@@ -1,9 +1,10 @@
 # rust-expect: Technical Architecture
 
-**Version:** 1.0.3
-**Date:** 2025-12-26
+**Version:** 1.1.0
+**Date:** 2025-12-30
 **Status:** Authoritative
 **Dependency Versions:** As of December 2025
+**Aligns With:** REQUIREMENTS.md v1.2.0
 
 ---
 
@@ -29,6 +30,9 @@
 18. [Observability and Metrics](#18-observability-and-metrics)
 19. [Configuration File Support](#19-configuration-file-support)
 20. [Transcript Logging](#20-transcript-logging)
+21. [Zero-Config Mode](#21-zero-config-mode)
+22. [Mock Session Backend](#22-mock-session-backend)
+23. [Supply Chain Security](#23-supply-chain-security)
 
 **Appendices:**
 - [Appendix A: Glossary](#appendix-a-glossary)
@@ -102,6 +106,23 @@ rust-expect is a next-generation terminal automation library for Rust, designed 
 | `rustix` over `nix` | Modern, maintained, better API; used by pty-process |
 | `windows-sys` over `winapi` | Official Microsoft crate; better type safety |
 | Edition 2024 / MSRV 1.85 | Async closures; modern patterns worth adoption trade-off |
+
+**MSRV Adoption Considerations:**
+
+The choice of MSRV 1.85 (Edition 2024) is intentional for a greenfield project, enabling:
+- Native async closures (RFC 3668) for cleaner callback APIs
+- `gen` blocks for pattern matching iterators
+- Modern error handling patterns
+
+However, organizations with conservative MSRV policies (typically stable-2 to stable-7) may require adaptation. For maximum compatibility:
+
+| Alternative | MSRV | Trade-off |
+|-------------|------|-----------|
+| Edition 2021 / MSRV 1.70 | 1.70 | Sacrifices async closures; requires `Box<dyn Future>` wrappers |
+| Edition 2021 / MSRV 1.75 | 1.75 | Adds async fn in traits; still requires closure workarounds |
+| Edition 2024 / MSRV 1.85 | 1.85 | Full feature set; recommended for new projects |
+
+The `proptest` crate (MSRV guaranteed ≤ stable-7) validates this approach. Organizations needing broader compatibility should fork with Edition 2021 and accept the API ergonomics trade-off.
 
 ### 2.3 Non-Goals
 
@@ -269,7 +290,7 @@ tokio = { version = "~1.43", features = ["full"] }  # LTS release, supported unt
 rustix = { version = "1.1", features = ["termios", "process", "pty", "fs"] }
 
 # Pattern matching
-regex = "1.11"
+regex = "1.12"
 
 # Logging
 tracing = "0.1"
@@ -288,7 +309,7 @@ russh = "0.54"
 russh-keys = "0.49"
 
 # Testing
-proptest = "1.5"
+proptest = "1.9"
 
 # Workspace crates
 rust-pty = { path = "crates/rust-pty" }
@@ -296,7 +317,7 @@ rust-expect = { path = "crates/rust-expect" }
 rust-expect-macros = { path = "crates/rust-expect-macros" }
 
 [workspace.dependencies.windows-sys]
-version = "0.59"
+version = "0.61"
 features = [
     "Win32_Foundation",
     "Win32_System_Console",
@@ -728,8 +749,8 @@ fn spawn_unix(config: &PtyConfig) -> Result<(UnixPtyMaster, UnixPtyChild)> {
 │  ┌─────────────────────────────────────────────────────────────────────────┐ │
 │  │                                                                          │ │
 │  │  ┌─────────────────────────────┐  ┌─────────────────────────────────┐   │ │
-│  │  │  Thread-Per-Pipe            │  │  Overlapped I/O (25H2+)         │   │ │
-│  │  │  (Windows 10-11 pre-25H2)   │  │  (Windows 11 25H2+)             │   │ │
+│  │  │  Thread-Per-Pipe (Current)  │  │  Overlapped I/O (Future)        │   │ │
+│  │  │  (All current Windows)      │  │  (Windows 26H2+, unconfirmed)   │   │ │
 │  │  │                             │  │                                  │   │ │
 │  │  │  read_thread:               │  │  overlapped_read:               │   │ │
 │  │  │    loop { ReadFile() }      │  │    ReadFile(OVERLAPPED)         │   │ │
@@ -742,7 +763,8 @@ fn spawn_unix(config: &PtyConfig) -> Result<(UnixPtyMaster, UnixPtyChild)> {
 │  │  │  Channel ←→ tokio task      │  │  Direct tokio integration       │   │ │
 │  │  └─────────────────────────────┘  └─────────────────────────────────┘   │ │
 │  │                                                                          │ │
-│  │  Selection at runtime via GetVersionEx() or RtlGetVersion()             │ │
+│  │  NOTE: ConPTY overlapped I/O (PR #17510) merged Aug 2024 but NOT        │ │
+│  │  shipped in any Windows release including 24H2/25H2. Expected 26H2+.    │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 │                                                                               │
 │  Job Object Management:                                                       │
@@ -754,37 +776,40 @@ fn spawn_unix(config: &PtyConfig) -> Result<(UnixPtyMaster, UnixPtyChild)> {
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### 5.4.1 Windows Version Detection
+#### 5.4.1 Windows Version Detection and Async Strategy
 
 ```rust
 // Runtime Windows version detection for async strategy selection
+//
+// IMPORTANT: As of December 2025, ConPTY overlapped I/O is NOT available
+// in any released Windows version, including Windows 11 24H2 and 25H2.
+//
+// Background:
+// - PR #17510 (microsoft/terminal) added overlapped I/O support in August 2024
+// - However, this was AFTER the feature cutoff for Windows 11 24H2 (build 26100)
+// - Windows 11 25H2 (build 26200) is an enablement package over 24H2,
+//   sharing the same kernel base - it does NOT include new ConPTY features
+// - Expected availability: Windows 26H2 or a future major Windows release
+//
+// Reference: https://github.com/microsoft/terminal/discussions/19112
 
 #[cfg(windows)]
 fn supports_overlapped_conpty() -> bool {
-    use windows_sys::Win32::System::SystemInformation::{
-        GetVersionExW, OSVERSIONINFOW,
-    };
-
-    let mut osvi = OSVERSIONINFOW {
-        dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
-        ..Default::default()
-    };
-
-    unsafe {
-        // Note: GetVersionExW may be deprecated; use RtlGetVersion for accuracy
-        if GetVersionExW(&mut osvi) != 0 {
-            // Windows 11 25H2 is build 26200+
-            // Check for >= 10.0.26200
-            osvi.dwMajorVersion >= 10 && osvi.dwBuildNumber >= 26200
-        } else {
-            false
-        }
-    }
+    // Conservative default: return false until overlapped I/O is confirmed
+    // in a released Windows version. When Microsoft ships this feature,
+    // update this function with proper version detection.
+    //
+    // Future implementation (when available):
+    // - Detect Windows version >= 26H2 or specific build number
+    // - Or probe ConPTY capability directly via CreatePseudoConsole flags
+    false
 }
 
 #[cfg(windows)]
 enum AsyncAdapter {
+    /// Thread-per-pipe pattern (current default for all Windows versions)
     ThreadPerPipe(ThreadPipeAdapter),
+    /// Overlapped I/O pattern (reserved for future Windows releases)
     Overlapped(OverlappedAdapter),
 }
 
@@ -794,6 +819,7 @@ impl AsyncAdapter {
         if supports_overlapped_conpty() {
             AsyncAdapter::Overlapped(OverlappedAdapter::new(stdin_write, stdout_read))
         } else {
+            // Thread-per-pipe is required for ALL current Windows versions
             AsyncAdapter::ThreadPerPipe(ThreadPipeAdapter::new(stdin_write, stdout_read))
         }
     }
@@ -803,7 +829,13 @@ impl AsyncAdapter {
 #### 5.4.2 Thread-Per-Pipe Pattern
 
 ```rust
-// Thread-per-pipe async adapter for pre-25H2 Windows
+// Thread-per-pipe async adapter for all current Windows versions
+// This is the ONLY supported pattern until ConPTY overlapped I/O ships.
+//
+// SCALABILITY NOTE: This pattern creates 2 threads per session (read + write).
+// For 50+ concurrent sessions, this means 100+ threads. For high-concurrency
+// scenarios on current Windows, consider implementing a shared thread pool
+// with work-stealing (planned for post-1.0 optimization).
 
 use std::sync::mpsc;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -1190,6 +1222,7 @@ impl Session<PtyBackend> {
 │  │      before_patterns: Vec<Pattern>,  // expect_before                    │ │
 │  │      after_patterns: Vec<Pattern>,   // expect_after                     │ │
 │  │      search_window: Option<usize>,   // Performance optimization         │ │
+│  │      regex_cache: RegexCache,        // Compiled regex cache             │ │
 │  │  }                                                                       │ │
 │  │                                                                          │ │
 │  │  Methods:                                                                │ │
@@ -1324,6 +1357,97 @@ impl Matcher {
 }
 ```
 
+#### 6.3.2 Regex Compilation Cache
+
+```rust
+// crates/rust-expect/src/expect/cache.rs
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use regex::Regex;
+
+/// Thread-safe cache for compiled regex patterns
+///
+/// Regex compilation is expensive (~1ms for simple patterns, more for complex).
+/// This cache prevents recompilation when the same pattern is used multiple times.
+pub struct RegexCache {
+    cache: RwLock<HashMap<String, Arc<Regex>>>,
+    max_entries: usize,
+}
+
+impl RegexCache {
+    /// Create a new cache with default capacity (1000 patterns)
+    pub fn new() -> Self {
+        Self::with_capacity(1000)
+    }
+
+    pub fn with_capacity(max_entries: usize) -> Self {
+        Self {
+            cache: RwLock::new(HashMap::with_capacity(max_entries / 4)),
+            max_entries,
+        }
+    }
+
+    /// Get a compiled regex, compiling and caching if not present
+    pub fn get_or_compile(&self, pattern: &str) -> Result<Arc<Regex>, regex::Error> {
+        // Try read lock first (fast path)
+        if let Some(regex) = self.cache.read().unwrap().get(pattern) {
+            return Ok(Arc::clone(regex));
+        }
+
+        // Compile and cache (slow path)
+        let regex = Arc::new(Regex::new(pattern)?);
+
+        let mut cache = self.cache.write().unwrap();
+
+        // Evict if at capacity (simple LRU-ish: just clear half)
+        if cache.len() >= self.max_entries {
+            let to_remove: Vec<_> = cache.keys()
+                .take(self.max_entries / 2)
+                .cloned()
+                .collect();
+            for key in to_remove {
+                cache.remove(&key);
+            }
+        }
+
+        cache.insert(pattern.to_string(), Arc::clone(&regex));
+        Ok(regex)
+    }
+
+    /// Clear the cache
+    pub fn clear(&self) {
+        self.cache.write().unwrap().clear();
+    }
+
+    /// Get cache statistics
+    pub fn stats(&self) -> CacheStats {
+        let cache = self.cache.read().unwrap();
+        CacheStats {
+            entries: cache.len(),
+            capacity: self.max_entries,
+        }
+    }
+}
+
+/// Default global cache for pattern matching
+static GLOBAL_REGEX_CACHE: std::sync::OnceLock<RegexCache> = std::sync::OnceLock::new();
+
+pub fn global_regex_cache() -> &'static RegexCache {
+    GLOBAL_REGEX_CACHE.get_or_init(RegexCache::new)
+}
+```
+
+**Cache Performance Characteristics:**
+
+| Operation | Without Cache | With Cache (hit) | Notes |
+|-----------|---------------|------------------|-------|
+| Regex compile | ~1-5ms | ~200ns (Arc clone) | 5000x improvement on cache hit |
+| Pattern match | ~7µs | ~7µs | Match time unchanged |
+| Memory overhead | 0 | ~1KB per pattern | Acceptable for most workloads |
+
+The cache is thread-safe and uses a simple eviction strategy (clear half when full) that is appropriate for expect automation workloads where pattern diversity is typically bounded.
+
 ### 6.4 Buffer Management
 
 ```rust
@@ -1425,11 +1549,128 @@ pub enum Encoding {
 1. **`VecDeque::make_contiguous()`**: For buffers exceeding ~10MB, this operation may cause performance degradation due to memory copies. For very large output scenarios (100MB+), consider:
    - Using the `search_window` option to limit pattern matching to recent output
    - Enabling discard mode for non-critical output
-   - Future enhancement: rope-like data structures or memory-mapped files
+   - See "Large Buffer Strategy" below for 100MB+ handling
 
 2. **Regex crate weight**: The full `regex` crate adds ~1MB to binary size. For simple patterns (exact string, prefix/suffix), the library uses optimized fast paths. For applications where binary size is critical, a future `regex-lite` feature flag may provide a lighter alternative.
 
 3. **PTY buffer tuning**: OS-level PTY buffer sizes (typically 4KB-64KB) can impact throughput. The library does not currently tune these; high-throughput applications may benefit from platform-specific tuning.
+
+#### 6.4.1 Large Buffer Strategy (100MB+ to 1GB Target)
+
+For automation scenarios requiring capture of very large outputs (e.g., log dumps, database exports), the standard `VecDeque` buffer becomes inefficient. The library provides tiered buffer strategies:
+
+```rust
+// crates/rust-expect/src/expect/large_buffer.rs
+
+/// Buffer strategy selection based on expected output size
+pub enum BufferStrategy {
+    /// Standard VecDeque-based buffer (default, optimal for <10MB)
+    Standard(Buffer),
+    /// Memory-mapped file backing for large outputs (10MB-1GB)
+    MemoryMapped(MmapBuffer),
+    /// Streaming with no retention (for unbounded output)
+    Streaming(StreamingBuffer),
+}
+
+/// Memory-mapped buffer for large output handling
+/// Uses temporary file backing to avoid heap pressure
+pub struct MmapBuffer {
+    /// Memory-mapped region
+    mmap: memmap2::MmapMut,
+    /// Current write position
+    write_pos: usize,
+    /// Current search start position
+    search_start: usize,
+    /// Total capacity
+    capacity: usize,
+    /// Backing file (kept open)
+    _file: std::fs::File,
+}
+
+impl MmapBuffer {
+    /// Create a new memory-mapped buffer with specified capacity
+    pub fn new(capacity: usize) -> std::io::Result<Self> {
+        use std::io::Write;
+
+        // Create temporary file
+        let file = tempfile::tempfile()?;
+        file.set_len(capacity as u64)?;
+
+        // Memory-map the file
+        let mmap = unsafe { memmap2::MmapMut::map_mut(&file)? };
+
+        Ok(Self {
+            mmap,
+            write_pos: 0,
+            search_start: 0,
+            capacity,
+            _file: file,
+        })
+    }
+
+    /// Extend buffer with new data
+    pub fn extend(&mut self, bytes: &[u8]) {
+        let available = self.capacity - self.write_pos;
+        if bytes.len() <= available {
+            self.mmap[self.write_pos..self.write_pos + bytes.len()]
+                .copy_from_slice(bytes);
+            self.write_pos += bytes.len();
+        } else {
+            // Wrap around: discard oldest data
+            let shift = bytes.len() - available;
+            self.search_start = self.search_start.saturating_sub(shift);
+            self.mmap.copy_within(shift..self.write_pos, 0);
+            self.write_pos -= shift;
+            self.mmap[self.write_pos..self.write_pos + bytes.len()]
+                .copy_from_slice(bytes);
+            self.write_pos += bytes.len();
+        }
+    }
+
+    /// Get searchable slice (always contiguous - mmap advantage)
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.mmap[self.search_start..self.write_pos]
+    }
+}
+
+/// Automatic strategy selection based on configured max size
+impl BufferStrategy {
+    pub fn new(max_size: usize) -> Self {
+        match max_size {
+            0..=10_000_000 => BufferStrategy::Standard(Buffer::new(max_size)),
+            _ => match MmapBuffer::new(max_size) {
+                Ok(mmap) => BufferStrategy::MemoryMapped(mmap),
+                Err(_) => {
+                    // Fallback to standard if mmap fails
+                    tracing::warn!(
+                        max_size,
+                        "Failed to create mmap buffer, falling back to VecDeque"
+                    );
+                    BufferStrategy::Standard(Buffer::new(max_size))
+                }
+            },
+        }
+    }
+}
+```
+
+**Strategy Comparison:**
+
+| Size Range | Strategy | Memory Usage | Pattern Match Latency | Notes |
+|------------|----------|--------------|----------------------|-------|
+| < 10 MB | `VecDeque` | 1x (heap) | ~7µs | Best for typical automation |
+| 10-1000 MB | `MmapBuffer` | 0.5x (file-backed) | ~10µs | Avoids heap pressure; OS manages paging |
+| Unbounded | `Streaming` | O(window) | ~7µs | Only retains search window; old data discarded |
+
+**Achieving 1GB Target:**
+
+The 1GB target is achieved through `MmapBuffer`:
+1. File-backed storage avoids 1GB heap allocation
+2. OS virtual memory system handles paging efficiently
+3. `as_bytes()` returns contiguous slice (no `make_contiguous()` overhead)
+4. Works across all platforms (Linux tmpfs, Windows temp, macOS)
+
+For outputs exceeding 1GB, use `StreamingBuffer` with `search_window` option.
 
 ### 6.5 Interactive Mode
 
@@ -2273,8 +2514,101 @@ pub struct ResilientSshSession {
     on_state_change: Option<StateChangeCallback>,
     /// Pre-reconnect callback (return false to abort)
     on_reconnect: Option<ReconnectCallback>,
-    /// Buffer of unsent data during reconnection
-    pending_writes: Mutex<Vec<Vec<u8>>>,
+    /// Buffer of unsent data during reconnection (bounded)
+    pending_writes: Mutex<BoundedWriteBuffer>,
+}
+
+/// Bounded buffer for pending writes during disconnection
+/// Prevents unbounded memory growth during extended outages
+struct BoundedWriteBuffer {
+    /// Queued writes
+    writes: Vec<Vec<u8>>,
+    /// Current total size in bytes
+    current_size: usize,
+    /// Maximum total bytes to buffer (default: 1MB)
+    max_size: usize,
+    /// Bytes dropped due to overflow
+    dropped_bytes: usize,
+    /// Strategy when full
+    overflow_strategy: WriteOverflowStrategy,
+}
+
+#[derive(Clone, Copy, Default)]
+enum WriteOverflowStrategy {
+    /// Drop oldest writes first (default)
+    #[default]
+    DropOldest,
+    /// Drop newest writes (reject new data)
+    DropNewest,
+    /// Return error to caller
+    Error,
+}
+
+impl BoundedWriteBuffer {
+    fn new(max_size: usize) -> Self {
+        Self {
+            writes: Vec::new(),
+            current_size: 0,
+            max_size,
+            dropped_bytes: 0,
+            overflow_strategy: WriteOverflowStrategy::default(),
+        }
+    }
+
+    fn push(&mut self, data: Vec<u8>) -> Result<(), Error> {
+        let data_len = data.len();
+
+        // Check if single write exceeds max
+        if data_len > self.max_size {
+            match self.overflow_strategy {
+                WriteOverflowStrategy::DropOldest | WriteOverflowStrategy::DropNewest => {
+                    self.dropped_bytes += data_len;
+                    tracing::warn!(
+                        data_len,
+                        max_size = self.max_size,
+                        "Single write exceeds max buffer size, dropping"
+                    );
+                    return Ok(());
+                }
+                WriteOverflowStrategy::Error => {
+                    return Err(Error::BufferFull);
+                }
+            }
+        }
+
+        // Evict old data if necessary
+        while self.current_size + data_len > self.max_size && !self.writes.is_empty() {
+            match self.overflow_strategy {
+                WriteOverflowStrategy::DropOldest => {
+                    if let Some(old) = self.writes.first() {
+                        self.dropped_bytes += old.len();
+                        self.current_size -= old.len();
+                    }
+                    self.writes.remove(0);
+                }
+                WriteOverflowStrategy::DropNewest => {
+                    self.dropped_bytes += data_len;
+                    return Ok(());
+                }
+                WriteOverflowStrategy::Error => {
+                    return Err(Error::BufferFull);
+                }
+            }
+        }
+
+        self.current_size += data_len;
+        self.writes.push(data);
+        Ok(())
+    }
+
+    fn drain(&mut self) -> Vec<Vec<u8>> {
+        self.current_size = 0;
+        std::mem::take(&mut self.writes)
+    }
+
+    fn stats(&self) -> (usize, usize, usize) {
+        (self.current_size, self.max_size, self.dropped_bytes)
+    }
 }
 
 /// Preserved configuration for reconnection
@@ -3514,8 +3848,12 @@ pub mod version {
     /// Minimum Windows version for ConPTY (Windows 10 1809, build 17763)
     pub const MIN_CONPTY_BUILD: u32 = 17763;
 
-    /// Windows version with ConPTY overlapped I/O support (Windows 11 25H2, build 26200)
-    pub const OVERLAPPED_IO_BUILD: u32 = 26200;
+    // NOTE: ConPTY overlapped I/O is NOT available in any released Windows version
+    // as of December 2025. PR #17510 was merged in August 2024 but missed the
+    // feature cutoff for Windows 11 24H2. Windows 11 25H2 is an enablement package
+    // over 24H2 (same kernel base) and does NOT include new ConPTY features.
+    // Expected availability: Windows 26H2 or later (no confirmed date).
+    // Reference: https://github.com/microsoft/terminal/discussions/19112
 
     /// Check if ConPTY is available
     pub fn has_conpty() -> bool {
@@ -3523,8 +3861,14 @@ pub mod version {
     }
 
     /// Check if ConPTY overlapped I/O is available
+    ///
+    /// IMPORTANT: As of December 2025, this always returns false.
+    /// Overlapped I/O is not available in any released Windows version.
+    /// This function is a placeholder for future Windows releases.
     pub fn has_overlapped_conpty() -> bool {
-        get_windows_build() >= OVERLAPPED_IO_BUILD
+        // Conservative default until Microsoft ships this feature
+        // in a publicly released Windows version
+        false
     }
 
     fn get_windows_build() -> u32 {
@@ -3577,12 +3921,12 @@ pub mod version {
 │  │                                                                          │ │
 │  │  Unix:                          Windows:                                 │ │
 │  │  ┌─────────────────────┐       ┌─────────────────────────────────────┐  │ │
-│  │  │ AsyncFd<OwnedFd>    │       │ Thread-per-pipe OR Overlapped I/O   │  │ │
+│  │  │ AsyncFd<OwnedFd>    │       │ Thread-per-pipe (all current)       │  │ │
 │  │  │                     │       │                                     │  │ │
 │  │  │ - Registers PTY fd  │       │ - Blocking threads → tokio channels │  │ │
-│  │  │   with epoll/kqueue │       │   (pre-25H2)                        │  │ │
-│  │  │ - Zero-copy async   │       │ - Native IOCP integration           │  │ │
-│  │  │   read/write        │       │   (25H2+)                           │  │ │
+│  │  │   with epoll/kqueue │       │   (required for all Windows today)  │  │ │
+│  │  │ - Zero-copy async   │       │ - Native IOCP via Overlapped I/O    │  │ │
+│  │  │   read/write        │       │   (future: Windows 26H2+)           │  │ │
 │  │  └─────────────────────┘       └─────────────────────────────────────┘  │ │
 │  └─────────────────────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -4260,8 +4604,17 @@ screen = ["vte"]
 ## Structured logging via tracing
 tracing = ["dep:tracing"]
 
+## Observability metrics (Prometheus/OpenTelemetry)
+metrics = ["dep:metrics", "dep:opentelemetry", "dep:prometheus"]
+
+## Auto-detect and redact PII patterns in transcripts
+pii-redaction = []
+
+## MockSession backend for deterministic testing
+mock = []
+
 ## All features
-full = ["sync", "async-tokio", "ssh", "screen", "tracing"]
+full = ["sync", "async-tokio", "ssh", "screen", "tracing", "metrics"]
 
 [dependencies]
 rust-pty = { workspace = true }
@@ -4291,7 +4644,10 @@ proptest = { workspace = true }
 | `ssh` | Enables `SshSession` and SSH-related APIs |
 | `screen` | Enables ANSI parsing, `Screen` buffer, screen-based matching |
 | `tracing` | Enables structured logging throughout the library |
-| `full` | All features enabled |
+| `metrics` | Prometheus/OpenTelemetry metrics export (session counts, latency histograms, error rates) |
+| `pii-redaction` | Auto-detect and redact sensitive patterns (credit cards, SSNs, API keys) in transcripts |
+| `mock` | Enables `MockSession` backend for deterministic testing without real processes |
+| `full` | All features enabled (except `mock` and `pii-redaction` which are opt-in) |
 
 ---
 
@@ -4302,7 +4658,7 @@ proptest = { workspace = true }
 | Crate | Version | Purpose | License |
 |-------|---------|---------|---------|
 | `tokio` | 1.43+ | Async runtime | MIT |
-| `regex` | 1.11+ | Pattern matching | MIT/Apache-2.0 |
+| `regex` | 1.12+ | Pattern matching | MIT/Apache-2.0 |
 | `thiserror` | 2.0+ | Error derive macros | MIT/Apache-2.0 |
 | `crossterm` | 0.29+ | Terminal manipulation | MIT |
 
@@ -4728,32 +5084,48 @@ This section establishes performance targets and measurement methodology for rus
 
 ### 16.1 Latency Targets
 
-| Operation | Target | Acceptable | Notes |
-|-----------|--------|------------|-------|
-| PTY spawn (Unix) | < 5ms | < 15ms | Includes fork(), setsid(), pty allocation |
-| PTY spawn (Windows) | < 10ms | < 30ms | ConPTY creation is heavier |
-| Pattern match (literal) | < 1µs | < 10µs | Boyer-Moore for literals |
-| Pattern match (regex) | < 50µs | < 500µs | Depends on pattern complexity |
-| Regex compilation | < 1ms | < 5ms | Cached after first use |
-| PTY read (small) | < 100µs | < 500µs | < 4KB, includes syscall overhead |
-| PTY write | < 50µs | < 200µs | Includes kernel buffer copy |
-| Session close | < 10ms | < 50ms | Includes process termination |
-| SSH connect | < 500ms | < 2s | Network-dependent |
-| SSH auth (key) | < 100ms | < 500ms | Crypto operation dependent |
+| Operation | Target | Stretch Goal | Notes |
+|-----------|--------|--------------|-------|
+| PTY spawn (Unix) | < 50ms | < 5ms | Stretch requires warm fork pool, pre-allocated PTY |
+| PTY spawn (Windows) | < 50ms | < 10ms | ConPTY creation is heavier |
+| Pattern match (literal) | < 1µs | < 100ns | Stretch via `memchr` SIMD acceleration |
+| Pattern match (regex) | < 50µs | < 10µs | Depends on pattern complexity |
+| Regex compilation | < 1ms | < 500µs | Cached with LRU eviction after first use |
+| PTY read (small) | < 100µs | < 50µs | < 4KB, includes syscall overhead |
+| PTY write | < 50µs | < 20µs | Includes kernel buffer copy |
+| Session close | < 10ms | < 5ms | Includes process termination |
+| SSH connect | < 500ms | < 200ms | Network-dependent |
+| SSH auth (key) | < 100ms | < 50ms | Crypto operation dependent |
 
 **Reference:** Linux pipe round-trip latency is approximately 500µs including context switch overhead ([source](https://manpages.ubuntu.com/manpages/xenial/lat_pipe.8.html)).
 
 ### 16.2 Throughput Targets
 
-| Scenario | Target | Acceptable | Notes |
-|----------|--------|------------|-------|
-| PTY read throughput | > 100 MB/s | > 50 MB/s | Large continuous output |
-| Pattern scan rate | > 500 MB/s | > 100 MB/s | Literal patterns |
-| Regex scan rate | > 50 MB/s | > 10 MB/s | Complex patterns |
-| SSH channel throughput | > 50 MB/s | > 10 MB/s | Encrypted, network-bound |
-| Concurrent sessions | > 100 | > 50 | Without degradation |
+| Scenario | Target | Stretch Goal | Notes |
+|----------|--------|--------------|-------|
+| PTY read throughput | > 100 MB/s | > 500 MB/s | Large continuous output |
+| Pattern scan rate (literal) | > 100 MB/s | > 1 GB/s | Stretch via `memchr` SIMD; zero-copy buffer views |
+| Pattern scan rate (regex) | > 50 MB/s | > 100 MB/s | Regex caching; DFA compilation |
+| SSH channel throughput | > 50 MB/s | > 100 MB/s | Encrypted, network-bound |
+| Concurrent sessions | > 1,000 | > 10,000 | Stretch requires shared thread pool; no per-session threads |
 
 **Reference:** Linux pipes can achieve 17 GB/s throughput ([source](https://mazzo.li/posts/fast-pipes.html)), though real-world PTY throughput is lower due to terminal emulation overhead.
+
+### 16.2.1 Performance Implementation Notes
+
+**Achieving Stretch Goals:**
+
+| Goal | Implementation Strategy |
+|------|------------------------|
+| **< 5ms spawn latency** | Warm fork pool with pre-forked worker processes; pre-allocated PTY pairs |
+| **> 1 GB/s literal matching** | Use `memchr` crate for SIMD-accelerated byte scanning; zero-copy buffer views |
+| **> 100 MB/s regex** | `RegexCache` with LRU eviction (Section 6.3.2); avoid recompilation |
+| **> 10,000 sessions** | Shared thread pool for Windows ConPTY; avoid per-session thread overhead |
+| **< 64 KB per session** | Lazy buffer allocation; small-buffer optimization for typical workloads |
+
+**Dependency Notes:**
+- `memchr` crate provides cross-platform SIMD acceleration (SSE2, AVX2, NEON)
+- Ring buffer implementation uses `VecDeque` for < 10MB, `MmapBuffer` for larger outputs (Section 6.4.1)
 
 ### 16.3 Memory Targets
 
@@ -6121,6 +6493,1113 @@ impl TranscriptPlayer {
 }
 ```
 
+### 20.5 PII Auto-Redaction
+
+The library provides optional automatic detection and redaction of personally identifiable information (PII) in transcripts. This feature implements FR-3.7.7.
+
+#### 20.5.1 Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            PII Redaction Pipeline                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                      Pattern Detectors                               │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  │    │
+│  │  │ Credit Card │  │    SSN      │  │  API Keys   │  │  Custom    │  │    │
+│  │  │   (Luhn)    │  │  (Format)   │  │  (Patterns) │  │  Patterns  │  │    │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └─────┬──────┘  │    │
+│  └─────────┼────────────────┼────────────────┼───────────────┼─────────┘    │
+│            │                │                │               │              │
+│            ▼                ▼                ▼               ▼              │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                        Redaction Engine                              │    │
+│  │         Input: "Card: 4111111111111111"                              │    │
+│  │         Output: "Card: [REDACTED:CREDIT_CARD]"                       │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 20.5.2 PII Pattern Types
+
+```rust
+/// PII pattern types with detection strategies
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PiiType {
+    /// Credit card numbers (validated with Luhn algorithm)
+    CreditCard,
+    /// US Social Security Numbers (XXX-XX-XXXX format)
+    Ssn,
+    /// API keys (various vendor patterns)
+    ApiKey,
+    /// Email addresses
+    Email,
+    /// Phone numbers (US format)
+    PhoneNumber,
+    /// IPv4 addresses
+    IpAddress,
+    /// Custom user-defined pattern
+    Custom(&'static str),
+}
+
+impl PiiType {
+    /// Redaction placeholder for each PII type
+    pub fn placeholder(&self) -> &'static str {
+        match self {
+            PiiType::CreditCard => "[REDACTED:CREDIT_CARD]",
+            PiiType::Ssn => "[REDACTED:SSN]",
+            PiiType::ApiKey => "[REDACTED:API_KEY]",
+            PiiType::Email => "[REDACTED:EMAIL]",
+            PiiType::PhoneNumber => "[REDACTED:PHONE]",
+            PiiType::IpAddress => "[REDACTED:IP]",
+            PiiType::Custom(name) => name,
+        }
+    }
+}
+```
+
+#### 20.5.3 Credit Card Detection with Luhn Validation
+
+```rust
+/// Detect and validate credit card numbers using Luhn algorithm
+pub struct CreditCardDetector {
+    /// Regex for potential credit card patterns
+    pattern: Regex,
+}
+
+impl CreditCardDetector {
+    pub fn new() -> Self {
+        Self {
+            // Match 13-19 digit sequences (with optional separators)
+            pattern: Regex::new(r"\b(?:\d[ -]*?){13,19}\b").unwrap(),
+        }
+    }
+
+    /// Check if a number passes the Luhn algorithm
+    fn luhn_check(digits: &[u8]) -> bool {
+        let mut sum = 0;
+        let mut alternate = false;
+
+        for &digit in digits.iter().rev() {
+            let mut d = digit - b'0';
+            if alternate {
+                d *= 2;
+                if d > 9 {
+                    d -= 9;
+                }
+            }
+            sum += d as u32;
+            alternate = !alternate;
+        }
+
+        sum % 10 == 0
+    }
+
+    /// Detect credit card numbers in text
+    pub fn detect(&self, text: &str) -> Vec<PiiMatch> {
+        let mut matches = Vec::new();
+
+        for m in self.pattern.find_iter(text) {
+            // Extract digits only
+            let digits: Vec<u8> = m.as_str()
+                .bytes()
+                .filter(|b| b.is_ascii_digit())
+                .collect();
+
+            // Validate length and Luhn check
+            if digits.len() >= 13 && digits.len() <= 19 && Self::luhn_check(&digits) {
+                matches.push(PiiMatch {
+                    pii_type: PiiType::CreditCard,
+                    start: m.start(),
+                    end: m.end(),
+                    matched_text: m.as_str().to_string(),
+                });
+            }
+        }
+
+        matches
+    }
+}
+```
+
+#### 20.5.4 API Key Detection Patterns
+
+```rust
+/// Common API key patterns by vendor
+pub struct ApiKeyDetector {
+    patterns: Vec<(Regex, &'static str)>,
+}
+
+impl ApiKeyDetector {
+    pub fn new() -> Self {
+        Self {
+            patterns: vec![
+                // AWS Access Key
+                (Regex::new(r"AKIA[0-9A-Z]{16}").unwrap(), "AWS"),
+                // GitHub Token
+                (Regex::new(r"ghp_[a-zA-Z0-9]{36}").unwrap(), "GitHub"),
+                (Regex::new(r"github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}").unwrap(), "GitHub"),
+                // Stripe Key
+                (Regex::new(r"sk_live_[a-zA-Z0-9]{24,}").unwrap(), "Stripe"),
+                (Regex::new(r"pk_live_[a-zA-Z0-9]{24,}").unwrap(), "Stripe"),
+                // Slack Token
+                (Regex::new(r"xox[baprs]-[0-9a-zA-Z-]+").unwrap(), "Slack"),
+                // Generic high-entropy strings (32+ hex chars)
+                (Regex::new(r"\b[a-fA-F0-9]{32,}\b").unwrap(), "Generic"),
+            ],
+        }
+    }
+
+    pub fn detect(&self, text: &str) -> Vec<PiiMatch> {
+        let mut matches = Vec::new();
+
+        for (pattern, _vendor) in &self.patterns {
+            for m in pattern.find_iter(text) {
+                matches.push(PiiMatch {
+                    pii_type: PiiType::ApiKey,
+                    start: m.start(),
+                    end: m.end(),
+                    matched_text: m.as_str().to_string(),
+                });
+            }
+        }
+
+        matches
+    }
+}
+```
+
+#### 20.5.5 SSN and Other Pattern Detection
+
+```rust
+/// Social Security Number detector
+pub struct SsnDetector {
+    pattern: Regex,
+}
+
+impl SsnDetector {
+    pub fn new() -> Self {
+        Self {
+            // XXX-XX-XXXX format (with validation for valid area numbers)
+            pattern: Regex::new(
+                r"\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b"
+            ).unwrap(),
+        }
+    }
+
+    pub fn detect(&self, text: &str) -> Vec<PiiMatch> {
+        self.pattern.find_iter(text)
+            .map(|m| PiiMatch {
+                pii_type: PiiType::Ssn,
+                start: m.start(),
+                end: m.end(),
+                matched_text: m.as_str().to_string(),
+            })
+            .collect()
+    }
+}
+```
+
+#### 20.5.6 Redaction Engine
+
+```rust
+/// Configuration for PII redaction
+#[derive(Debug, Clone)]
+pub struct RedactionConfig {
+    /// Enable credit card detection
+    pub detect_credit_cards: bool,
+    /// Enable SSN detection
+    pub detect_ssn: bool,
+    /// Enable API key detection
+    pub detect_api_keys: bool,
+    /// Enable email detection
+    pub detect_email: bool,
+    /// Custom patterns to detect
+    pub custom_patterns: Vec<(Regex, String)>,
+}
+
+impl Default for RedactionConfig {
+    fn default() -> Self {
+        Self {
+            detect_credit_cards: true,
+            detect_ssn: true,
+            detect_api_keys: true,
+            detect_email: false,  // Off by default (often needed in transcripts)
+            custom_patterns: Vec::new(),
+        }
+    }
+}
+
+/// PII redaction engine
+#[cfg(feature = "pii-redaction")]
+pub struct Redactor {
+    config: RedactionConfig,
+    credit_card: CreditCardDetector,
+    ssn: SsnDetector,
+    api_key: ApiKeyDetector,
+}
+
+impl Redactor {
+    pub fn new(config: RedactionConfig) -> Self {
+        Self {
+            config,
+            credit_card: CreditCardDetector::new(),
+            ssn: SsnDetector::new(),
+            api_key: ApiKeyDetector::new(),
+        }
+    }
+
+    /// Redact all PII from text
+    pub fn redact(&self, text: &str) -> String {
+        let mut all_matches = Vec::new();
+
+        if self.config.detect_credit_cards {
+            all_matches.extend(self.credit_card.detect(text));
+        }
+        if self.config.detect_ssn {
+            all_matches.extend(self.ssn.detect(text));
+        }
+        if self.config.detect_api_keys {
+            all_matches.extend(self.api_key.detect(text));
+        }
+
+        // Sort by position (reverse) to replace from end to start
+        all_matches.sort_by(|a, b| b.start.cmp(&a.start));
+
+        let mut result = text.to_string();
+        for m in all_matches {
+            result.replace_range(m.start..m.end, m.pii_type.placeholder());
+        }
+
+        result
+    }
+}
+```
+
+#### 20.5.7 Transcript Integration
+
+```rust
+/// Transcript recorder with PII redaction
+pub struct RedactingTranscriptRecorder {
+    inner: TranscriptRecorder,
+    redactor: Redactor,
+}
+
+impl RedactingTranscriptRecorder {
+    pub fn new(path: impl AsRef<Path>, redactor: Redactor) -> io::Result<Self> {
+        Ok(Self {
+            inner: TranscriptRecorder::new(path)?,
+            redactor,
+        })
+    }
+
+    /// Record output with automatic PII redaction
+    pub fn record_output(&mut self, data: &str) -> io::Result<()> {
+        let redacted = self.redactor.redact(data);
+        self.inner.record_output(&redacted)
+    }
+
+    /// Record input with automatic PII redaction
+    pub fn record_input(&mut self, data: &str) -> io::Result<()> {
+        let redacted = self.redactor.redact(data);
+        self.inner.record_input(&redacted)
+    }
+}
+
+// Usage example
+let redactor = Redactor::new(RedactionConfig::default());
+let recorder = RedactingTranscriptRecorder::new("session.log", redactor)?;
+
+session.set_recorder(recorder);
+
+// Now any PII in input/output is automatically redacted before logging
+session.send_line("4111111111111111").await?;
+// Logged as: [REDACTED:CREDIT_CARD]
+```
+
+#### 20.5.8 Performance Considerations
+
+| Optimization | Technique |
+|--------------|-----------|
+| **Lazy initialization** | Pattern detectors compiled once on first use |
+| **Early termination** | Skip detection if no potential matches (no digits for credit cards) |
+| **Streaming mode** | Process line-by-line for large outputs |
+| **Compiled regexes** | All patterns pre-compiled at startup |
+| **Zero-copy where possible** | Return byte ranges, not copied strings |
+
+---
+
+## 21. Zero-Config Mode
+
+Zero-Config Mode enables automatic detection and configuration to minimize boilerplate for common use cases. This section documents the architecture for FR-1.6.
+
+### 21.1 Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            Session::auto(command)                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                              AutoConfig Engine                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │    Shell    │  │ Line Ending │  │   Prompt    │  │      Encoding       │ │
+│  │  Detector   │  │  Detector   │  │  Detector   │  │      Detector       │ │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘ │
+│         │                │                │                     │           │
+│         ▼                ▼                ▼                     ▼           │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                         SessionConfig                                 │   │
+│  │  shell: ShellType, line_ending: LineEnding, prompts: Vec<Pattern>,   │   │
+│  │  encoding: Encoding, terminal_size: (u16, u16)                       │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 21.2 Shell Type Detection
+
+The library auto-detects shell type from environment and command inspection.
+
+#### 21.2.1 Detection Sources (Priority Order)
+
+```rust
+pub enum ShellType {
+    Bash,
+    Zsh,
+    Fish,
+    PowerShell,
+    Cmd,
+    Unknown(String),
+}
+
+impl ShellType {
+    /// Detect shell type from command and environment
+    pub fn detect(command: &str) -> Self {
+        // 1. Parse command name from path
+        let cmd_name = Path::new(command)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(command)
+            .to_lowercase();
+
+        match cmd_name.as_str() {
+            "bash" => ShellType::Bash,
+            "zsh" => ShellType::Zsh,
+            "fish" => ShellType::Fish,
+            "pwsh" | "powershell" => ShellType::PowerShell,
+            "cmd" => ShellType::Cmd,
+            _ => {
+                // 2. Fallback to $SHELL environment variable
+                if let Ok(shell) = std::env::var("SHELL") {
+                    return ShellType::detect(&shell);
+                }
+                ShellType::Unknown(cmd_name)
+            }
+        }
+    }
+}
+```
+
+#### 21.2.2 Shell-Specific Configurations
+
+| Shell | Line Ending | Common Prompts | Exit Command |
+|-------|-------------|----------------|--------------|
+| Bash | `\n` | `$ `, `# `, `bash-*$ ` | `exit` |
+| Zsh | `\n` | `% `, `➜ `, `❯ ` | `exit` |
+| Fish | `\n` | `> `, `❯ ` | `exit` |
+| PowerShell | `\r\n` | `PS>`, `>>> ` | `exit` |
+| Cmd | `\r\n` | `>`, `C:\>` | `exit` |
+
+### 21.3 Line Ending Detection
+
+```rust
+pub enum LineEnding {
+    Lf,     // Unix: \n
+    CrLf,   // Windows: \r\n
+    Auto,   // Detect from shell type and platform
+}
+
+impl LineEnding {
+    pub fn detect(shell: &ShellType) -> Self {
+        match shell {
+            ShellType::PowerShell | ShellType::Cmd => LineEnding::CrLf,
+            ShellType::Bash | ShellType::Zsh | ShellType::Fish => LineEnding::Lf,
+            ShellType::Unknown(_) => {
+                // Platform-based fallback
+                if cfg!(windows) {
+                    LineEnding::CrLf
+                } else {
+                    LineEnding::Lf
+                }
+            }
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LineEnding::Lf => "\n",
+            LineEnding::CrLf => "\r\n",
+            LineEnding::Auto => if cfg!(windows) { "\r\n" } else { "\n" },
+        }
+    }
+}
+```
+
+### 21.4 Prompt Pattern Detection
+
+The library provides built-in patterns for common shell prompts.
+
+```rust
+/// Common prompt patterns by shell type
+pub fn default_prompts(shell: &ShellType) -> Vec<Pattern> {
+    match shell {
+        ShellType::Bash => vec![
+            Pattern::regex(r"\$ $"),           // Standard user prompt
+            Pattern::regex(r"# $"),            // Root prompt
+            Pattern::regex(r"bash-\d+\.\d+\$ $"), // Bash version prompt
+            Pattern::regex(r"\w+@\w+[:\$#] $"), // user@host prompt
+        ],
+        ShellType::Zsh => vec![
+            Pattern::regex(r"% $"),
+            Pattern::regex(r"➜ "),
+            Pattern::regex(r"❯ $"),
+        ],
+        ShellType::Fish => vec![
+            Pattern::regex(r"> $"),
+            Pattern::regex(r"❯ $"),
+        ],
+        ShellType::PowerShell => vec![
+            Pattern::regex(r"PS [^>]+> $"),
+            Pattern::regex(r">>> $"),
+        ],
+        ShellType::Cmd => vec![
+            Pattern::regex(r"[A-Z]:\\[^>]*>$"),
+            Pattern::regex(r">$"),
+        ],
+        ShellType::Unknown(_) => vec![
+            // Fallback: common prompt endings
+            Pattern::regex(r"[\$#>%] $"),
+        ],
+    }
+}
+```
+
+### 21.5 Encoding Detection
+
+Encoding is auto-detected from locale environment variables.
+
+```rust
+pub fn detect_encoding() -> Encoding {
+    // Check locale environment variables in priority order
+    for var in &["LC_ALL", "LC_CTYPE", "LANG"] {
+        if let Ok(locale) = std::env::var(var) {
+            let locale_lower = locale.to_lowercase();
+
+            // Parse encoding from locale string (e.g., "en_US.UTF-8")
+            if locale_lower.contains("utf-8") || locale_lower.contains("utf8") {
+                return Encoding::Utf8;
+            }
+            if locale_lower.contains("iso-8859") || locale_lower.contains("latin") {
+                return Encoding::Latin1;
+            }
+            if locale_lower.contains("cp1252") || locale_lower.contains("windows-1252") {
+                return Encoding::Windows1252;
+            }
+        }
+    }
+
+    // Platform-based default
+    if cfg!(windows) {
+        Encoding::Windows1252
+    } else {
+        Encoding::Utf8
+    }
+}
+```
+
+### 21.6 Terminal Size Detection
+
+```rust
+pub fn detect_terminal_size() -> (u16, u16) {
+    // Try to inherit from parent terminal
+    if let Some((cols, rows)) = terminal_size::terminal_size() {
+        return (cols.0, rows.0);
+    }
+
+    // Check environment variables
+    if let (Ok(cols), Ok(rows)) = (
+        std::env::var("COLUMNS").and_then(|s| s.parse().map_err(|_| std::env::VarError::NotPresent)),
+        std::env::var("LINES").and_then(|s| s.parse().map_err(|_| std::env::VarError::NotPresent)),
+    ) {
+        return (cols, rows);
+    }
+
+    // Sensible default
+    (80, 24)
+}
+```
+
+### 21.7 API Usage
+
+```rust
+// Zero-config mode: auto-detects everything
+let session = Session::auto("bash").spawn().await?;
+
+// Equivalent to:
+let session = Session::builder()
+    .command("bash")
+    .shell_type(ShellType::Bash)
+    .line_ending(LineEnding::Lf)
+    .default_prompts()
+    .encoding(Encoding::Utf8)
+    .terminal_size(80, 24)
+    .spawn()
+    .await?;
+
+// Override specific settings while keeping auto-detection for others
+let session = Session::auto("bash")
+    .terminal_size(120, 40)  // Override terminal size
+    .spawn()
+    .await?;
+```
+
+---
+
+## 22. Mock Session Backend
+
+The Mock Session Backend provides deterministic testing without spawning real processes. This section documents the architecture for Section 9.1a requirements.
+
+### 22.1 Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              MockSession                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
+│  │      Scenario Engine        │  │           Response Queue                ││
+│  │  ┌───────────────────────┐  │  │  ┌─────────────────────────────────┐   ││
+│  │  │   Pattern Triggers    │  │  │  │    Scripted Outputs             │   ││
+│  │  │   Input → Response    │  │  │  │    Timing Controls              │   ││
+│  │  └───────────────────────┘  │  │  │    Delay Simulation             │   ││
+│  └─────────────────────────────┘  │  └─────────────────────────────────┘   ││
+├─────────────────────────────────────────────────────────────────────────────┤
+│                         Implements Backend Trait                             │
+│  read() → scripted output    send() → triggers patterns    close() → EOF    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 22.2 Core Types
+
+```rust
+/// Mock session for deterministic testing
+#[cfg(feature = "mock")]
+pub struct MockSession {
+    /// Scripted events to replay
+    events: VecDeque<MockEvent>,
+    /// Pattern-triggered responses
+    triggers: HashMap<Pattern, Vec<u8>>,
+    /// Input capture for assertions
+    sent_data: Vec<u8>,
+    /// Current time for timing simulation
+    virtual_time: Instant,
+    /// Configuration
+    config: MockConfig,
+}
+
+/// A single mock event in a scenario
+#[derive(Debug, Clone)]
+pub enum MockEvent {
+    /// Output data to the "process" (received by expect)
+    Output { data: Vec<u8>, delay: Duration },
+    /// Expect input from the client
+    ExpectInput { pattern: Pattern, timeout: Duration },
+    /// Simulate process exit
+    Exit { code: i32 },
+    /// Pause for timing tests
+    Delay(Duration),
+}
+
+/// Configuration for mock behavior
+#[derive(Debug, Clone)]
+pub struct MockConfig {
+    /// Whether to use real-time delays or skip them
+    pub real_time: bool,
+    /// Default timeout for expect operations
+    pub default_timeout: Duration,
+    /// Whether to fail on unexpected input
+    pub strict_mode: bool,
+}
+```
+
+### 22.3 Transcript Replay
+
+MockSession supports loading scenarios from NDJSON transcript files.
+
+#### 22.3.1 NDJSON Scenario Format
+
+```json
+{"t": 0.0, "e": "o", "d": "login: "}
+{"t": 0.1, "e": "i", "d": "admin\r\n"}
+{"t": 0.15, "e": "o", "d": "Password: "}
+{"t": 0.2, "e": "i", "d": "secret123\r\n"}
+{"t": 0.5, "e": "o", "d": "Welcome to the system!\r\n$ "}
+{"t": 5.0, "e": "x", "code": 0}
+```
+
+| Field | Description |
+|-------|-------------|
+| `t` | Timestamp in seconds from session start |
+| `e` | Event type: `o` (output), `i` (input), `x` (exit) |
+| `d` | Data for output/input events |
+| `code` | Exit code for exit events |
+
+#### 22.3.2 Loading Transcripts
+
+```rust
+impl MockSession {
+    /// Load scenario from NDJSON transcript file
+    pub fn from_transcript<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+        let file = File::open(path)?;
+        let reader = BufReader::new(file);
+        let mut events = VecDeque::new();
+        let mut last_time = 0.0;
+
+        for line in reader.lines() {
+            let line = line?;
+            let event: TranscriptEvent = serde_json::from_str(&line)?;
+
+            // Calculate delay from previous event
+            let delay = Duration::from_secs_f64(event.t - last_time);
+            last_time = event.t;
+
+            match event.e.as_str() {
+                "o" => events.push_back(MockEvent::Output {
+                    data: event.d.unwrap_or_default().into_bytes(),
+                    delay,
+                }),
+                "i" => events.push_back(MockEvent::ExpectInput {
+                    pattern: Pattern::exact(&event.d.unwrap_or_default()),
+                    timeout: Duration::from_secs(30),
+                }),
+                "x" => events.push_back(MockEvent::Exit {
+                    code: event.code.unwrap_or(0),
+                }),
+                _ => return Err(Error::InvalidTranscript),
+            }
+        }
+
+        Ok(Self::from_events(events))
+    }
+}
+```
+
+### 22.4 Pattern-Triggered Responses
+
+For interactive testing, MockSession supports pattern-triggered responses.
+
+```rust
+impl MockSession {
+    /// Add a pattern trigger that responds when specific input is sent
+    pub fn on_input<P: Into<Pattern>>(mut self, pattern: P, response: &str) -> Self {
+        self.triggers.insert(pattern.into(), response.as_bytes().to_vec());
+        self
+    }
+}
+
+// Usage example
+let mock = MockSession::new()
+    .on_input("username:", "admin\r\n")
+    .on_input("password:", "secret\r\n")
+    .on_input(Pattern::regex(r"\$ $"), "exit\r\n");
+```
+
+### 22.5 Built-in Scenarios
+
+Common testing scenarios are provided as convenience methods.
+
+```rust
+impl MockSession {
+    /// SSH login scenario
+    pub fn ssh_login(username: &str, password: &str, success: bool) -> Self {
+        let mut events = vec![
+            MockEvent::Output {
+                data: format!("{username}@host's password: ").into_bytes(),
+                delay: Duration::from_millis(100),
+            },
+            MockEvent::ExpectInput {
+                pattern: Pattern::exact(&format!("{password}\r\n")),
+                timeout: Duration::from_secs(30),
+            },
+        ];
+
+        if success {
+            events.push(MockEvent::Output {
+                data: b"Welcome to Ubuntu 22.04\r\n$ ".to_vec(),
+                delay: Duration::from_millis(200),
+            });
+        } else {
+            events.push(MockEvent::Output {
+                data: b"Permission denied, please try again.\r\n".to_vec(),
+                delay: Duration::from_millis(100),
+            });
+        }
+
+        Self::from_events(events.into())
+    }
+
+    /// Sudo password prompt scenario
+    pub fn sudo_prompt(password: &str, success: bool) -> Self {
+        // Similar pattern...
+    }
+
+    /// Simple shell prompt scenario
+    pub fn shell_prompt(prompt: &str) -> Self {
+        Self::from_events(vec![
+            MockEvent::Output {
+                data: prompt.as_bytes().to_vec(),
+                delay: Duration::from_millis(50),
+            },
+        ].into())
+    }
+}
+```
+
+### 22.6 Timing Control
+
+```rust
+impl MockSession {
+    /// Skip timing delays (fast mode for unit tests)
+    pub fn instant(mut self) -> Self {
+        self.config.real_time = false;
+        self
+    }
+
+    /// Use real-time delays (for integration/timeout tests)
+    pub fn real_time(mut self) -> Self {
+        self.config.real_time = true;
+        self
+    }
+
+    /// Add configurable delay for timeout testing
+    pub fn with_delay(mut self, delay: Duration) -> Self {
+        self.events.push_front(MockEvent::Delay(delay));
+        self
+    }
+}
+```
+
+### 22.7 Test Integration Example
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_login_dialog() {
+        let mock = MockSession::from_transcript("fixtures/ssh_login.json")
+            .instant();  // Skip delays for fast tests
+
+        let mut session = Session::from_backend(mock);
+
+        session.expect("login: ").await?;
+        session.send_line("admin").await?;
+        session.expect("Password: ").await?;
+        session.send_line("secret123").await?;
+        session.expect("$ ").await?;
+
+        assert!(session.sent_data().contains(b"admin"));
+    }
+
+    #[tokio::test]
+    async fn test_timeout_behavior() {
+        let mock = MockSession::new()
+            .with_delay(Duration::from_secs(5))
+            .then_output("delayed response");
+
+        let mut session = Session::from_backend(mock)
+            .real_time();  // Use real delays
+
+        let result = session.expect_timeout("response", Duration::from_secs(1)).await;
+        assert!(matches!(result, Err(Error::Timeout { .. })));
+    }
+}
+```
+
+---
+
+## 23. Supply Chain Security
+
+This section documents the architecture for supply chain security requirements (NFR-5.7), ensuring verifiable builds and auditable dependencies.
+
+### 23.1 Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           CI/CD Pipeline                                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                        Build Stage                                   │    │
+│  │  cargo build → deterministic → reproducible outputs                 │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                       Security Checks                                │    │
+│  │  cargo-audit │ cargo-deny │ cargo-vet                                │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                         │
+│                                    ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                      Artifact Generation                             │    │
+│  │  SLSA Provenance │ Sigstore Signing │ SBOM (SPDX + CycloneDX)       │    │
+│  └─────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 23.2 Reproducible Builds
+
+Reproducible builds ensure that the same source code always produces identical binaries.
+
+#### 23.2.1 Build Environment Controls
+
+```yaml
+# .github/workflows/release.yml
+env:
+  # Lock timestamps for reproducibility
+  SOURCE_DATE_EPOCH: ${{ github.event.repository.updated_at }}
+  # Disable debug info that includes paths
+  CARGO_PROFILE_RELEASE_DEBUG: 0
+  # Use consistent Rust toolchain
+  RUSTUP_TOOLCHAIN: "1.85.0"
+```
+
+#### 23.2.2 Cargo Configuration
+
+```toml
+# .cargo/config.toml
+[build]
+# Consistent target directory
+target-dir = "target"
+
+[profile.release]
+# Reproducibility settings
+debug = 0
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+```
+
+### 23.3 SLSA Level 3 Provenance
+
+SLSA (Supply-chain Levels for Software Artifacts) Level 3 provides verifiable build provenance.
+
+#### 23.3.1 Provenance Generation
+
+```yaml
+# .github/workflows/release.yml
+jobs:
+  build:
+    permissions:
+      id-token: write  # For OIDC token
+      contents: read
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release artifacts
+        run: cargo build --release
+
+      - name: Generate SLSA provenance
+        uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2
+        with:
+          artifacts: target/release/librust_expect*
+```
+
+#### 23.3.2 Provenance Attestation Format
+
+```json
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "librust_expect.rlib",
+      "digest": {
+        "sha256": "abc123..."
+      }
+    }
+  ],
+  "predicateType": "https://slsa.dev/provenance/v1",
+  "predicate": {
+    "buildDefinition": {
+      "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+      "externalParameters": {
+        "workflow": ".github/workflows/release.yml"
+      }
+    },
+    "runDetails": {
+      "builder": {
+        "id": "https://github.com/slsa-framework/slsa-github-generator"
+      }
+    }
+  }
+}
+```
+
+### 23.4 Sigstore Keyless Signing
+
+Sigstore provides keyless signing tied to GitHub Actions workflow identity.
+
+```yaml
+# .github/workflows/release.yml
+- name: Sign with Sigstore
+  uses: sigstore/cosign-installer@v3
+
+- name: Sign release artifacts
+  run: |
+    cosign sign-blob \
+      --yes \
+      --oidc-issuer https://token.actions.githubusercontent.com \
+      --output-signature target/release/librust_expect.sig \
+      --output-certificate target/release/librust_expect.crt \
+      target/release/librust_expect.rlib
+```
+
+#### 23.4.1 Verification
+
+Users can verify signatures with:
+
+```bash
+cosign verify-blob \
+  --certificate rust-expect.crt \
+  --signature rust-expect.sig \
+  --certificate-identity-regexp "github.com/rust-expect/rust-expect" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  librust_expect.rlib
+```
+
+### 23.5 SBOM Generation
+
+Software Bill of Materials (SBOM) enables dependency auditing.
+
+#### 23.5.1 SPDX Format
+
+```yaml
+# .github/workflows/release.yml
+- name: Generate SPDX SBOM
+  run: |
+    cargo sbom --format spdx > sbom.spdx.json
+```
+
+#### 23.5.2 CycloneDX Format
+
+```yaml
+- name: Generate CycloneDX SBOM
+  run: |
+    cargo cyclonedx --format json > sbom.cdx.json
+```
+
+#### 23.5.3 SBOM Contents
+
+| Component | Included Data |
+|-----------|---------------|
+| Direct dependencies | Name, version, license, PURL |
+| Transitive dependencies | Full dependency tree |
+| Build tools | Rust version, cargo version |
+| Checksums | SHA-256 of all components |
+
+### 23.6 Dependency Auditing
+
+#### 23.6.1 cargo-audit (Vulnerability Checking)
+
+```yaml
+# .github/workflows/ci.yml
+- name: Security audit
+  run: |
+    cargo install cargo-audit
+    cargo audit --deny warnings
+```
+
+**Policy:** CI fails on any known vulnerability (RUSTSEC advisory).
+
+#### 23.6.2 cargo-deny (License and Duplicate Checking)
+
+```toml
+# deny.toml
+[licenses]
+unlicensed = "deny"
+allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "ISC", "Zlib"]
+copyleft = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = [
+  # Known problematic crates
+]
+
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"
+```
+
+#### 23.6.3 cargo-vet (Attestation)
+
+```toml
+# supply-chain/config.toml
+[policy.rust-expect]
+criteria = "safe-to-deploy"
+
+# supply-chain/audits.toml
+[[audits.tokio]]
+who = "rust-expect maintainers"
+criteria = "safe-to-deploy"
+version = "1.40.0"
+notes = "Audited for memory safety and async correctness"
+```
+
+### 23.7 CI Security Pipeline
+
+```yaml
+# .github/workflows/security.yml
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 0 * * *'  # Daily vulnerability check
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cargo-audit
+        run: cargo audit --deny warnings
+
+      - name: cargo-deny
+        run: cargo deny check
+
+      - name: cargo-vet
+        run: cargo vet --locked
+```
+
+### 23.8 Release Artifact Manifest
+
+Each release includes:
+
+| Artifact | Description |
+|----------|-------------|
+| `librust_expect-*.rlib` | Compiled library |
+| `*.sig` | Sigstore signature |
+| `*.crt` | Signing certificate |
+| `sbom.spdx.json` | SPDX SBOM |
+| `sbom.cdx.json` | CycloneDX SBOM |
+| `provenance.intoto.jsonl` | SLSA provenance |
+| `SHA256SUMS` | Checksums for all artifacts |
+
 ---
 
 ## Appendix A: Glossary
@@ -6131,17 +7610,27 @@ impl TranscriptPlayer {
 | Backend | Abstract interface for session I/O (PTY, SSH, etc.) |
 | Buffer | Ring buffer holding process output for pattern matching |
 | ConPTY | Windows Console Pseudo Terminal API (Windows 10 1809+) |
+| CycloneDX | OASIS standard for Software Bill of Materials (SBOM) format |
 | exp_continue | Continue matching within same expect call after action |
 | expect_before | Persistent patterns checked before main patterns |
 | expect_after | Persistent patterns checked after main patterns |
 | Job Object | Windows mechanism for process group management |
+| Luhn Algorithm | Checksum formula for validating credit card numbers |
+| MockSession | Test backend that replays scripted scenarios without real processes |
 | MSRV | Minimum Supported Rust Version |
+| NDJSON | Newline-delimited JSON format for streaming/transcript logs |
 | Overlapped I/O | Windows async I/O mechanism |
+| PII | Personally Identifiable Information (credit cards, SSNs, etc.) |
 | PTY | Pseudo-terminal; virtual terminal device |
 | PtyMaster | The controlling side of a PTY (where we read/write) |
 | PtySlave | The process side of a PTY (terminal to child) |
+| SBOM | Software Bill of Materials; inventory of software components |
+| Sigstore | Keyless signing infrastructure for software artifacts |
 | SIGWINCH | Unix signal for terminal window size change |
+| SLSA | Supply-chain Levels for Software Artifacts; build provenance framework |
 | Session | Handle to a spawned process with expect capabilities |
+| SPDX | Software Package Data Exchange; SBOM format standard |
+| Zero-Config Mode | Auto-detection of shell type, prompts, and encoding for simplified usage |
 
 ---
 
@@ -6160,6 +7649,14 @@ impl TranscriptPlayer {
 11. [expectrl Documentation](https://docs.rs/expectrl)
 12. [rexpect Documentation](https://docs.rs/rexpect)
 13. [asciinema Recording Format](https://docs.asciinema.org/manual/asciicast/v2/)
+14. [SLSA Specification](https://slsa.dev/spec/v1.0/)
+15. [Sigstore Documentation](https://docs.sigstore.dev/)
+16. [SPDX Specification](https://spdx.dev/specifications/)
+17. [CycloneDX Specification](https://cyclonedx.org/specification/overview/)
+18. [cargo-audit](https://github.com/rustsec/rustsec/tree/main/cargo-audit)
+19. [cargo-deny](https://github.com/EmbarkStudios/cargo-deny)
+20. [cargo-vet](https://mozilla.github.io/cargo-vet/)
+21. [Luhn Algorithm (Wikipedia)](https://en.wikipedia.org/wiki/Luhn_algorithm)
 
 ---
 

@@ -1,0 +1,267 @@
+# =============================================================================
+# rust-expect .gitignore
+# =============================================================================
+
+# =============================================================================
+# Rust / Cargo
+# =============================================================================
+
+# Build artifacts
+/target/
+**/target/
+
+# Cargo.lock is typically committed for libraries, but generated for binaries
+# Uncomment if this becomes a binary project:
+# Cargo.lock
+
+# Backup files from rustfmt
+**/*.rs.bk
+
+# MSVC Windows builds
+*.pdb
+
+# Incremental compilation cache
+/incremental/
+
+# =============================================================================
+# Temporary & Working Files
+# =============================================================================
+
+# Local temporary/scratch directory
+.tmp/
+
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+\#*\#
+.#*
+
+# =============================================================================
+# IDE & Editor Configurations
+# =============================================================================
+
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# JetBrains IDEs (CLion, IntelliJ IDEA, RustRover)
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim/Neovim
+*.vim
+.nvim/
+Session.vim
+.netrwhist
+tags
+
+# Emacs
+*~
+\#*\#
+.dir-locals.el
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Helix
+.helix/
+
+# Zed
+.zed/
+
+# =============================================================================
+# OS-Specific Files
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# =============================================================================
+# Testing & Coverage
+# =============================================================================
+
+# Code coverage reports
+/coverage/
+*.profraw
+*.profdata
+lcov.info
+*.gcno
+*.gcda
+*.gcov
+tarpaulin-report.html
+tarpaulin-report.json
+cobertura.xml
+
+# Test output artifacts
+/test-output/
+/test-results/
+*.log
+
+# Property-based testing (proptest)
+/proptest-regressions/
+**/proptest-regressions/
+
+# Fuzzing artifacts (cargo-fuzz)
+/fuzz/artifacts/
+/fuzz/corpus/
+/fuzz/coverage/
+
+# =============================================================================
+# Transcript & Session Logs
+# =============================================================================
+
+# Transcript recordings (may contain sensitive data)
+*.transcript
+*.ndjson
+!fixtures/**/*.ndjson
+*.asciicast
+*.cast
+
+# Session logs
+session-*.log
+transcript-*.log
+
+# =============================================================================
+# Documentation Build
+# =============================================================================
+
+# mdBook output
+/book/
+/docs/book/
+
+# rustdoc output (if built locally outside target)
+/doc/
+/docs/api/
+
+# =============================================================================
+# Security & Supply Chain Tooling
+# =============================================================================
+
+# cargo-audit
+/advisory-db/
+
+# cargo-deny (output files, config is committed)
+deny-report.json
+
+# SBOM outputs (generated in CI, not committed)
+sbom.spdx.json
+sbom.cdx.json
+
+# Sigstore signatures (generated in CI)
+*.sig
+*.crt
+*.bundle
+
+# SLSA provenance (generated in CI)
+*.intoto.jsonl
+provenance.json
+
+# =============================================================================
+# Benchmarking
+# =============================================================================
+
+# Criterion benchmark data
+/target/criterion/
+criterion-*.json
+
+# =============================================================================
+# Release & Distribution
+# =============================================================================
+
+# Release binaries
+/dist/
+/release/
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# Checksums (generated in CI)
+SHA256SUMS
+SHA512SUMS
+
+# =============================================================================
+# Environment & Secrets
+# =============================================================================
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+*.env
+
+# Credentials (should NEVER be committed)
+credentials.json
+secrets.json
+*.pem
+*.key
+!fixtures/**/*.pem
+
+# SSH keys (for testing - use fixtures instead)
+id_rsa
+id_ed25519
+*.pub
+!fixtures/**/*.pub
+
+# =============================================================================
+# Miscellaneous
+# =============================================================================
+
+# Patch files
+*.patch
+*.diff
+*.orig
+*.rej
+
+# Archive files
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Database files (if any local testing)
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js (if using for tooling/docs)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python (if using for tooling/scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/

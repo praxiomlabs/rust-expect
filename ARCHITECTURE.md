@@ -1,6 +1,6 @@
 # rust-expect: Technical Architecture
 
-**Version:** 1.1.0
+**Version:** 1.2.0
 **Date:** 2025-12-30
 **Status:** Authoritative
 **Dependency Versions:** As of December 2025
@@ -137,125 +137,298 @@ The `proptest` crate (MSRV guaranteed ≤ stable-7) validates this approach. Org
 
 ### 3.1 Directory Layout
 
+This project uses the modern Rust module convention (Rust 2018+) where `module.rs` + `module/` replaces `module/mod.rs`. This provides clearer module boundaries and better IDE navigation.
+
 ```
 rust-expect/
-├── Cargo.toml                    # Workspace manifest
-├── ARCHITECTURE.md               # This document
-├── REQUIREMENTS.md               # Functional requirements
-├── LIBRARY_ANALYSIS.md           # Competitive analysis
-├── README.md                     # Project overview
-├── LICENSE-MIT                   # MIT license
-├── LICENSE-APACHE                # Apache 2.0 license
+├── Cargo.toml                        # Workspace manifest (Edition 2024, resolver v3)
+├── Cargo.lock                        # Locked dependencies (committed for reproducibility)
+├── rust-toolchain.toml               # Pinned Rust toolchain (1.85, Edition 2024)
+├── ARCHITECTURE.md                   # This document (v1.2.0)
+├── REQUIREMENTS.md                   # Functional requirements (v1.2.0)
+├── LIBRARY_ANALYSIS.md               # Competitive analysis
+├── README.md                         # Project overview with badges
+├── CHANGELOG.md                      # Version history (Keep a Changelog format)
+├── CONTRIBUTING.md                   # Contribution guidelines
+├── CODE_OF_CONDUCT.md                # Contributor Covenant v2.1
+├── SECURITY.md                       # Security vulnerability reporting policy
+├── LICENSE-MIT                       # MIT license
+├── LICENSE-APACHE                    # Apache 2.0 license
+│
+├── .cargo/
+│   └── config.toml                   # Cargo configuration (reproducible builds, MSRV resolver)
+│
+├── .github/
+│   ├── FUNDING.yml                   # Sponsorship configuration
+│   ├── CODEOWNERS                    # Code ownership for reviews
+│   ├── dependabot.yml                # Automated dependency updates
+│   ├── PULL_REQUEST_TEMPLATE.md      # PR template with checklist
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── config.yml                # Template chooser configuration
+│   │   ├── bug_report.md             # Bug report template
+│   │   ├── feature_request.md        # Feature request template
+│   │   └── security_vulnerability.md # Security issue template (private)
+│   └── workflows/
+│       ├── ci.yml                    # Main CI pipeline (test matrix, MSRV check)
+│       ├── bench.yml                 # Benchmark workflow (Criterion)
+│       ├── release.yml               # Release with SLSA/Sigstore/SBOM
+│       └── security.yml              # cargo-audit/deny/vet checks
+│
+├── deny.toml                         # cargo-deny configuration
+├── rustfmt.toml                      # Code formatting rules
+├── clippy.toml                       # Lint configuration
+├── cliff.toml                        # git-cliff changelog automation
+│
+├── supply-chain/                     # cargo-vet attestations
+│   ├── config.toml
+│   └── audits.toml
 │
 ├── crates/
-│   ├── rust-pty/                 # Cross-platform async PTY
+│   ├── rust-pty/                     # Cross-platform async PTY
 │   │   ├── Cargo.toml
-│   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── config.rs         # PtyConfig, PtySignal
-│   │   │   ├── error.rs          # PtyError types
-│   │   │   ├── traits.rs         # PtyMaster, PtyChild, PtySystem
-│   │   │   ├── unix/             # Unix backend
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── pty.rs        # PTY allocation via rustix
-│   │   │   │   ├── child.rs      # Child process management
-│   │   │   │   └── signals.rs    # SIGWINCH, SIGCHLD handling
-│   │   │   └── windows/          # Windows backend
-│   │   │       ├── mod.rs
-│   │   │       ├── conpty.rs     # ConPTY management
-│   │   │       ├── pipes.rs      # Pipe I/O handling
-│   │   │       ├── child.rs      # Process + Job Object management
-│   │   │       └── async_adapter.rs  # Thread-per-pipe / overlapped I/O
-│   │   └── tests/
+│   │   ├── README.md                 # Crate-specific README (synced to docs.rs)
+│   │   └── src/
+│   │       ├── lib.rs                # Public API, re-exports
+│   │       ├── config.rs             # PtyConfig, PtySignal
+│   │       ├── error.rs              # PtyError (thiserror)
+│   │       ├── traits.rs             # PtyMaster, PtyChild, PtySystem traits
+│   │       │
+│   │       ├── unix.rs               # Unix module root (cfg(unix))
+│   │       ├── unix/
+│   │       │   ├── pty.rs            # PTY allocation via rustix
+│   │       │   ├── child.rs          # Child process management
+│   │       │   ├── buffer.rs         # Zero-copy buffer management
+│   │       │   └── signals.rs        # SIGWINCH, SIGCHLD handling
+│   │       │
+│   │       ├── windows.rs            # Windows module root (cfg(windows))
+│   │       └── windows/
+│   │           ├── conpty.rs         # ConPTY management
+│   │           ├── pipes.rs          # Pipe I/O handling
+│   │           ├── child.rs          # Process + Job Object management
+│   │           └── async_adapter.rs  # Thread-per-pipe / overlapped I/O
 │   │
-│   ├── rust-expect/              # Main expect library
+│   ├── rust-expect/                  # Main expect library
 │   │   ├── Cargo.toml
-│   │   ├── src/
-│   │   │   ├── lib.rs
-│   │   │   ├── session/          # Session management
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── builder.rs    # SessionBuilder
-│   │   │   │   ├── handle.rs     # Session handle
-│   │   │   │   └── lifecycle.rs  # Spawn, wait, kill
-│   │   │   ├── expect/           # Pattern matching
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── pattern.rs    # Pattern types
-│   │   │   │   ├── matcher.rs    # Matching engine
-│   │   │   │   ├── buffer.rs     # Buffer management
-│   │   │   │   └── result.rs     # Match results
-│   │   │   ├── send/             # Output operations
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── basic.rs      # send, send_line, send_control
-│   │   │   │   └── human.rs      # send_slow, send_human
-│   │   │   ├── interact/         # Interactive mode
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── basic.rs      # Basic interact
-│   │   │   │   ├── hooks.rs      # Pattern/input hooks
-│   │   │   │   └── terminal.rs   # Raw mode via crossterm
-│   │   │   ├── multi/            # Multi-session
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── group.rs      # Session groups
-│   │   │   │   └── select.rs     # select_expect, expect_all
-│   │   │   ├── ssh/              # SSH backend (feature-gated)
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── session.rs    # SSH session
-│   │   │   │   ├── auth.rs       # Authentication
-│   │   │   │   └── channel.rs    # Channel management
-│   │   │   ├── screen/           # Terminal emulation (feature-gated)
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── parser.rs     # ANSI parsing via vte
-│   │   │   │   ├── buffer.rs     # Virtual screen buffer
-│   │   │   │   └── query.rs      # Screen queries
-│   │   │   ├── dialog/           # Dialog system
-│   │   │   │   ├── mod.rs
-│   │   │   │   ├── definition.rs # Dialog definition
-│   │   │   │   ├── executor.rs   # Dialog execution
-│   │   │   │   └── common.rs     # Login, sudo, confirm dialogs
-│   │   │   ├── logging/          # Transcript logging
-│   │   │   │   ├── mod.rs
-│   │   │   │   └── transcript.rs # Session recording
-│   │   │   └── error.rs          # Error types
-│   │   ├── tests/
-│   │   └── examples/
+│   │   ├── README.md                 # Crate-specific README (synced to docs.rs)
+│   │   └── src/
+│   │       ├── lib.rs                # Public API, feature gates, re-exports
+│   │       ├── prelude.rs            # Common imports: Session, Pattern, Error, etc.
+│   │       ├── error.rs              # ExpectError, ErrorContext (thiserror)
+│   │       ├── types.rs              # Shared types: Timeout, MatchResult, etc.
+│   │       ├── sync.rs               # Blocking/sync API wrapper
+│   │       ├── encoding.rs           # Encoding detection & conversion
+│   │       │
+│   │       ├── session.rs            # Session module root
+│   │       ├── session/
+│   │       │   ├── builder.rs        # SessionBuilder (fluent API)
+│   │       │   ├── handle.rs         # Session handle & state
+│   │       │   ├── lifecycle.rs      # Spawn, wait, kill, close
+│   │       │   └── screen.rs         # Screen-enabled session wrapper
+│   │       │
+│   │       ├── auto_config.rs        # Zero-Config Mode module root
+│   │       ├── auto_config/
+│   │       │   ├── shell.rs          # ShellType detection
+│   │       │   ├── line_ending.rs    # LineEnding detection
+│   │       │   ├── prompt.rs         # Prompt pattern detection
+│   │       │   └── locale.rs         # Encoding detection from $LANG/$LC_*
+│   │       │
+│   │       ├── expect.rs             # Pattern matching module root
+│   │       ├── expect/
+│   │       │   ├── pattern.rs        # Pattern enum (Regex, Literal, Eof, etc.)
+│   │       │   ├── matcher.rs        # Matching engine
+│   │       │   ├── buffer.rs         # Ring buffer management
+│   │       │   ├── large_buffer.rs   # MmapBuffer for large outputs (>10MB)
+│   │       │   ├── cache.rs          # RegexCache with LRU eviction
+│   │       │   └── before_after.rs   # expect_before/expect_after patterns
+│   │       │
+│   │       ├── send.rs               # Send operations module root
+│   │       ├── send/
+│   │       │   ├── basic.rs          # send, send_line, send_control
+│   │       │   └── human.rs          # send_slow, send_human (typing simulation)
+│   │       │
+│   │       ├── interact.rs           # Interactive mode module root
+│   │       ├── interact/
+│   │       │   ├── mode.rs           # Basic interact loop
+│   │       │   ├── hooks.rs          # Pattern/input hooks, escape sequences
+│   │       │   └── terminal.rs       # Raw mode via crossterm
+│   │       │
+│   │       ├── multi.rs              # Multi-session module root
+│   │       ├── multi/
+│   │       │   ├── group.rs          # SessionGroup management
+│   │       │   └── select.rs         # select_expect!, expect_all
+│   │       │
+│   │       ├── backend.rs            # Backend trait module root
+│   │       ├── backend/
+│   │       │   ├── pty.rs            # PTY backend (wraps rust-pty)
+│   │       │   ├── ssh.rs            # SSH module root (feature = "ssh")
+│   │       │   └── ssh/
+│   │       │       ├── session.rs    # SshSession
+│   │       │       ├── builder.rs    # SshSessionBuilder
+│   │       │       ├── auth.rs       # Password, key, agent authentication
+│   │       │       ├── channel.rs    # Channel management
+│   │       │       ├── pool.rs       # Connection pooling
+│   │       │       ├── retry.rs      # Retry policies (exponential backoff)
+│   │       │       ├── resilient.rs  # Resilient session with auto-reconnect
+│   │       │       └── keepalive.rs  # Keepalive management
+│   │       │
+│   │       ├── mock.rs               # Mock backend module root (feature = "mock")
+│   │       ├── mock/
+│   │       │   ├── session.rs        # MockSession type
+│   │       │   ├── event.rs          # MockEvent enum
+│   │       │   ├── scenario.rs       # Scenario loading from NDJSON
+│   │       │   └── builtin.rs        # Built-in scenarios (ssh_login, sudo, etc.)
+│   │       │
+│   │       ├── screen.rs             # Screen buffer module root (feature = "screen")
+│   │       ├── screen/
+│   │       │   ├── parser.rs         # ANSI parsing via vte
+│   │       │   ├── buffer.rs         # Virtual screen buffer (cells, cursor)
+│   │       │   └── query.rs          # row(), col(), text_at(), find_on_screen()
+│   │       │
+│   │       ├── dialog.rs             # Dialog system module root
+│   │       ├── dialog/
+│   │       │   ├── definition.rs     # Dialog, Step, Action DSL
+│   │       │   ├── executor.rs       # Dialog execution engine
+│   │       │   └── common.rs         # LoginDialog, SudoDialog, ConfirmDialog
+│   │       │
+│   │       ├── transcript.rs         # Transcript logging module root
+│   │       ├── transcript/
+│   │       │   ├── format.rs         # NDJSON types (TranscriptEvent, etc.)
+│   │       │   ├── asciicast.rs      # Asciicast v2 format support
+│   │       │   ├── recorder.rs       # TranscriptRecorder
+│   │       │   └── player.rs         # TranscriptPlayer (replay)
+│   │       │
+│   │       ├── pii.rs                # PII redaction module root (feature = "pii-redaction")
+│   │       ├── pii/
+│   │       │   ├── detector.rs       # PiiDetector trait
+│   │       │   ├── credit_card.rs    # Luhn-validated credit card detection
+│   │       │   ├── ssn.rs            # SSN pattern detection
+│   │       │   ├── api_key.rs        # API key patterns (AWS, GitHub, Stripe, etc.)
+│   │       │   └── redactor.rs       # Redactor engine, RedactionConfig
+│   │       │
+│   │       ├── config.rs             # Configuration module root
+│   │       ├── config/
+│   │       │   ├── file.rs           # TOML config file parsing
+│   │       │   └── env.rs            # Environment variable overrides
+│   │       │
+│   │       ├── metrics.rs            # Prometheus/OpenTelemetry metrics (feature = "metrics")
+│   │       ├── health.rs             # Health checks & diagnostics
+│   │       │
+│   │       └── util/                 # Internal utilities (not pub)
+│   │           ├── backpressure.rs   # Backpressure handling strategies
+│   │           ├── timeout.rs        # Timeout wrapper utilities
+│   │           └── bytes.rs          # Byte manipulation helpers
 │   │
-│   └── rust-expect-macros/       # Procedural macros
+│   └── rust-expect-macros/           # Procedural macros
 │       ├── Cargo.toml
-│       ├── src/
-│       │   ├── lib.rs
-│       │   ├── patterns.rs       # patterns! macro
-│       │   ├── regex.rs          # regex! macro
-│       │   └── timeout.rs        # timeout! macro
-│       └── tests/
+│       ├── README.md                 # Crate-specific README (synced to docs.rs)
+│       └── src/
+│           ├── lib.rs                # Macro exports
+│           ├── patterns.rs           # patterns! { } macro
+│           ├── regex.rs              # regex! compile-time validation
+│           ├── dialog.rs             # dialog! { } macro
+│           └── timeout.rs            # timeout! macro
 │
-├── tests/                        # Integration tests
-│   ├── common/                   # Shared test utilities
-│   ├── spawn_tests.rs
-│   ├── expect_tests.rs
-│   ├── interact_tests.rs
-│   ├── multi_session_tests.rs
-│   └── platform_tests.rs
+├── tests/                            # Workspace integration tests
+│   ├── common.rs                     # Shared test utilities (modern style)
+│   ├── common/
+│   │   ├── fixtures.rs               # Test fixture helpers
+│   │   └── assertions.rs             # Custom assertions
+│   │
+│   ├── spawn_tests.rs                # Session spawning tests
+│   ├── expect_tests.rs               # Pattern matching tests
+│   ├── send_tests.rs                 # Send operation tests
+│   ├── interact_tests.rs             # Interactive mode tests
+│   ├── multi_session_tests.rs        # Multi-session tests
+│   ├── dialog_tests.rs               # Dialog system tests
+│   ├── sync_tests.rs                 # Sync API wrapper tests
+│   │
+│   ├── ssh_tests.rs                  # SSH integration tests (feature = "ssh")
+│   ├── mock_tests.rs                 # MockSession tests (feature = "mock")
+│   ├── screen_tests.rs               # Screen buffer tests (feature = "screen")
+│   ├── pii_tests.rs                  # PII redaction tests (feature = "pii-redaction")
+│   │
+│   ├── encoding_tests.rs             # Encoding/charset tests
+│   ├── transcript_tests.rs           # Transcript recording/playback tests
+│   ├── auto_config_tests.rs          # Zero-config mode tests
+│   ├── config_tests.rs               # Configuration file tests
+│   ├── health_tests.rs               # Health check tests
+│   │
+│   └── platform/                     # Platform-specific tests
+│       ├── unix.rs
+│       └── windows.rs
 │
-├── benches/                      # Benchmarks
-│   ├── spawn_bench.rs
-│   ├── pattern_bench.rs
-│   └── throughput_bench.rs
+├── benches/                          # Criterion benchmarks
+│   ├── main.rs                       # Benchmark harness
+│   ├── spawn.rs                      # Spawn latency benchmarks
+│   ├── pattern.rs                    # Pattern matching benchmarks
+│   ├── buffer.rs                     # Ring buffer benchmarks
+│   ├── regex_cache.rs                # Regex cache hit/miss benchmarks
+│   └── throughput.rs                 # Throughput benchmarks
 │
-├── examples/                     # Usage examples
-│   ├── basic.rs
-│   ├── ssh.rs
-│   ├── interactive.rs
-│   ├── multi_session.rs
-│   ├── large_output.rs
-│   ├── dialog.rs
-│   └── logging.rs
+├── examples/                         # Runnable examples
+│   ├── basic.rs                      # Simple spawn and expect
+│   ├── ssh.rs                        # SSH session example (feature = "ssh")
+│   ├── interactive.rs                # Interactive mode with hooks
+│   ├── multi_session.rs              # Multiple sessions with select!
+│   ├── large_output.rs               # Handling large output streams
+│   ├── dialog.rs                     # Dialog system usage
+│   ├── transcript.rs                 # Recording and playback
+│   ├── zero_config.rs                # Session::auto() zero-config mode
+│   ├── mock_testing.rs               # MockSession for testing (feature = "mock")
+│   ├── screen_buffer.rs              # Screen buffer queries (feature = "screen")
+│   ├── pii_redaction.rs              # PII detection and redaction (feature = "pii-redaction")
+│   ├── metrics.rs                    # Observability integration (feature = "metrics")
+│   └── sync_api.rs                   # Synchronous API usage
 │
-└── test-utils/                   # Test fixture binaries
+├── fixtures/                         # Test fixtures
+│   ├── transcripts/                  # NDJSON test transcripts
+│   │   ├── ssh_login.ndjson
+│   │   ├── sudo_prompt.ndjson
+│   │   └── shell_session.ndjson
+│   ├── keys/                         # Test SSH keys (NOT real credentials)
+│   │   ├── test_ed25519.pub
+│   │   └── test_ed25519
+│   └── configs/                      # Test configuration files
+│       ├── default.toml
+│       └── custom.toml
+│
+└── test-utils/                       # Test fixture binaries
+    ├── Cargo.toml                    # Workspace member
     ├── test-echo/
+    │   ├── Cargo.toml
+    │   └── src/main.rs               # Simple echo for basic tests
     ├── test-prompt/
+    │   ├── Cargo.toml
+    │   └── src/main.rs               # Configurable prompt simulation
     ├── test-output/
+    │   ├── Cargo.toml
+    │   └── src/main.rs               # Large/streaming output generation
     ├── test-signals/
+    │   ├── Cargo.toml
+    │   └── src/main.rs               # Signal handling verification
+    ├── test-timing/
+    │   ├── Cargo.toml
+    │   └── src/main.rs               # Precise timing for timeout tests
     └── test-hang/
+        ├── Cargo.toml
+        └── src/main.rs               # Timeout/hang simulation
 ```
+
+### 3.1.1 Module Convention Rationale
+
+The modern `module.rs` + `module/` pattern provides several advantages:
+
+| Aspect | Old (`mod.rs`) | Modern (`module.rs`) |
+|--------|----------------|---------------------|
+| **File identification** | All roots named `mod.rs` | Unique names per module |
+| **IDE tabs** | Multiple `mod.rs` tabs | Distinct `session.rs`, `expect.rs` |
+| **Git history** | Harder to track renames | Clear file-level history |
+| **Refactoring** | Must move directories | Can split/merge files easily |
+
+**Convention applied:**
+- Module roots use `module.rs` (e.g., `session.rs`)
+- Submodules live in `module/` directory (e.g., `session/builder.rs`)
+- Platform-specific code uses `#[cfg]` attributes in module root
 
 ### 3.2 Workspace Cargo.toml
 
@@ -269,9 +442,10 @@ members = [
     "test-utils/test-prompt",
     "test-utils/test-output",
     "test-utils/test-signals",
+    "test-utils/test-timing",
     "test-utils/test-hang",
 ]
-resolver = "2"
+resolver = "3"  # Default for Edition 2024, enables MSRV-aware dependency resolution
 
 [workspace.package]
 version = "0.1.0"
@@ -3841,7 +4015,7 @@ pub fn native_pty_system() -> impl PtySystem {
 ### 8.3 Feature Detection
 
 ```rust
-// crates/rust-pty/src/windows/mod.rs
+// crates/rust-pty/src/windows.rs
 
 #[cfg(windows)]
 pub mod version {
@@ -4883,7 +5057,7 @@ fn main() {
 ### 14.3 Test Utilities
 
 ```rust
-// tests/common/mod.rs
+// tests/common.rs
 
 use rust_expect::{Session, Result};
 use std::time::Duration;

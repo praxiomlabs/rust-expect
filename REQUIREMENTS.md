@@ -1,7 +1,7 @@
 # rust-expect: Functional Requirements Specification
 
-**Version:** 1.1.0
-**Date:** 2025-12-26
+**Version:** 1.2.0
+**Date:** 2025-12-30
 **Status:** Authoritative
 
 ---
@@ -129,10 +129,41 @@ To create the definitive terminal automation library for the Rust ecosystem—on
 
 ### 3.3 Future Considerations
 
+The following features are explicitly out of scope for 1.0 but the architecture should not preclude their addition in future versions:
+
+#### Platform Expansion
+- FreeBSD as Tier 2 platform
+- Android/Termux support
+- Embedded Linux (Raspberry Pi, BeagleBone)
+
+#### Backend Expansion
 - WebSocket-based remote sessions
 - Kubernetes pod exec integration
 - Docker container exec integration
+- Serial port backend (via `serialport` crate)
+- gRPC service mode for language-agnostic automation
+
+#### Language Bindings
+- Python bindings (via PyO3)
+- Node.js bindings (via napi-rs)
+- Go bindings (via CGO)
+- WASM mock-only mode for browser playgrounds
+
+#### Vertical Specialization Modules
+- Network device automation (Cisco/Juniper/Arista prompt detection, pagination handling)
+- Database CLI helpers (psql/mysql/redis REPL interaction)
+- Security/pentesting utilities (credential redaction, session isolation)
+
+#### Enterprise Features
+- LTS version branches (2-year security patch support)
+- FIPS-validated crypto backend for SSH
+- Compliance modes (SOC2, HIPAA, PCI-DSS audit logging)
+- High-availability session failover
+
+#### Developer Experience
 - Recording/playback for test generation
+- Browser-based visual debugger for transcripts
+- OpenTelemetry/Prometheus metrics integration
 
 ---
 
@@ -200,6 +231,25 @@ The library MUST support spawning processes with PTY attachment.
 | FR-1.5.2 | Spawn from pipe/socket | C |
 | FR-1.5.3 | Fork/clone current session (Expect's `fork`) | C |
 | FR-1.5.4 | Disconnect/daemonize session (Expect's `disconnect`) | C |
+
+#### FR-1.6: Zero-Config Mode [S]
+
+The library SHOULD support automatic detection and configuration to minimize boilerplate for common use cases.
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-1.6.1 | Auto-detect shell type (bash/zsh/fish/powershell/cmd) from `$SHELL` or process name | S |
+| FR-1.6.2 | Auto-configure line endings based on shell family and platform | S |
+| FR-1.6.3 | Auto-detect common prompt patterns (`$`, `#`, `>`, PS1 parsing) | S |
+| FR-1.6.4 | Provide `Session::auto(command)` builder variant for zero-config spawn | S |
+| FR-1.6.5 | Inherit terminal size from parent process or use sensible default (80×24) | S |
+| FR-1.6.6 | Auto-detect encoding from `$LANG` / `$LC_ALL` environment variables | S |
+
+**Example Usage:**
+```rust
+// Zero-config mode: auto-detects shell type, line endings, prompts, and encoding
+let session = Session::auto("bash").spawn().await?;
+```
 
 ---
 
@@ -327,10 +377,16 @@ The library MUST support spawning processes with PTY attachment.
 |----|-------------|----------|
 | FR-3.7.1 | `log_file(path)` - Record all session I/O to file | M |
 | FR-3.7.2 | `log_user(bool)` - Enable/disable echoing to stdout | M |
-| FR-3.7.3 | Configurable log format (raw, timestamped, JSON) | S |
+| FR-3.7.3 | Configurable log format (raw, timestamped, NDJSON, asciicast v2) | S |
 | FR-3.7.4 | Separate logging of sent vs received data | S |
 | FR-3.7.5 | Log rotation and size limits | C |
 | FR-3.7.6 | Redaction of sensitive patterns in logs | S |
+| FR-3.7.7 | Auto-detect and redact common PII patterns (feature flag) | C |
+
+**Transcript Format Notes:**
+- **NDJSON**: Newline-delimited JSON for machine parsing and replay
+- **asciicast v2**: Compatible with asciinema player for visual replay
+- **PII auto-redaction** (FR-3.7.7): Detects credit cards (Luhn-validated), SSNs, common API key patterns
 
 ---
 
@@ -591,14 +647,22 @@ The library MUST support spawning processes with PTY attachment.
 
 ### NFR-1: Performance
 
-| ID | Requirement | Target | Priority |
-|----|-------------|--------|----------|
-| NFR-1.1 | Process spawn latency | < 50ms | M |
-| NFR-1.2 | Pattern match throughput | > 100 MB/s | M |
-| NFR-1.3 | Memory usage for 100MB buffer | < 150 MB | M |
-| NFR-1.4 | Handle 1GB output without crash | < 10s, < 2GB RAM | S |
-| NFR-1.5 | Concurrent session overhead | < 1 MB per session | S |
-| NFR-1.6 | Async task spawn overhead | < 1 μs | S |
+| ID | Requirement | Target | Stretch Goal | Priority |
+|----|-------------|--------|--------------|----------|
+| NFR-1.1 | Process spawn latency | < 50ms | < 5ms | M |
+| NFR-1.2 | Pattern match throughput (literals) | > 100 MB/s | > 1 GB/s (SIMD) | M |
+| NFR-1.2a | Pattern match throughput (regex) | > 50 MB/s | > 100 MB/s | M |
+| NFR-1.3 | Memory usage for 100MB buffer | < 150 MB | < 110 MB | M |
+| NFR-1.4 | Handle 1GB output without crash | < 10s, < 2GB RAM | < 5s, < 1.5GB RAM | S |
+| NFR-1.5 | Concurrent session overhead | < 1 MB per session | < 64 KB baseline | S |
+| NFR-1.6 | Async task spawn overhead | < 1 μs | — | S |
+| NFR-1.7 | Maximum concurrent sessions | > 1,000 | > 10,000 | S |
+
+**Performance Implementation Notes:**
+- Literal pattern matching SHOULD use `memchr` crate for SIMD acceleration
+- Regex patterns SHOULD be cached with LRU eviction to avoid recompilation
+- Buffer implementation SHOULD use ring buffer with zero-copy views where possible
+- Spawn latency stretch goal requires warm fork pool and pre-allocated PTY (Unix)
 
 ### NFR-2: Reliability
 
@@ -668,7 +732,24 @@ Precise behavior when async operations are cancelled (via `select!`, timeout, or
 | NFR-5.3 | Credentials not logged by default | M |
 | NFR-5.4 | Secure SSH host key handling | S |
 | NFR-5.5 | No arbitrary code execution from patterns | M |
-| NFR-5.6 | Memory cleared for sensitive data | S |
+| NFR-5.6 | Memory cleared for sensitive data (zeroization) | S |
+
+#### NFR-5.7: Supply Chain Security [S]
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| NFR-5.7.1 | Reproducible builds (deterministic from same inputs) | S |
+| NFR-5.7.2 | SLSA Level 3 provenance for release artifacts | S |
+| NFR-5.7.3 | Sigstore keyless signing for release binaries | S |
+| NFR-5.7.4 | SBOM generation in SPDX and CycloneDX formats | S |
+| NFR-5.7.5 | cargo-vet attestations for all dependencies | C |
+| NFR-5.7.6 | cargo-audit integration in CI (block on known vulnerabilities) | M |
+| NFR-5.7.7 | cargo-deny for license and duplicate dependency checking | S |
+
+**Implementation Notes:**
+- SLSA provenance enables downstream verification that binaries were built from the claimed source
+- Sigstore provides keyless signing tied to GitHub Actions workflow identity
+- SBOM enables enterprise users to audit transitive dependencies for compliance
 
 ---
 
@@ -884,8 +965,16 @@ async-tokio = ["tokio"]       # Tokio async runtime (primary)
 ssh = ["russh"]               # SSH integration (uses aws-lc-rs crypto by default)
 screen = ["vte"]              # ANSI parsing and virtual screen buffer
 tracing = ["dep:tracing"]     # Structured logging via tracing crate
-full = ["async-tokio", "ssh", "screen", "tracing"]
+metrics = ["opentelemetry", "prometheus"]  # Observability metrics export
+pii-redaction = []            # Auto-detect and redact sensitive data patterns
+mock = []                     # MockSession backend for testing
+full = ["async-tokio", "ssh", "screen", "tracing", "metrics"]
 ```
+
+**Feature Flag Notes:**
+- `metrics`: Exports Prometheus-compatible metrics (session count, latency histograms, error rates)
+- `pii-redaction`: Enables FR-3.7.7 auto-detection of credit cards, SSNs, API keys in transcripts
+- `mock`: Enables MockSession for deterministic testing without real process spawning
 
 ### 7.7 Crate Structure
 
@@ -963,6 +1052,37 @@ repository = "https://github.com/..."
 | Property Tests | Randomized input testing | Pattern matching, buffers |
 | Stress Tests | Large output, many sessions | 100MB, 1GB, 100 sessions |
 | Platform Tests | Platform-specific behavior | CI matrix |
+| Fuzz Tests | Security and robustness testing | Parsers, pattern matching |
+
+### 9.1a Mock Session Backend
+
+The library MUST provide a mock session backend for deterministic testing without spawning real processes.
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| 9.1a.1 | `MockSession` type implementing same interface as real `Session` | M |
+| 9.1a.2 | Load mock scenarios from transcript files (NDJSON format) | S |
+| 9.1a.3 | Deterministic timing replay for pattern matching tests | S |
+| 9.1a.4 | Configurable response delays for timeout testing | S |
+| 9.1a.5 | Built-in scenarios for common patterns (SSH login, sudo, shell prompts) | C |
+
+**Example Usage:**
+```rust
+#[test]
+async fn test_login_dialog() {
+    let mock = MockSession::from_transcript("fixtures/ssh_login.json");
+    let result = login_dialog().execute(&mut mock).await;
+    assert!(result.is_ok());
+}
+
+// Property-based testing with mock
+proptest! {
+    #[test]
+    fn pattern_never_panics(pattern in any::<String>(), input in any::<Vec<u8>>()) {
+        let _ = Matcher::new(&pattern).map(|m| m.find(&input));
+    }
+}
+```
 
 ### 9.2 CI Matrix
 
@@ -1156,6 +1276,13 @@ These binaries ensure consistent behavior across platforms and CI environments.
 | Thread-per-pipe for pre-26H2 Windows | Proven pattern from Alacritty/WezTerm; unavoidable given ConPTY sync-only I/O | 2025-12-26 |
 | Job Objects for Windows process trees | Reliable child process termination; prevents orphaned processes | 2025-12-26 |
 | signal-hook for Unix signals | Cross-platform (macOS + Linux), tokio-compatible, well-maintained | 2025-12-26 |
+| Aggressive performance targets | Competitive analysis shows opportunity for 10x improvement over competitors; added stretch goals | 2025-12-30 |
+| Zero-config mode (FR-1.6) | DX competitive advantage; auto-detection reduces boilerplate for common use cases | 2025-12-30 |
+| MockSession backend | Enables deterministic testing without real processes; critical for library users | 2025-12-30 |
+| Supply chain security (NFR-5.7) | Enterprise credibility; SLSA/Sigstore/SBOM becoming industry standard | 2025-12-30 |
+| NDJSON + asciicast v2 formats | Machine-parseable transcripts; asciinema compatibility for visual replay | 2025-12-30 |
+| PII auto-redaction feature | Reduces compliance burden for enterprise users; credit cards, SSNs, API keys | 2025-12-30 |
+| Expanded Future Considerations | Documents strategic roadmap; language bindings, verticals, enterprise features | 2025-12-30 |
 
 ### Appendix D: Resolved Questions
 

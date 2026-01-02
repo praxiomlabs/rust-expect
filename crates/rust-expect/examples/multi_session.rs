@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo run --example multi_session`
 
-use rust_expect::multi::{GroupBuilder, GroupManager, Selector, SessionGroup};
+use rust_expect::multi::{GroupBuilder, GroupManager, MultiSessionManager, PatternSelector, SessionGroup};
 use rust_expect::prelude::*;
 use std::time::Duration;
 
@@ -60,27 +60,18 @@ async fn main() -> Result<()> {
     println!("   Groups: {:?}", manager.names());
     println!("   Total sessions: {}", manager.total_sessions());
 
-    // Example 4: Session selector
-    println!("\n4. Using session selector...");
+    // Example 4: PatternSelector for per-session patterns
+    println!("\n4. Using PatternSelector...");
 
-    let mut selector = Selector::new().with_timeout(Duration::from_secs(10));
+    let selector = PatternSelector::new()
+        .session(0, "login:")
+        .session(0, "password:")
+        .session(1, "prompt>")
+        .default_pattern("$");
 
-    let _s1 = selector.register();
-    let s2 = selector.register();
-    let _s3 = selector.register();
-
-    println!("   Registered {} sessions", selector.len());
-
-    // Simulate data arriving on session 2
-    selector.push_data(s2, b"Login: ".to_vec());
-
-    // Poll for ready sessions
-    if let Some(result) = selector.poll() {
-        println!("   Session {} is ready: {:?}", result.session_id, result.ready_type);
-        if let Some(data) = result.data {
-            println!("   Data: '{}'", String::from_utf8_lossy(&data));
-        }
-    }
+    println!("   Patterns for session 0: {} patterns", selector.patterns_for(0).len());
+    println!("   Patterns for session 1: {} patterns", selector.patterns_for(1).len());
+    println!("   Patterns for unknown session: {} patterns", selector.patterns_for(99).len());
 
     // Example 5: Iterating over group sessions
     println!("\n5. Iterating over sessions...");
@@ -94,7 +85,7 @@ async fn main() -> Result<()> {
         println!("   Session {}: {}", id, label);
     });
 
-    // Example 6: Real concurrent sessions
+    // Example 6: Real concurrent sessions with MultiSessionManager
     println!("\n6. Running concurrent shell sessions...");
 
     // Spawn multiple shell sessions
@@ -124,6 +115,40 @@ async fn main() -> Result<()> {
     session2.send_line("exit").await?;
     session1.wait().await?;
     session2.wait().await?;
+
+    // Example 7: MultiSessionManager for expect_any/expect_all
+    println!("\n7. Using MultiSessionManager for concurrent expect...");
+
+    // Create new sessions for the manager demo
+    let s1 = Session::spawn("/bin/sh", &[]).await?;
+    let s2 = Session::spawn("/bin/sh", &[]).await?;
+
+    let mut multi_manager: MultiSessionManager<_> = MultiSessionManager::new();
+    let id1 = multi_manager.add(s1, "shell-1");
+    let id2 = multi_manager.add(s2, "shell-2");
+
+    println!("   Added {} sessions to manager", multi_manager.len());
+    println!("   Session IDs: {}, {}", id1, id2);
+
+    // Get labels
+    let label1 = multi_manager.label(id1).await;
+    let label2 = multi_manager.label(id2).await;
+    println!("   Labels: {:?}, {:?}", label1, label2);
+
+    // Wait for prompts on all sessions
+    let results = multi_manager.expect_all(Pattern::regex(r"[$#>]").unwrap()).await?;
+    println!("   Got {} prompt responses", results.len());
+
+    // Send to all sessions at once
+    let send_results = multi_manager.send_all(b"echo 'hello'\n").await;
+    println!("   Sent to {} sessions", send_results.len());
+
+    // Wait for any to match
+    let first_match = multi_manager.expect_any("hello").await?;
+    println!("   First session to respond: {}", first_match.session_id);
+
+    // Clean up by sending exit to all
+    let _ = multi_manager.send_all(b"exit\n").await;
 
     println!("\nMulti-session examples completed successfully!");
     Ok(())

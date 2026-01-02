@@ -70,6 +70,26 @@ pub enum ExpectError {
     #[error("session is closed")]
     SessionClosed,
 
+    /// Session not found.
+    #[error("session with id {id} not found")]
+    SessionNotFound {
+        /// The session ID that was not found.
+        id: usize,
+    },
+
+    /// No sessions available for operation.
+    #[error("no sessions available for operation")]
+    NoSessions,
+
+    /// Error in multi-session operation.
+    #[error("multi-session error in session {session_id}: {error}")]
+    MultiSessionError {
+        /// The session that encountered the error.
+        session_id: usize,
+        /// The underlying error.
+        error: Box<ExpectError>,
+    },
+
     /// Session is not in interact mode.
     #[error("session is not in interact mode")]
     NotInteracting,

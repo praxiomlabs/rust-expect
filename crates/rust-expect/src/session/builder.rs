@@ -235,8 +235,56 @@ impl QuickSession {
     #[must_use]
     pub fn python() -> SessionConfig {
         SessionBuilder::new()
-            .command("python3")
+            .command(if cfg!(windows) { "python" } else { "python3" })
             .arg("-i")
+            .build()
+    }
+
+    /// Create a session config for Windows Command Prompt.
+    ///
+    /// This configures a cmd.exe session with Windows-style line endings.
+    #[must_use]
+    pub fn cmd() -> SessionConfig {
+        SessionBuilder::new()
+            .command("cmd.exe")
+            .windows_line_endings()
+            .build()
+    }
+
+    /// Create a session config for PowerShell.
+    ///
+    /// Works with both Windows PowerShell (powershell.exe) and
+    /// PowerShell Core (pwsh.exe). Defaults to powershell.exe on Windows,
+    /// pwsh on other platforms.
+    #[must_use]
+    pub fn powershell() -> SessionConfig {
+        let command = if cfg!(windows) {
+            "powershell.exe"
+        } else {
+            "pwsh"
+        };
+        SessionBuilder::new()
+            .command(command)
+            .arg("-NoLogo")
+            .arg("-NoProfile")
+            .build()
+    }
+
+    /// Create a session config for zsh.
+    #[must_use]
+    pub fn zsh() -> SessionConfig {
+        SessionBuilder::new()
+            .command("/bin/zsh")
+            .arg("--no-rcs")
+            .build()
+    }
+
+    /// Create a session config for fish shell.
+    #[must_use]
+    pub fn fish() -> SessionConfig {
+        SessionBuilder::new()
+            .command("fish")
+            .arg("--no-config")
             .build()
     }
 
@@ -311,5 +359,47 @@ mod tests {
         let config = QuickSession::ssh_user("admin", "example.com");
         assert_eq!(config.command, "ssh");
         assert!(config.args.contains(&"admin@example.com".to_string()));
+    }
+
+    #[test]
+    fn quick_session_cmd() {
+        let config = QuickSession::cmd();
+        assert_eq!(config.command, "cmd.exe");
+        assert_eq!(config.line_ending, LineEnding::CrLf);
+    }
+
+    #[test]
+    fn quick_session_powershell() {
+        let config = QuickSession::powershell();
+        #[cfg(windows)]
+        assert_eq!(config.command, "powershell.exe");
+        #[cfg(not(windows))]
+        assert_eq!(config.command, "pwsh");
+        assert!(config.args.contains(&"-NoLogo".to_string()));
+        assert!(config.args.contains(&"-NoProfile".to_string()));
+    }
+
+    #[test]
+    fn quick_session_zsh() {
+        let config = QuickSession::zsh();
+        assert_eq!(config.command, "/bin/zsh");
+        assert!(config.args.contains(&"--no-rcs".to_string()));
+    }
+
+    #[test]
+    fn quick_session_fish() {
+        let config = QuickSession::fish();
+        assert_eq!(config.command, "fish");
+        assert!(config.args.contains(&"--no-config".to_string()));
+    }
+
+    #[test]
+    fn quick_session_python() {
+        let config = QuickSession::python();
+        #[cfg(windows)]
+        assert_eq!(config.command, "python");
+        #[cfg(not(windows))]
+        assert_eq!(config.command, "python3");
+        assert!(config.args.contains(&"-i".to_string()));
     }
 }

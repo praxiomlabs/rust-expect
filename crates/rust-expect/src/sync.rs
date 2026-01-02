@@ -14,6 +14,9 @@ use tokio::runtime::{Builder, Runtime};
 #[cfg(unix)]
 use crate::backend::AsyncPty;
 
+#[cfg(windows)]
+use crate::backend::WindowsAsyncPty;
+
 /// A synchronous session wrapper.
 ///
 /// This wraps an async session and provides blocking methods for
@@ -26,15 +29,16 @@ pub struct SyncSession {
     inner: Session<AsyncPty>,
 }
 
-/// A synchronous session wrapper (non-Unix placeholder).
-#[cfg(not(unix))]
+/// A synchronous session wrapper (Windows).
+///
+/// This wraps an async session and provides blocking methods for
+/// use in synchronous contexts using Windows ConPTY.
+#[cfg(windows)]
 pub struct SyncSession {
     /// The tokio runtime.
     runtime: Runtime,
-    /// Session configuration.
-    config: SessionConfig,
-    /// Whether the session is active.
-    active: bool,
+    /// The inner async session.
+    inner: Session<WindowsAsyncPty>,
 }
 
 #[cfg(unix)]
@@ -190,61 +194,145 @@ impl SyncSession {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 impl SyncSession {
-    /// Spawn a command (Windows placeholder).
+    /// Spawn a command and create a session.
     ///
     /// # Errors
     ///
-    /// Returns an error - Windows not yet supported.
-    pub fn spawn(_command: &str, _args: &[&str]) -> Result<Self> {
-        Err(crate::error::ExpectError::Spawn(
-            crate::error::SpawnError::PtyAllocation {
-                reason: "SyncSession not yet implemented for Windows".to_string(),
-            },
-        ))
+    /// Returns an error if spawning fails.
+    pub fn spawn(command: &str, args: &[&str]) -> Result<Self> {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(crate::error::ExpectError::Io)?;
+
+        let inner = runtime.block_on(Session::spawn(command, args))?;
+
+        Ok(Self { runtime, inner })
+    }
+
+    /// Spawn with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if spawning fails.
+    pub fn spawn_with_config(command: &str, args: &[&str], config: SessionConfig) -> Result<Self> {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(crate::error::ExpectError::Io)?;
+
+        let inner = runtime.block_on(Session::spawn_with_config(command, args, config))?;
+
+        Ok(Self { runtime, inner })
     }
 
     /// Get the session configuration.
     #[must_use]
     pub const fn config(&self) -> &SessionConfig {
-        &self.config
+        self.inner.config()
     }
 
     /// Check if the session is active.
     #[must_use]
-    pub const fn is_active(&self) -> bool {
-        self.active
+    pub fn is_active(&self) -> bool {
+        !self.inner.is_eof()
     }
 
-    /// Send bytes to the session (placeholder).
-    pub fn send(&mut self, _data: &[u8]) -> Result<()> {
-        Ok(())
+    /// Get the child process ID.
+    #[must_use]
+    pub fn pid(&self) -> u32 {
+        self.inner.pid()
     }
 
-    /// Send a string to the session (placeholder).
-    pub fn send_str(&mut self, _s: &str) -> Result<()> {
-        Ok(())
+    /// Send bytes to the session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn send(&mut self, data: &[u8]) -> Result<()> {
+        self.runtime.block_on(self.inner.send(data))
     }
 
-    /// Send a line to the session (placeholder).
-    pub fn send_line(&mut self, _line: &str) -> Result<()> {
-        Ok(())
+    /// Send a string to the session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn send_str(&mut self, s: &str) -> Result<()> {
+        self.runtime.block_on(self.inner.send_str(s))
     }
 
-    /// Send a control character (placeholder).
-    pub fn send_control(&mut self, _ctrl: ControlChar) -> Result<()> {
-        Ok(())
+    /// Send a line to the session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn send_line(&mut self, line: &str) -> Result<()> {
+        self.runtime.block_on(self.inner.send_line(line))
     }
 
-    /// Expect a pattern (placeholder).
-    pub fn expect(&mut self, _pattern: impl Into<Pattern>) -> Result<Match> {
-        Ok(Match::new(0, String::new(), String::new(), String::new()))
+    /// Send a control character.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub fn send_control(&mut self, ctrl: ControlChar) -> Result<()> {
+        self.runtime.block_on(self.inner.send_control(ctrl))
     }
 
-    /// Expect a pattern with timeout (placeholder).
-    pub fn expect_timeout(&mut self, _pattern: impl Into<Pattern>, _timeout: Duration) -> Result<Match> {
-        Ok(Match::new(0, String::new(), String::new(), String::new()))
+    /// Expect a pattern in the output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on timeout or EOF.
+    pub fn expect(&mut self, pattern: impl Into<Pattern>) -> Result<Match> {
+        self.runtime.block_on(self.inner.expect(pattern))
+    }
+
+    /// Expect a pattern with a specific timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on timeout or EOF.
+    pub fn expect_timeout(&mut self, pattern: impl Into<Pattern>, timeout: Duration) -> Result<Match> {
+        self.runtime.block_on(self.inner.expect_timeout(pattern, timeout))
+    }
+
+    /// Get the current buffer contents.
+    #[must_use]
+    pub fn buffer(&mut self) -> String {
+        self.inner.buffer()
+    }
+
+    /// Clear the buffer.
+    pub fn clear_buffer(&mut self) {
+        self.inner.clear_buffer();
+    }
+
+    /// Resize the terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resize fails.
+    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        self.runtime.block_on(self.inner.resize_pty(cols, rows))
+    }
+
+    /// Check if the child process is still running.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        self.inner.is_running()
+    }
+
+    /// Kill the child process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if killing fails.
+    pub fn kill(&self) -> Result<()> {
+        self.inner.kill()
     }
 
     /// Run an async operation synchronously.

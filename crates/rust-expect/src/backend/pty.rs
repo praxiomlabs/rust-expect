@@ -279,12 +279,40 @@ impl PtySpawner {
         }
     }
 
-    /// Spawn a command (Windows placeholder).
+    /// Spawn a command on Windows using ConPTY.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - ConPTY is not available (Windows version too old)
+    /// - PTY allocation fails
+    /// - Process spawning fails
     #[cfg(windows)]
-    pub async fn spawn(&self, _command: &str, _args: &[String]) -> Result<PtyHandle> {
-        Err(ExpectError::Spawn(SpawnError::PtyAllocation {
-            reason: "PTY not yet implemented for Windows".to_string(),
-        }))
+    pub async fn spawn(&self, command: &str, args: &[String]) -> Result<WindowsPtyHandle> {
+        use rust_pty::{PtySystem, WindowsPtySystem};
+
+        // Create configuration for rust-pty
+        let pty_config = rust_pty::PtyConfig {
+            window_size: self.config.dimensions,
+            inherit_env: match self.config.env_mode {
+                EnvMode::Clear => false,
+                _ => true,
+            },
+            ..Default::default()
+        };
+
+        // Spawn using rust-pty's Windows implementation
+        let (master, child) = WindowsPtySystem::spawn(command, args.iter().map(|s| s.as_str()), &pty_config)
+            .await
+            .map_err(|e| ExpectError::Spawn(SpawnError::PtyAllocation {
+                reason: format!("Windows ConPTY spawn failed: {e}"),
+            }))?;
+
+        Ok(WindowsPtyHandle {
+            master,
+            child,
+            dimensions: self.config.dimensions,
+        })
     }
 }
 
@@ -294,11 +322,11 @@ impl Default for PtySpawner {
     }
 }
 
-/// Handle to a spawned PTY process.
+/// Handle to a spawned PTY process (Unix).
+#[cfg(unix)]
 #[derive(Debug)]
 pub struct PtyHandle {
     /// Master PTY file descriptor.
-    #[cfg(unix)]
     master_fd: i32,
     /// Process ID.
     pid: u32,
@@ -306,6 +334,27 @@ pub struct PtyHandle {
     dimensions: (u16, u16),
 }
 
+/// Handle to a spawned PTY process (Windows).
+#[cfg(windows)]
+pub struct WindowsPtyHandle {
+    /// The PTY master from rust-pty.
+    pub(crate) master: rust_pty::WindowsPtyMaster,
+    /// The child process handle.
+    pub(crate) child: rust_pty::WindowsPtyChild,
+    /// Terminal dimensions (cols, rows).
+    dimensions: (u16, u16),
+}
+
+#[cfg(windows)]
+impl std::fmt::Debug for WindowsPtyHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WindowsPtyHandle")
+            .field("dimensions", &self.dimensions)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(unix)]
 impl PtyHandle {
     /// Get the process ID.
     #[must_use]
@@ -320,7 +369,6 @@ impl PtyHandle {
     }
 
     /// Resize the terminal.
-    #[cfg(unix)]
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         let winsize = libc::winsize {
             ws_row: rows,
@@ -342,15 +390,7 @@ impl PtyHandle {
         }
     }
 
-    /// Resize the terminal (Windows placeholder).
-    #[cfg(windows)]
-    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
-        self.dimensions = (cols, rows);
-        Ok(())
-    }
-
     /// Wait for the process to exit.
-    #[cfg(unix)]
     pub fn wait(&self) -> Result<i32> {
         let mut status: libc::c_int = 0;
         // SAFETY: self.pid is a valid process ID from fork().
@@ -369,14 +409,7 @@ impl PtyHandle {
         }
     }
 
-    /// Wait for the process to exit (Windows placeholder).
-    #[cfg(windows)]
-    pub fn wait(&self) -> Result<i32> {
-        Ok(0)
-    }
-
     /// Send a signal to the process.
-    #[cfg(unix)]
     pub fn signal(&self, signal: i32) -> Result<()> {
         // SAFETY: self.pid is a valid process ID from fork().
         // The signal is passed from the caller and must be a valid signal number.
@@ -389,22 +422,53 @@ impl PtyHandle {
         }
     }
 
-    /// Send a signal to the process (Windows placeholder).
-    #[cfg(windows)]
-    pub fn signal(&self, _signal: i32) -> Result<()> {
-        Ok(())
-    }
-
     /// Kill the process.
-    #[cfg(unix)]
     pub fn kill(&self) -> Result<()> {
         self.signal(libc::SIGKILL)
     }
+}
 
-    /// Kill the process (Windows placeholder).
-    #[cfg(windows)]
-    pub fn kill(&self) -> Result<()> {
+#[cfg(windows)]
+impl WindowsPtyHandle {
+    /// Get the process ID.
+    #[must_use]
+    pub fn pid(&self) -> u32 {
+        use rust_pty::PtyChild;
+        self.child.pid()
+    }
+
+    /// Get the terminal dimensions.
+    #[must_use]
+    pub const fn dimensions(&self) -> (u16, u16) {
+        self.dimensions
+    }
+
+    /// Resize the terminal.
+    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        use rust_pty::{PtyMaster, WindowSize};
+        let size = WindowSize::new(cols, rows);
+        self.master.resize(size).map_err(|e| ExpectError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("resize failed: {e}"),
+        )))?;
+        self.dimensions = (cols, rows);
         Ok(())
+    }
+
+    /// Check if the child process is still running.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        use rust_pty::PtyChild;
+        self.child.is_running()
+    }
+
+    /// Kill the process.
+    pub fn kill(&mut self) -> Result<()> {
+        use rust_pty::PtyChild;
+        self.child.kill().map_err(|e| ExpectError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("kill failed: {e}"),
+        )))
     }
 }
 
@@ -608,6 +672,121 @@ impl std::fmt::Debug for AsyncPty {
             .field("pid", &self.pid)
             .field("dimensions", &self.dimensions)
             .finish()
+    }
+}
+
+/// Async wrapper around Windows ConPTY for use with Tokio.
+///
+/// This wraps the rust-pty WindowsPtyMaster and provides the same interface
+/// as the Unix AsyncPty for consistent cross-platform Session usage.
+#[cfg(windows)]
+pub struct WindowsAsyncPty {
+    /// The underlying Windows PTY master.
+    master: rust_pty::WindowsPtyMaster,
+    /// The child process handle.
+    child: rust_pty::WindowsPtyChild,
+    /// Process ID.
+    pid: u32,
+    /// Terminal dimensions.
+    dimensions: (u16, u16),
+}
+
+#[cfg(windows)]
+impl WindowsAsyncPty {
+    /// Create a new Windows async PTY wrapper from a WindowsPtyHandle.
+    ///
+    /// Takes ownership of the handle.
+    pub fn from_handle(handle: WindowsPtyHandle) -> Self {
+        use rust_pty::PtyChild;
+        let pid = handle.child.pid();
+        let dimensions = handle.dimensions;
+        Self {
+            master: handle.master,
+            child: handle.child,
+            pid,
+            dimensions,
+        }
+    }
+
+    /// Get the process ID.
+    #[must_use]
+    pub const fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// Get the terminal dimensions.
+    #[must_use]
+    pub const fn dimensions(&self) -> (u16, u16) {
+        self.dimensions
+    }
+
+    /// Resize the terminal.
+    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        use rust_pty::{PtyMaster, WindowSize};
+        let size = WindowSize::new(cols, rows);
+        self.master.resize(size).map_err(|e| ExpectError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("resize failed: {e}"),
+        )))?;
+        self.dimensions = (cols, rows);
+        Ok(())
+    }
+
+    /// Check if the child process is still running.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        use rust_pty::PtyChild;
+        self.child.is_running()
+    }
+
+    /// Kill the child process.
+    pub fn kill(&mut self) -> Result<()> {
+        use rust_pty::PtyChild;
+        self.child.kill().map_err(|e| ExpectError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("kill failed: {e}"),
+        )))
+    }
+}
+
+#[cfg(windows)]
+impl AsyncRead for WindowsAsyncPty {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        // Delegate to the underlying WindowsPtyMaster which implements AsyncRead
+        Pin::new(&mut self.master).poll_read(cx, buf)
+    }
+}
+
+#[cfg(windows)]
+impl AsyncWrite for WindowsAsyncPty {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.master).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.master).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.master).poll_shutdown(cx)
+    }
+}
+
+#[cfg(windows)]
+impl std::fmt::Debug for WindowsAsyncPty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WindowsAsyncPty")
+            .field("pid", &self.pid)
+            .field("dimensions", &self.dimensions)
+            .finish_non_exhaustive()
     }
 }
 

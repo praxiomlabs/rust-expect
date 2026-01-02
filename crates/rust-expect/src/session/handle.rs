@@ -15,6 +15,9 @@ use tokio::sync::Mutex;
 #[cfg(unix)]
 use crate::backend::{AsyncPty, PtyConfig, PtySpawner};
 
+#[cfg(windows)]
+use crate::backend::{PtyConfig, PtySpawner, WindowsAsyncPty};
+
 /// A session handle for interacting with a spawned process.
 ///
 /// The session provides methods to send input, expect patterns in output,
@@ -406,6 +409,115 @@ impl Session<AsyncPty> {
     /// Returns an error if killing the process fails.
     pub fn kill(&self) -> Result<()> {
         if let Ok(transport) = self.transport.try_lock() {
+            transport.kill()
+        } else {
+            Err(ExpectError::Io(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "transport is locked",
+            )))
+        }
+    }
+}
+
+// Windows-specific spawn implementation
+#[cfg(windows)]
+impl Session<WindowsAsyncPty> {
+    /// Spawn a new process with the given command.
+    ///
+    /// This creates a new PTY using Windows ConPTY, spawns a child process,
+    /// and returns a Session connected to the child's terminal.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::Session;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("cmd.exe", &[]).await?;
+    ///     session.expect(">").await?;
+    ///     session.send_line("echo hello").await?;
+    ///     session.expect("hello").await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - ConPTY is not available (Windows version too old)
+    /// - PTY allocation fails
+    /// - The command cannot be executed
+    pub async fn spawn(command: &str, args: &[&str]) -> Result<Self> {
+        Self::spawn_with_config(command, args, SessionConfig::default()).await
+    }
+
+    /// Spawn a new process with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if spawning fails.
+    pub async fn spawn_with_config(
+        command: &str,
+        args: &[&str],
+        config: SessionConfig,
+    ) -> Result<Self> {
+        let pty_config = PtyConfig::from(&config);
+        let spawner = PtySpawner::with_config(pty_config);
+
+        // Convert &[&str] to Vec<String> for the spawner
+        let args_owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+
+        // Spawn the process
+        let handle = spawner.spawn(command, &args_owned).await?;
+
+        // Wrap in WindowsAsyncPty for async I/O
+        let async_pty = WindowsAsyncPty::from_handle(handle);
+
+        // Create the session
+        let mut session = Session::new(async_pty, config);
+        session.state = SessionState::Running;
+
+        Ok(session)
+    }
+
+    /// Get the child process ID.
+    #[must_use]
+    pub fn pid(&self) -> u32 {
+        if let Ok(transport) = self.transport.try_lock() {
+            transport.pid()
+        } else {
+            0
+        }
+    }
+
+    /// Resize the terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resize operation fails.
+    pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
+        let mut transport = self.transport.lock().await;
+        transport.resize(cols, rows)
+    }
+
+    /// Check if the child process is still running.
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        if let Ok(transport) = self.transport.try_lock() {
+            transport.is_running()
+        } else {
+            true // Assume running if we can't check
+        }
+    }
+
+    /// Kill the child process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if killing the process fails.
+    pub fn kill(&self) -> Result<()> {
+        if let Ok(mut transport) = self.transport.try_lock() {
             transport.kill()
         } else {
             Err(ExpectError::Io(std::io::Error::new(

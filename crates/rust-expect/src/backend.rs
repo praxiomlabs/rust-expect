@@ -5,11 +5,15 @@
 
 mod pty;
 
-pub use pty::{EnvMode, PtyConfig, PtyHandle, PtySpawner, PtyTransport};
+pub use pty::{EnvMode, PtyConfig, PtySpawner, PtyTransport};
 
-// Export AsyncPty for Unix platforms
+// Export AsyncPty and PtyHandle for Unix platforms
 #[cfg(unix)]
-pub use pty::AsyncPty;
+pub use pty::{AsyncPty, PtyHandle};
+
+// Export WindowsAsyncPty and WindowsPtyHandle for Windows platforms
+#[cfg(windows)]
+pub use pty::{WindowsAsyncPty, WindowsPtyHandle};
 
 // SSH backend is conditionally compiled
 #[cfg(feature = "ssh")]

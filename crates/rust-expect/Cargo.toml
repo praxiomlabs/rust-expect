@@ -84,6 +84,9 @@ screen = ["dep:vte", "dep:bitflags"]
 # Enable PII detection and redaction
 pii-redaction = []
 
+# Enable legacy character encodings (Latin-1, Windows-1252)
+legacy-encoding = []
+
 # Enable Prometheus/OpenTelemetry metrics
 metrics = []
 

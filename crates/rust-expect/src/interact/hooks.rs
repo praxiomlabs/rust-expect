@@ -27,7 +27,12 @@ pub enum InteractionEvent {
     /// Escape sequence detected.
     EscapeSequence(Vec<u8>),
     /// Window resized.
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        /// New column count.
+        cols: u16,
+        /// New row count.
+        rows: u16,
+    },
 }
 
 /// Hook manager for interaction sessions.

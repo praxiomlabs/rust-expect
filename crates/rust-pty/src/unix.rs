@@ -86,7 +86,6 @@ pub type NativePtySystem = UnixPtySystem;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::traits::PtyMaster;
 
     #[tokio::test]
     async fn spawn_shell() {

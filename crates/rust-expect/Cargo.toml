@@ -1,0 +1,99 @@
+# rust-expect: Next-generation terminal automation library
+# https://docs.rs/rust-expect
+
+[package]
+name = "rust-expect"
+description = "Next-generation Expect-style terminal automation library for Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Core dependencies
+rust-pty.workspace = true
+rust-expect-macros.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Pattern matching
+regex.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Terminal manipulation (for interactive mode)
+crossterm.workspace = true
+
+# Serialization (for transcripts and config)
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+# Random number generation (for human typing simulation)
+rand.workspace = true
+
+# libc for low-level Unix operations
+libc.workspace = true
+
+# ANSI parsing (optional, for screen buffer)
+vte = { workspace = true, optional = true }
+
+# Bitflags for terminal attributes (screen buffer)
+bitflags = { workspace = true, optional = true }
+
+# SSH support (optional)
+russh = { workspace = true, optional = true }
+russh-keys = { workspace = true, optional = true }
+
+[dev-dependencies]
+proptest.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "pattern_matching"
+harness = false
+
+[[bench]]
+name = "screen_buffer"
+harness = false
+
+[features]
+default = []
+
+# Enable SSH backend for remote sessions
+ssh = ["dep:russh", "dep:russh-keys"]
+
+# Enable mock backend for testing
+mock = []
+
+# Enable screen buffer with ANSI parsing
+screen = ["dep:vte", "dep:bitflags"]
+
+# Enable PII detection and redaction
+pii-redaction = []
+
+# Enable Prometheus/OpenTelemetry metrics
+metrics = []
+
+# Enable test utilities
+test-utils = []
+
+# DANGEROUS: Enable HostKeyVerification::AcceptAll which disables SSH host key verification.
+# This is insecure and should ONLY be used in controlled testing environments.
+# Enabling this in production allows MITM attacks. You have been warned.
+insecure-skip-verify = []
+
+# Enable all optional features (excludes insecure-skip-verify for safety)
+full = ["ssh", "mock", "screen", "pii-redaction", "metrics"]

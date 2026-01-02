@@ -1,0 +1,28 @@
+# Default rust-expect configuration
+
+[session]
+# Default timeout for expect operations (in milliseconds)
+timeout_ms = 30000
+
+# Buffer size for reading
+buffer_size = 4096
+
+# Echo input back
+echo = false
+
+[pty]
+# Default window size
+rows = 24
+cols = 80
+
+# Environment variables
+[pty.env]
+TERM = "xterm-256color"
+LC_ALL = "C.UTF-8"
+
+[logging]
+# Log level: trace, debug, info, warn, error
+level = "info"
+
+# Redact PII in logs
+redact_pii = true

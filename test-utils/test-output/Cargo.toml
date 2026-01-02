@@ -1,0 +1,18 @@
+# test-output: Large/streaming output generation for testing
+
+[package]
+name = "test-output"
+version = "0.0.0"  # Internal only, not published
+edition.workspace = true
+publish = false
+description = "Large/streaming output generator for rust-expect testing"
+
+[[bin]]
+name = "test-output"
+path = "src/main.rs"
+
+[dependencies]
+# Minimal dependencies for test binary
+
+[lints]
+workspace = true

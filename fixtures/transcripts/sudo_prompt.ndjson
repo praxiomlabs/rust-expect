@@ -1,0 +1,12 @@
+{"version":2,"width":80,"height":24,"timestamp":1704067200,"title":"Sudo Prompt Example"}
+[0.0,"o","$ "]
+[0.5,"i","sudo whoami\r"]
+[0.6,"o","sudo whoami\r\n"]
+[0.7,"o","[sudo] password for user: "]
+[1.5,"i","userpassword\r"]
+[1.6,"o","\r\n"]
+[1.8,"o","root\r\n"]
+[2.0,"o","$ "]
+[2.5,"i","sudo -k\r"]
+[2.6,"o","sudo -k\r\n"]
+[2.7,"o","$ "]

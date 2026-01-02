@@ -1,0 +1,15 @@
+# test-utils directory organization
+#
+# This directory contains test utility binaries used by the rust-expect test suite.
+# Each subdirectory is a standalone binary crate that is a member of the root workspace.
+#
+# Binaries:
+# - test-echo: Simple echo for basic I/O tests
+# - test-prompt: Configurable prompt simulation
+# - test-output: Large/streaming output generation
+# - test-signals: Signal handling verification
+# - test-timing: Precise timing for timeout tests
+# - test-hang: Timeout/hang simulation
+#
+# Note: This file is a placeholder. The actual crates are workspace members
+# defined in the root Cargo.toml.

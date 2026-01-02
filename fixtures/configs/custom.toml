@@ -1,0 +1,24 @@
+# Custom rust-expect configuration for testing
+
+[session]
+timeout_ms = 60000
+buffer_size = 8192
+echo = true
+
+[pty]
+rows = 40
+cols = 120
+
+[pty.env]
+TERM = "vt100"
+LANG = "en_US.UTF-8"
+CUSTOM_VAR = "test_value"
+
+[logging]
+level = "debug"
+redact_pii = false
+
+[ssh]
+# SSH-specific settings
+connect_timeout_ms = 10000
+keepalive_interval_s = 60

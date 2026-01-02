@@ -1,0 +1,18 @@
+# test-hang: Timeout/hang simulation for testing
+
+[package]
+name = "test-hang"
+version = "0.0.0"  # Internal only, not published
+edition.workspace = true
+publish = false
+description = "Hang simulation program for rust-expect timeout testing"
+
+[[bin]]
+name = "test-hang"
+path = "src/main.rs"
+
+[dependencies]
+# Minimal dependencies for test binary
+
+[lints]
+workspace = true

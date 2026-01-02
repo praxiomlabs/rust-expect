@@ -1,0 +1,18 @@
+# test-echo: Simple echo binary for basic I/O tests
+
+[package]
+name = "test-echo"
+version = "0.0.0"  # Internal only, not published
+edition.workspace = true
+publish = false
+description = "Simple echo program for rust-expect testing"
+
+[[bin]]
+name = "test-echo"
+path = "src/main.rs"
+
+[dependencies]
+# Minimal dependencies for test binary
+
+[lints]
+workspace = true

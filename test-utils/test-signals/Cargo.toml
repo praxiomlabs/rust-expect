@@ -1,0 +1,20 @@
+# test-signals: Signal handling verification for testing
+
+[package]
+name = "test-signals"
+version = "0.0.0"  # Internal only, not published
+edition.workspace = true
+publish = false
+description = "Signal handling verification for rust-expect testing"
+
+[[bin]]
+name = "test-signals"
+path = "src/main.rs"
+
+[dependencies]
+# Unix signal handling
+[target.'cfg(unix)'.dependencies]
+signal-hook.workspace = true
+
+[lints]
+workspace = true

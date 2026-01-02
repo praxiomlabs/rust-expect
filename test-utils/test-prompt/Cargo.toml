@@ -1,0 +1,18 @@
+# test-prompt: Configurable prompt simulation for testing
+
+[package]
+name = "test-prompt"
+version = "0.0.0"  # Internal only, not published
+edition.workspace = true
+publish = false
+description = "Configurable prompt simulation for rust-expect testing"
+
+[[bin]]
+name = "test-prompt"
+path = "src/main.rs"
+
+[dependencies]
+# Minimal dependencies for test binary
+
+[lints]
+workspace = true

@@ -1,0 +1,33 @@
+# Cargo configuration for rust-expect workspace
+# https://doc.rust-lang.org/cargo/reference/config.html
+
+[build]
+# Use all available CPU cores for parallel compilation
+jobs = -1
+
+[term]
+# Enable colored output
+color = "auto"
+# Show progress bar
+progress.when = "auto"
+
+[net]
+# Retry failed network operations
+retry = 3
+
+[resolver]
+# Enable MSRV-aware resolver (Edition 2024 default)
+# https://doc.rust-lang.org/edition-guide/rust-2024/cargo-resolver.html
+incompatible-rust-versions = "fallback"
+
+# Target-specific configuration for cross-compilation
+[target.x86_64-unknown-linux-gnu]
+# Use mold linker if available for faster linking
+# linker = "clang"
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[target.x86_64-apple-darwin]
+# macOS specific settings
+
+[target.x86_64-pc-windows-msvc]
+# Windows MSVC specific settings

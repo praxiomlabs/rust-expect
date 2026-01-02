@@ -1,0 +1,84 @@
+# cargo-deny configuration for rust-expect
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+# Target platforms to check
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+all-features = true
+
+[advisories]
+# The database of advisories to check against
+db-path = "~/.cargo/advisory-db"
+# Update the advisory database on check
+version = 2
+# How to handle yanked crates
+yanked = "warn"
+# Ignore advisories (with reason)
+ignore = []
+
+[licenses]
+version = 2
+# Allow these licenses
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "Unlicense",
+]
+# Confidence threshold for license detection
+confidence-threshold = 0.8
+
+# Clarify licenses that cargo-deny may not detect correctly
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[[licenses.clarify]]
+name = "webpki"
+expression = "ISC"
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
+
+[bans]
+# Lint level for multiple versions of the same crate
+multiple-versions = "warn"
+# Lint level for crates that have been marked as deprecated
+wildcards = "allow"
+# Allow specific duplicate dependencies
+allow = []
+# Deny specific crates
+deny = [
+    # Use thiserror instead
+    { name = "anyhow", wrappers = [] },
+]
+# Skip duplicate dependency checks for dev-dependencies
+skip = []
+skip-tree = []
+
+[sources]
+# Lint level for crates not from crates.io
+unknown-registry = "warn"
+# Lint level for crates from git
+unknown-git = "warn"
+# Allow crates from these registries
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# Allow crates from these git sources
+allow-git = []
+
+[sources.allow-org]
+# Allow crates from these GitHub organizations
+github = []

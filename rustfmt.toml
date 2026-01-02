@@ -1,0 +1,23 @@
+# rustfmt configuration for rust-expect
+# https://rust-lang.github.io/rustfmt/
+
+# Stable options
+edition = "2024"
+max_width = 100
+tab_spaces = 4
+newline_style = "Unix"
+use_small_heuristics = "Default"
+
+# Use field init shorthand when possible
+use_field_init_shorthand = true
+
+# Format strings in macros
+format_strings = false
+
+# Reorder imports
+reorder_imports = true
+reorder_modules = true
+
+# Group imports
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"

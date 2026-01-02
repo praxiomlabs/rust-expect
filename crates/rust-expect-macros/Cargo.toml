@@ -1,0 +1,33 @@
+# rust-expect-macros: Procedural macros for rust-expect
+# https://docs.rs/rust-expect-macros
+
+[package]
+name = "rust-expect-macros"
+description = "Procedural macros for the rust-expect terminal automation library"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["expect", "macro", "proc-macro", "terminal", "automation"]
+categories = ["development-tools::procedural-macro-helpers"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# Proc-macro utilities
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true
+
+# Pattern validation at compile time
+regex.workspace = true
+
+[dev-dependencies]
+# Compile-fail testing
+trybuild = "1.0"

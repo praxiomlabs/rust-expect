@@ -1,0 +1,46 @@
+# rust-pty: Cross-platform async PTY library
+# https://docs.rs/rust-pty
+
+[package]
+name = "rust-pty"
+description = "Cross-platform async PTY (pseudo-terminal) library for Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["pty", "terminal", "tty", "process", "async"]
+categories = ["os", "asynchronous", "command-line-interface"]
+readme = "README.md"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Async runtime
+tokio.workspace = true
+
+# Error handling
+thiserror.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Unix-specific dependencies
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+signal-hook.workspace = true
+signal-hook-tokio.workspace = true
+libc.workspace = true
+
+# Windows-specific dependencies
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[features]
+default = []
+# Enable additional buffer statistics and debugging
+debug-buffer = []

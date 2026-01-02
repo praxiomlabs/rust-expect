@@ -1,0 +1,149 @@
+# rust-expect Workspace Manifest
+# https://doc.rust-lang.org/cargo/reference/workspaces.html
+
+[workspace]
+members = [
+    "crates/rust-pty",
+    "crates/rust-expect",
+    "crates/rust-expect-macros",
+    "test-utils/test-echo",
+    "test-utils/test-prompt",
+    "test-utils/test-output",
+    "test-utils/test-signals",
+    "test-utils/test-timing",
+    "test-utils/test-hang",
+]
+resolver = "3"  # Edition 2024 default, enables MSRV-aware dependency resolution
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/jkindrix/rust-expect"
+keywords = ["expect", "pty", "terminal", "automation", "async"]
+categories = ["command-line-utilities", "development-tools::testing", "asynchronous"]
+
+[workspace.dependencies]
+# Async runtime - Tokio 1.43 LTS (supported until March 2026)
+tokio = { version = "~1.43", features = ["full"] }
+
+# PTY operations - Unix syscalls via rustix
+rustix = { version = "1.1", features = ["termios", "process", "pty", "fs"] }
+
+# Pattern matching
+regex = "1.12"
+
+# libc for low-level Unix operations
+libc = "0.2"
+
+# Logging and tracing
+tracing = "0.1"
+
+# Error handling
+thiserror = "2.0"
+
+# Terminal manipulation
+crossterm = { version = "0.29", features = ["event-stream"] }
+
+# ANSI escape sequence parsing
+vte = "0.15"
+
+# Bitflags for terminal attributes
+bitflags = "2.9"
+
+# SSH support (optional)
+russh = "0.54"
+russh-keys = "0.49"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Proc-macro support
+syn = { version = "2.0", features = ["full", "parsing", "printing"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+
+# Testing
+proptest = "1.9"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Random number generation (for human typing simulation)
+rand = "0.9"
+
+# Workspace crates (internal)
+rust-pty = { path = "crates/rust-pty" }
+rust-expect = { path = "crates/rust-expect" }
+rust-expect-macros = { path = "crates/rust-expect-macros" }
+
+# Windows-specific dependencies
+[workspace.dependencies.windows-sys]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+    "Win32_System_Pipes",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_IO",
+]
+
+# Unix signal handling
+[workspace.dependencies.signal-hook]
+version = "0.3"
+
+[workspace.dependencies.signal-hook-tokio]
+version = "0.3"
+features = ["futures-v0_3"]
+
+# Workspace-wide lint configuration
+[workspace.lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Set group priorities lower than individual lints to allow overrides
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow certain pedantic lints that are too noisy
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
+# Allow casting lints where we've verified correctness
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+# Allow style preferences that don't affect correctness
+option_if_let_else = "allow"
+redundant_pub_crate = "allow"
+match_same_arms = "allow"
+# Allow missing fields in manual Debug impls (intentional for large structs)
+missing_fields_in_debug = "allow"
+
+# Release profile optimizations
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+# Development profile with better debugging
+[profile.dev]
+debug = true
+opt-level = 0
+
+# Test profile - balance speed and debuggability
+[profile.test]
+debug = true
+opt-level = 1
+
+# Benchmark profile - release-like but with debug info
+[profile.bench]
+debug = true

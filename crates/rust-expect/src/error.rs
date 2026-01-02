@@ -8,6 +8,111 @@ use std::process::ExitStatus;
 use std::time::Duration;
 use thiserror::Error;
 
+/// Maximum length of buffer content to display in error messages.
+const MAX_BUFFER_DISPLAY: usize = 500;
+
+/// Context lines to show before/after truncation point.
+const CONTEXT_LINES: usize = 3;
+
+/// Format buffer content for display, truncating if necessary.
+fn format_buffer_snippet(buffer: &str) -> String {
+    if buffer.is_empty() {
+        return "(empty buffer)".to_string();
+    }
+
+    let buffer_len = buffer.len();
+
+    if buffer_len <= MAX_BUFFER_DISPLAY {
+        // Small buffer, show everything with visual markers
+        return format!(
+            "┌─ buffer ({} bytes) ──────────────────────\n│ {}\n└────────────────────────────────────────",
+            buffer_len,
+            buffer.lines().collect::<Vec<_>>().join("\n│ ")
+        );
+    }
+
+    // Large buffer - show tail with context
+    let lines: Vec<&str> = buffer.lines().collect();
+    let total_lines = lines.len();
+
+    if total_lines <= CONTEXT_LINES * 2 {
+        // Few lines, show all
+        return format!(
+            "┌─ buffer ({} bytes, {} lines) ─────────────\n│ {}\n└────────────────────────────────────────",
+            buffer_len,
+            total_lines,
+            lines.join("\n│ ")
+        );
+    }
+
+    // Show last N lines with truncation indicator
+    let tail_lines = &lines[lines.len().saturating_sub(CONTEXT_LINES * 2)..];
+    let hidden = total_lines - tail_lines.len();
+
+    format!(
+        "┌─ buffer ({} bytes, {} lines) ─────────────\n│ ... ({} lines hidden)\n│ {}\n└────────────────────────────────────────",
+        buffer_len,
+        total_lines,
+        hidden,
+        tail_lines.join("\n│ ")
+    )
+}
+
+/// Format a timeout error message with enhanced context.
+fn format_timeout_error(duration: Duration, pattern: &str, buffer: &str) -> String {
+    let buffer_snippet = format_buffer_snippet(buffer);
+
+    format!(
+        "timeout after {duration:?} waiting for pattern\n\
+         \n\
+         Pattern: '{pattern}'\n\
+         \n\
+         {buffer_snippet}\n\
+         \n\
+         Tip: The pattern was not found in the output. Check that:\n\
+         - The expected text actually appears in the output\n\
+         - The pattern is correct (regex special chars may need escaping)\n\
+         - The timeout duration is sufficient"
+    )
+}
+
+/// Format a pattern not found error message.
+fn format_pattern_not_found_error(pattern: &str, buffer: &str) -> String {
+    let buffer_snippet = format_buffer_snippet(buffer);
+
+    format!(
+        "pattern not found before EOF\n\
+         \n\
+         Pattern: '{pattern}'\n\
+         \n\
+         {buffer_snippet}\n\
+         \n\
+         Tip: The process closed before the pattern was found."
+    )
+}
+
+/// Format a process exited error message.
+fn format_process_exited_error(exit_status: &ExitStatus, buffer: &str) -> String {
+    let buffer_snippet = format_buffer_snippet(buffer);
+
+    format!(
+        "process exited unexpectedly with {exit_status:?}\n\
+         \n\
+         {buffer_snippet}"
+    )
+}
+
+/// Format an EOF error message.
+fn format_eof_error(buffer: &str) -> String {
+    let buffer_snippet = format_buffer_snippet(buffer);
+
+    format!(
+        "end of file reached unexpectedly\n\
+         \n\
+         {buffer_snippet}"
+    )
+}
+
 /// The main error type for rust-expect operations.
 #[derive(Debug, Error)]
 pub enum ExpectError {
@@ -20,7 +125,7 @@ pub enum ExpectError {
     Io(#[from] std::io::Error),
 
     /// Timeout waiting for pattern match.
-    #[error("timeout after {duration:?} waiting for pattern '{pattern}'\nbuffer contents:\n{buffer}")]
+    #[error("{}", format_timeout_error(*duration, pattern, buffer))]
     Timeout {
         /// The timeout duration that elapsed.
         duration: Duration,
@@ -31,7 +136,7 @@ pub enum ExpectError {
     },
 
     /// Pattern was not found before EOF.
-    #[error("pattern '{pattern}' not found before EOF\nbuffer contents:\n{buffer}")]
+    #[error("{}", format_pattern_not_found_error(pattern, buffer))]
     PatternNotFound {
         /// The pattern that was being searched for.
         pattern: String,
@@ -40,7 +145,7 @@ pub enum ExpectError {
     },
 
     /// Process exited unexpectedly.
-    #[error("process exited unexpectedly with {exit_status:?}\nbuffer contents:\n{buffer}")]
+    #[error("{}", format_process_exited_error(exit_status, buffer))]
     ProcessExited {
         /// The exit status of the process.
         exit_status: ExitStatus,
@@ -49,7 +154,7 @@ pub enum ExpectError {
     },
 
     /// End of file reached.
-    #[error("end of file reached\nbuffer contents:\n{buffer}")]
+    #[error("{}", format_eof_error(buffer))]
     Eof {
         /// Buffer contents when EOF was reached.
         buffer: String,
@@ -432,6 +537,44 @@ mod tests {
         assert!(msg.contains("timeout"));
         assert!(msg.contains("password:"));
         assert!(msg.contains("admin"));
+        // Check for enhanced formatting
+        assert!(msg.contains("Pattern:"));
+        assert!(msg.contains("buffer"));
+    }
+
+    #[test]
+    fn error_display_with_tips() {
+        let err = ExpectError::timeout(
+            Duration::from_secs(5),
+            "password:",
+            "output here\n",
+        );
+        let msg = err.to_string();
+        // Check that tips are included
+        assert!(msg.contains("Tip:"));
+    }
+
+    #[test]
+    fn error_display_empty_buffer() {
+        let err = ExpectError::eof("");
+        let msg = err.to_string();
+        assert!(msg.contains("empty buffer"));
+    }
+
+    #[test]
+    fn error_display_large_buffer_truncation() {
+        // Create a large buffer (> 500 bytes, > 6 lines)
+        let large_buffer: String = (0..50)
+            .map(|i| format!("Line {i}: Some content here\n"))
+            .collect();
+
+        let err = ExpectError::timeout(Duration::from_secs(1), "pattern", &large_buffer);
+        let msg = err.to_string();
+
+        // Should contain truncation indicator
+        assert!(msg.contains("lines hidden"));
+        // Should show line count
+        assert!(msg.contains("lines)"));
     }
 
     #[test]
@@ -456,5 +599,36 @@ mod tests {
     fn spawn_error_display() {
         let err = SpawnError::command_not_found("/usr/bin/nonexistent");
         assert!(err.to_string().contains("nonexistent"));
+    }
+
+    #[test]
+    fn format_buffer_snippet_empty() {
+        let result = format_buffer_snippet("");
+        assert_eq!(result, "(empty buffer)");
+    }
+
+    #[test]
+    fn format_buffer_snippet_small() {
+        let result = format_buffer_snippet("hello\nworld");
+        assert!(result.contains("hello"));
+        assert!(result.contains("world"));
+        assert!(result.contains("bytes"));
+    }
+
+    #[test]
+    fn pattern_not_found_error() {
+        let err = ExpectError::pattern_not_found("prompt>", "some output");
+        let msg = err.to_string();
+        assert!(msg.contains("prompt>"));
+        assert!(msg.contains("some output"));
+        assert!(msg.contains("EOF"));
+    }
+
+    #[test]
+    fn eof_error() {
+        let err = ExpectError::eof("final output");
+        let msg = err.to_string();
+        assert!(msg.contains("end of file"));
+        assert!(msg.contains("final output"));
     }
 }

@@ -2265,7 +2265,9 @@ pub enum KnownHostsPolicy {
     System,
     /// Check against custom known_hosts file
     File(PathBuf),
-    /// Accept any host key (INSECURE - for testing only)
+    /// Accept any host key (INSECURE - requires `insecure-skip-verify` feature)
+    /// WARNING: Only use in controlled testing environments!
+    #[cfg(feature = "insecure-skip-verify")]
     AcceptAll,
     /// Custom verification callback
     Custom(Arc<dyn Fn(&key::PublicKey, &str) -> bool + Send + Sync>),

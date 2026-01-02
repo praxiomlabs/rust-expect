@@ -2,6 +2,33 @@
 //!
 //! This module defines the pattern types that can be used with expect operations,
 //! including literal strings, regular expressions, globs, EOF, and timeout.
+//!
+//! # Examples
+//!
+//! ```
+//! use rust_expect::Pattern;
+//! use std::time::Duration;
+//!
+//! // Literal pattern - matches exact text
+//! let prompt = Pattern::literal("$ ");
+//! assert!(prompt.matches("user@host:~ $ ").is_some());
+//!
+//! // Regex pattern - matches regular expressions
+//! let version = Pattern::regex(r"\d+\.\d+\.\d+").unwrap();
+//! assert!(version.matches("Version: 1.2.3").is_some());
+//!
+//! // Glob pattern - matches shell-style wildcards
+//! let log = Pattern::glob("Error:*");
+//! assert!(log.matches("Error: connection failed").is_some());
+//!
+//! // Timeout pattern - used with expect_any for timeouts
+//! let timeout = Pattern::timeout(Duration::from_secs(5));
+//! assert!(timeout.is_timeout());
+//!
+//! // EOF pattern - matches process termination
+//! let eof = Pattern::eof();
+//! assert!(eof.is_eof());
+//! ```
 
 use regex::Regex;
 use std::fmt;

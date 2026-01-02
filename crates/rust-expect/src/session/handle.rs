@@ -6,6 +6,7 @@
 use crate::config::SessionConfig;
 use crate::error::{ExpectError, Result};
 use crate::expect::{ExpectState, MatchResult, Matcher, Pattern, PatternManager, PatternSet};
+use crate::interact::InteractBuilder;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
 use std::sync::Arc;
 use std::time::Duration;
@@ -285,8 +286,43 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Get the underlying transport.
     ///
     /// Use with caution as direct access bypasses session management.
-    #[must_use] pub const fn transport(&self) -> &Arc<Mutex<T>> {
+    #[must_use]
+    pub const fn transport(&self) -> &Arc<Mutex<T>> {
         &self.transport
+    }
+
+    /// Start an interactive session with pattern hooks.
+    ///
+    /// This returns a builder that allows you to configure pattern-based
+    /// callbacks that fire when patterns match in the output or input.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::{Session, InteractAction};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("/bin/bash", &[]).await?;
+    ///
+    ///     session.interact()
+    ///         .on_output("password:", |ctx| {
+    ///             ctx.send("my_password\n")
+    ///         })
+    ///         .on_output("logout", |_| {
+    ///             InteractAction::Stop
+    ///         })
+    ///         .start()
+    ///         .await?;
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn interact(&self) -> InteractBuilder<'_, T>
+    where
+        T: 'static,
+    {
+        InteractBuilder::new(&self.transport)
     }
 }
 

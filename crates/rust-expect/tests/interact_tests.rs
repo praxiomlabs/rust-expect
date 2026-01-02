@@ -1,6 +1,6 @@
 //! Integration tests for interactive mode.
 
-use rust_expect::{InteractionMode, TerminalMode, TerminalState};
+use rust_expect::{InteractAction, InteractEndReason, InteractResult, InteractionMode, TerminalMode, TerminalState};
 use std::time::Duration;
 
 #[test]
@@ -93,4 +93,91 @@ fn terminal_state_clone() {
     let state1 = TerminalState::default();
     let state2 = state1.clone();
     assert_eq!(format!("{:?}", state1), format!("{:?}", state2));
+}
+
+// Tests for new pattern hook types
+
+#[test]
+fn interact_action_continue() {
+    let action = InteractAction::Continue;
+    assert!(!format!("{:?}", action).is_empty());
+}
+
+#[test]
+fn interact_action_send_string() {
+    let action = InteractAction::send("hello");
+    match action {
+        InteractAction::Send(data) => assert_eq!(data, b"hello"),
+        _ => panic!("Expected Send action"),
+    }
+}
+
+#[test]
+fn interact_action_send_bytes() {
+    let action = InteractAction::send_bytes(vec![1, 2, 3]);
+    match action {
+        InteractAction::Send(data) => assert_eq!(data, vec![1, 2, 3]),
+        _ => panic!("Expected Send action"),
+    }
+}
+
+#[test]
+fn interact_action_stop() {
+    let action = InteractAction::Stop;
+    assert!(!format!("{:?}", action).is_empty());
+}
+
+#[test]
+fn interact_action_error() {
+    let action = InteractAction::Error("test error".to_string());
+    match action {
+        InteractAction::Error(msg) => assert_eq!(msg, "test error"),
+        _ => panic!("Expected Error action"),
+    }
+}
+
+#[test]
+fn interact_end_reason_pattern_stop() {
+    let reason = InteractEndReason::PatternStop { pattern_index: 5 };
+    match reason {
+        InteractEndReason::PatternStop { pattern_index } => assert_eq!(pattern_index, 5),
+        _ => panic!("Expected PatternStop"),
+    }
+}
+
+#[test]
+fn interact_end_reason_escape() {
+    let reason = InteractEndReason::Escape;
+    assert!(!format!("{:?}", reason).is_empty());
+}
+
+#[test]
+fn interact_end_reason_timeout() {
+    let reason = InteractEndReason::Timeout;
+    assert!(!format!("{:?}", reason).is_empty());
+}
+
+#[test]
+fn interact_end_reason_eof() {
+    let reason = InteractEndReason::Eof;
+    assert!(!format!("{:?}", reason).is_empty());
+}
+
+#[test]
+fn interact_end_reason_error() {
+    let reason = InteractEndReason::Error("connection lost".to_string());
+    match reason {
+        InteractEndReason::Error(msg) => assert_eq!(msg, "connection lost"),
+        _ => panic!("Expected Error"),
+    }
+}
+
+#[test]
+fn interact_result_struct() {
+    let result = InteractResult {
+        reason: InteractEndReason::Timeout,
+        buffer: "test output".to_string(),
+    };
+    assert_eq!(result.buffer, "test output");
+    assert!(!format!("{:?}", result.reason).is_empty());
 }

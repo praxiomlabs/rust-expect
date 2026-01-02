@@ -94,9 +94,15 @@ pub use util::{Backpressure, Deadline, TimeoutExt};
 pub use auto_config::{detect_shell, LocaleInfo, ShellType};
 pub use dialog::{Dialog, DialogBuilder, DialogStep};
 pub use health::{HealthChecker, HealthStatus};
-pub use interact::{InteractionMode, TerminalMode, TerminalState};
+pub use interact::{
+    InteractAction, InteractBuilder, InteractContext, InteractEndReason, InteractResult,
+    InteractionMode, TerminalMode, TerminalState,
+};
 pub use metrics::{Counter, Gauge, Histogram, MetricsRegistry, SessionMetrics};
-pub use multi::{GroupManager, Selector, SessionGroup};
+pub use multi::{
+    GroupBuilder, GroupManager, GroupResult, MultiSessionManager, PatternSelector, ReadyType,
+    SelectResult, SendResult, SessionGroup,
+};
 pub use transcript::{Player, Recorder, Transcript, TranscriptEvent};
 
 // Conditional re-exports

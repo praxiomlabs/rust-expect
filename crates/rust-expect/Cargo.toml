@@ -44,6 +44,10 @@ toml.workspace = true
 # Random number generation (for human typing simulation)
 rand.workspace = true
 
+# Futures utilities for async combinators
+futures.workspace = true
+tokio-stream.workspace = true
+
 # libc for low-level Unix operations
 libc.workspace = true
 

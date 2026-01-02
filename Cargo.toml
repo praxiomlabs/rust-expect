@@ -75,6 +75,10 @@ criterion = { version = "0.5", features = ["html_reports"] }
 # Random number generation (for human typing simulation)
 rand = "0.9"
 
+# Futures utilities for async combinators
+futures = "0.3"
+tokio-stream = "0.1"
+
 # Workspace crates (internal)
 rust-pty = { path = "crates/rust-pty" }
 rust-expect = { path = "crates/rust-expect" }

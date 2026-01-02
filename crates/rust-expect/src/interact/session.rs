@@ -38,6 +38,7 @@ use crate::expect::Pattern;
 
 use super::hooks::{HookManager, InteractionEvent};
 use super::mode::InteractionMode;
+use super::terminal::TerminalSize;
 
 /// Action to take after a pattern match in interactive mode.
 #[derive(Debug, Clone)]
@@ -95,6 +96,18 @@ impl<'a> InteractContext<'a> {
 /// Type alias for pattern hook callbacks.
 pub type PatternHook = Box<dyn Fn(&InteractContext<'_>) -> InteractAction + Send + Sync>;
 
+/// Context passed to resize hook callbacks.
+#[derive(Debug, Clone, Copy)]
+pub struct ResizeContext {
+    /// New terminal size.
+    pub size: TerminalSize,
+    /// Previous terminal size (if known).
+    pub previous: Option<TerminalSize>,
+}
+
+/// Type alias for resize hook callbacks.
+pub type ResizeHook = Box<dyn Fn(&ResizeContext) -> InteractAction + Send + Sync>;
+
 /// Output pattern hook registration.
 struct OutputPatternHook {
     pattern: Pattern,
@@ -118,6 +131,8 @@ where
     output_hooks: Vec<OutputPatternHook>,
     /// Input pattern hooks.
     input_hooks: Vec<InputPatternHook>,
+    /// Resize hook.
+    resize_hook: Option<ResizeHook>,
     /// Byte-level hook manager.
     hook_manager: HookManager,
     /// Interaction mode configuration.
@@ -140,6 +155,7 @@ where
             transport,
             output_hooks: Vec::new(),
             input_hooks: Vec::new(),
+            resize_hook: None,
             hook_manager: HookManager::new(),
             mode: InteractionMode::default(),
             buffer_size: 8192,
@@ -184,6 +200,36 @@ where
             pattern: pattern.into(),
             callback: Box::new(callback),
         });
+        self
+    }
+
+    /// Register a hook for terminal resize events.
+    ///
+    /// On Unix systems, this is triggered by SIGWINCH. The callback receives
+    /// the new terminal size and can optionally return an action.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// session.interact()
+    ///     .on_resize(|ctx| {
+    ///         println!("Terminal resized to {}x{}", ctx.size.cols, ctx.size.rows);
+    ///         InteractAction::Continue
+    ///     })
+    ///     .start()
+    ///     .await?;
+    /// ```
+    ///
+    /// # Platform Support
+    ///
+    /// - **Unix**: Resize events are detected via SIGWINCH signal handling.
+    /// - **Windows**: Resize detection is not currently supported; the callback
+    ///   will not be invoked.
+    pub fn on_resize<F>(mut self, callback: F) -> Self
+    where
+        F: Fn(&ResizeContext) -> InteractAction + Send + Sync + 'static,
+    {
+        self.resize_hook = Some(Box::new(callback));
         self
     }
 
@@ -256,6 +302,7 @@ where
             Arc::clone(self.transport),
             self.output_hooks,
             self.input_hooks,
+            self.resize_hook,
             self.hook_manager,
             self.mode,
             self.buffer_size,
@@ -301,12 +348,14 @@ where
     transport: Arc<Mutex<T>>,
     output_hooks: Vec<OutputPatternHook>,
     input_hooks: Vec<InputPatternHook>,
+    resize_hook: Option<ResizeHook>,
     hook_manager: HookManager,
     mode: InteractionMode,
     buffer: String,
     buffer_size: usize,
     escape_sequence: Option<Vec<u8>>,
     timeout: Option<Duration>,
+    current_size: Option<TerminalSize>,
 }
 
 impl<T> InteractRunner<T>
@@ -317,26 +366,182 @@ where
         transport: Arc<Mutex<T>>,
         output_hooks: Vec<OutputPatternHook>,
         input_hooks: Vec<InputPatternHook>,
+        resize_hook: Option<ResizeHook>,
         hook_manager: HookManager,
         mode: InteractionMode,
         buffer_size: usize,
         escape_sequence: Option<Vec<u8>>,
         timeout: Option<Duration>,
     ) -> Self {
+        // Get initial terminal size
+        let current_size = super::terminal::Terminal::size().ok();
+
         Self {
             transport,
             output_hooks,
             input_hooks,
+            resize_hook,
             hook_manager,
             mode,
             buffer: String::with_capacity(buffer_size),
             buffer_size,
             escape_sequence,
             timeout,
+            current_size,
         }
     }
 
     async fn run(&mut self) -> Result<InteractResult> {
+        #[cfg(unix)]
+        {
+            self.run_with_signals().await
+        }
+        #[cfg(not(unix))]
+        {
+            self.run_without_signals().await
+        }
+    }
+
+    /// Run the interaction loop with Unix signal handling (SIGWINCH).
+    #[cfg(unix)]
+    async fn run_with_signals(&mut self) -> Result<InteractResult> {
+        use tokio::io::{stdin, stdout, BufReader};
+
+        self.hook_manager.notify(InteractionEvent::Started);
+
+        let mut stdin = BufReader::new(stdin());
+        let mut input_buf = [0u8; 1024];
+        let mut output_buf = [0u8; 4096];
+        let mut escape_buf: Vec<u8> = Vec::new();
+
+        let deadline = self.timeout.map(|t| std::time::Instant::now() + t);
+
+        // Set up SIGWINCH signal handler
+        let mut sigwinch = tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::window_change(),
+        )
+        .map_err(|e| ExpectError::Io(e))?;
+
+        loop {
+            // Check timeout
+            if let Some(deadline) = deadline {
+                if std::time::Instant::now() >= deadline {
+                    self.hook_manager.notify(InteractionEvent::Ended);
+                    return Ok(InteractResult {
+                        reason: InteractEndReason::Timeout,
+                        buffer: self.buffer.clone(),
+                    });
+                }
+            }
+
+            let read_timeout = self.mode.read_timeout;
+            let mut transport = self.transport.lock().await;
+
+            tokio::select! {
+                // Handle SIGWINCH (window resize)
+                _ = sigwinch.recv() => {
+                    drop(transport); // Release lock before processing
+
+                    if let Some(result) = self.handle_resize().await? {
+                        return Ok(result);
+                    }
+                }
+
+                // Read from session output
+                result = transport.read(&mut output_buf) => {
+                    drop(transport); // Release lock before processing
+                    match result {
+                        Ok(0) => {
+                            self.hook_manager.notify(InteractionEvent::Ended);
+                            return Ok(InteractResult {
+                                reason: InteractEndReason::Eof,
+                                buffer: self.buffer.clone(),
+                            });
+                        }
+                        Ok(n) => {
+                            let data = &output_buf[..n];
+                            let processed = self.hook_manager.process_output(data.to_vec());
+
+                            self.hook_manager.notify(InteractionEvent::Output(processed.clone()));
+
+                            // Write to stdout
+                            let mut stdout = stdout();
+                            let _ = stdout.write_all(&processed).await;
+                            let _ = stdout.flush().await;
+
+                            // Append to buffer for pattern matching
+                            if let Ok(s) = std::str::from_utf8(&processed) {
+                                self.buffer.push_str(s);
+                                // Trim buffer if too large
+                                if self.buffer.len() > self.buffer_size {
+                                    let start = self.buffer.len() - self.buffer_size;
+                                    self.buffer = self.buffer[start..].to_string();
+                                }
+                            }
+
+                            // Check output patterns
+                            if let Some(result) = self.check_output_patterns().await? {
+                                return Ok(result);
+                            }
+                        }
+                        Err(e) => {
+                            self.hook_manager.notify(InteractionEvent::Ended);
+                            return Err(ExpectError::Io(e));
+                        }
+                    }
+                }
+
+                // Read from stdin (user input)
+                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)) => {
+                    drop(transport); // Release lock
+
+                    if let Ok(Ok(n)) = result {
+                        if n == 0 {
+                            continue;
+                        }
+
+                        let data = &input_buf[..n];
+
+                        // Check for escape sequence
+                        if let Some(ref esc) = self.escape_sequence {
+                            escape_buf.extend_from_slice(data);
+                            if escape_buf.ends_with(esc) {
+                                self.hook_manager.notify(InteractionEvent::ExitRequested);
+                                self.hook_manager.notify(InteractionEvent::Ended);
+                                return Ok(InteractResult {
+                                    reason: InteractEndReason::Escape,
+                                    buffer: self.buffer.clone(),
+                                });
+                            }
+                            // Keep only last N bytes where N is escape length
+                            if escape_buf.len() > esc.len() {
+                                escape_buf = escape_buf[escape_buf.len() - esc.len()..].to_vec();
+                            }
+                        }
+
+                        // Process through input hooks
+                        let processed = self.hook_manager.process_input(data.to_vec());
+
+                        self.hook_manager.notify(InteractionEvent::Input(processed.clone()));
+
+                        // Check input patterns
+                        if let Some(result) = self.check_input_patterns(&processed).await? {
+                            return Ok(result);
+                        }
+
+                        // Send to session
+                        let mut transport = self.transport.lock().await;
+                        transport.write_all(&processed).await.map_err(ExpectError::Io)?;
+                        transport.flush().await.map_err(ExpectError::Io)?;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Run the interaction loop without signal handling (non-Unix platforms).
+    #[cfg(not(unix))]
+    async fn run_without_signals(&mut self) -> Result<InteractResult> {
         use tokio::io::{stdin, stdout, BufReader};
 
         self.hook_manager.notify(InteractionEvent::Started);
@@ -542,6 +747,58 @@ where
                 }
             }
         }
+        Ok(None)
+    }
+
+    /// Handle a window resize event.
+    async fn handle_resize(&mut self) -> Result<Option<InteractResult>> {
+        // Get the new terminal size
+        let new_size = match super::terminal::Terminal::size() {
+            Ok(size) => size,
+            Err(_) => return Ok(None), // Ignore if we can't get size
+        };
+
+        // Build the context with previous size
+        let ctx = ResizeContext {
+            size: new_size,
+            previous: self.current_size,
+        };
+
+        // Notify via hook manager
+        self.hook_manager.notify(InteractionEvent::Resize {
+            cols: new_size.cols,
+            rows: new_size.rows,
+        });
+
+        // Update our tracked size
+        self.current_size = Some(new_size);
+
+        // Call the user's resize hook if registered
+        if let Some(ref hook) = self.resize_hook {
+            match hook(&ctx) {
+                InteractAction::Continue => {}
+                InteractAction::Send(data) => {
+                    let mut transport = self.transport.lock().await;
+                    transport.write_all(&data).await.map_err(ExpectError::Io)?;
+                    transport.flush().await.map_err(ExpectError::Io)?;
+                }
+                InteractAction::Stop => {
+                    self.hook_manager.notify(InteractionEvent::Ended);
+                    return Ok(Some(InteractResult {
+                        reason: InteractEndReason::PatternStop { pattern_index: 0 },
+                        buffer: self.buffer.clone(),
+                    }));
+                }
+                InteractAction::Error(msg) => {
+                    self.hook_manager.notify(InteractionEvent::Ended);
+                    return Ok(Some(InteractResult {
+                        reason: InteractEndReason::Error(msg),
+                        buffer: self.buffer.clone(),
+                    }));
+                }
+            }
+        }
+
         Ok(None)
     }
 }

@@ -33,6 +33,6 @@ pub use hooks::{HookBuilder, HookManager, InteractionEvent};
 pub use mode::{InputFilter, InteractionMode, OutputFilter};
 pub use session::{
     InteractAction, InteractBuilder, InteractContext, InteractEndReason, InteractResult,
-    PatternHook,
+    PatternHook, ResizeContext, ResizeHook,
 };
 pub use terminal::{Terminal, TerminalMode, TerminalSize, TerminalState};

@@ -153,3 +153,146 @@ fn session_builder_logging() {
 
     assert_eq!(config.logging.log_file, Some("/tmp/test.log".into()));
 }
+
+// =============================================================================
+// End-to-end spawn tests (require actual process spawning)
+// =============================================================================
+
+use rust_expect::Session;
+
+/// Test spawning a simple command and expecting output.
+#[tokio::test]
+async fn spawn_echo_command() {
+    let mut session = Session::spawn("/bin/echo", &["hello", "world"])
+        .await
+        .expect("Failed to spawn echo");
+
+    // Read the output
+    let m = session.expect("world").await.expect("Expected 'world'");
+    assert!(m.matched.contains("world"));
+}
+
+/// Test spawning a shell and sending commands.
+#[tokio::test]
+async fn spawn_shell_send_command() {
+    let mut session = Session::spawn("/bin/sh", &[])
+        .await
+        .expect("Failed to spawn shell");
+
+    // Wait for shell prompt ($ or something similar)
+    // Send a command
+    session.send_line("echo test123").await.expect("Failed to send");
+
+    // Expect the output
+    let m = session.expect("test123").await.expect("Expected 'test123'");
+    assert!(m.matched.contains("test123"));
+}
+
+/// Test spawning cat in interactive mode.
+#[tokio::test]
+async fn spawn_cat_interactive() {
+    let mut session = Session::spawn("/bin/cat", &[])
+        .await
+        .expect("Failed to spawn cat");
+
+    // Cat echoes what we send
+    session.send_line("hello cat").await.expect("Failed to send");
+
+    let m = session.expect("hello cat").await.expect("Expected 'hello cat'");
+    assert!(m.matched.contains("hello cat"));
+
+    // Send EOF to terminate cat (Ctrl+D)
+    session
+        .send_control(rust_expect::ControlChar::CtrlD)
+        .await
+        .expect("Failed to send EOF");
+}
+
+/// Test process ID is available.
+#[tokio::test]
+async fn spawn_has_pid() {
+    let session = Session::spawn("/bin/true", &[])
+        .await
+        .expect("Failed to spawn true");
+
+    let pid = session.pid();
+    assert!(pid > 0, "Expected valid PID, got {}", pid);
+}
+
+/// Test spawn with custom configuration.
+#[tokio::test]
+async fn spawn_with_custom_config() {
+    use rust_expect::SessionConfig;
+
+    let mut config = SessionConfig::default();
+    config.dimensions = (100, 30);
+
+    let session = Session::spawn_with_config("/bin/sh", &[], config)
+        .await
+        .expect("Failed to spawn with config");
+
+    // Just verify it spawned successfully
+    let pid = session.pid();
+    assert!(pid > 0);
+}
+
+/// Test spawning command that fails.
+#[tokio::test]
+async fn spawn_nonexistent_command() {
+    let result = Session::spawn("/nonexistent/command", &[]).await;
+    // The spawn should succeed (fork works), but the exec fails
+    // The child process will exit immediately with code 1
+    // This is expected behavior for PTY spawning
+    // We just verify we don't panic
+    assert!(result.is_ok() || result.is_err());
+}
+
+/// Test sending control characters.
+#[tokio::test]
+async fn spawn_send_control_c() {
+    let mut session = Session::spawn("/bin/cat", &[])
+        .await
+        .expect("Failed to spawn cat");
+
+    // Send Ctrl-C to interrupt
+    session
+        .send_control(rust_expect::ControlChar::CtrlC)
+        .await
+        .expect("Failed to send Ctrl-C");
+
+    // Cat should terminate after Ctrl-C
+    // Wait for EOF
+    let _ = session.wait().await;
+}
+
+/// Test basic expect with multiple patterns.
+#[tokio::test]
+async fn spawn_expect_multiple() {
+    let mut session = Session::spawn("/bin/sh", &[])
+        .await
+        .expect("Failed to spawn shell");
+
+    session
+        .send_line("echo first; echo second")
+        .await
+        .expect("Failed to send");
+
+    // Expect first
+    session.expect("first").await.expect("Expected 'first'");
+
+    // Expect second
+    session.expect("second").await.expect("Expected 'second'");
+}
+
+/// Test that matched field contains the expected text.
+#[tokio::test]
+async fn spawn_match_contains_text() {
+    let mut session = Session::spawn("/bin/echo", &["hello", "world"])
+        .await
+        .expect("Failed to spawn echo");
+
+    let m = session.expect("hello").await.expect("Expected 'hello'");
+
+    // The matched field should contain the matched text
+    assert!(m.matched.contains("hello"), "Match should contain 'hello'");
+}

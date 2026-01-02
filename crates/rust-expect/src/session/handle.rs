@@ -12,6 +12,9 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
+#[cfg(unix)]
+use crate::backend::{AsyncPty, PtyConfig, PtySpawner};
+
 /// A session handle for interacting with a spawned process.
 ///
 /// The session provides methods to send input, expect patterns in output,
@@ -291,6 +294,125 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> std::fmt::Debug for Session
             .field("state", &self.state)
             .field("eof", &self.eof)
             .finish_non_exhaustive()
+    }
+}
+
+// Unix-specific spawn implementation
+#[cfg(unix)]
+impl Session<AsyncPty> {
+    /// Spawn a new process with the given command.
+    ///
+    /// This creates a new PTY, forks a child process, and returns a Session
+    /// connected to the child's terminal.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::Session;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("/bin/bash", &[]).await?;
+    ///     session.expect("$").await?;
+    ///     session.send_line("echo hello").await?;
+    ///     session.expect("hello").await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The command contains null bytes
+    /// - PTY allocation fails
+    /// - Fork fails
+    /// - The command cannot be executed
+    pub async fn spawn(command: &str, args: &[&str]) -> Result<Self> {
+        Self::spawn_with_config(command, args, SessionConfig::default()).await
+    }
+
+    /// Spawn a new process with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if spawning fails.
+    pub async fn spawn_with_config(
+        command: &str,
+        args: &[&str],
+        config: SessionConfig,
+    ) -> Result<Self> {
+        let pty_config = PtyConfig::from(&config);
+        let spawner = PtySpawner::with_config(pty_config);
+
+        // Convert &[&str] to Vec<String> for the spawner
+        let args_owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+
+        // Spawn the process
+        let handle = spawner.spawn(command, &args_owned).await?;
+
+        // Wrap in AsyncPty for async I/O
+        let async_pty = AsyncPty::from_handle(handle).map_err(ExpectError::Io)?;
+
+        // Create the session
+        let mut session = Session::new(async_pty, config);
+        session.state = SessionState::Running;
+
+        Ok(session)
+    }
+
+    /// Get the child process ID.
+    #[must_use]
+    pub fn pid(&self) -> u32 {
+        // We need to access the inner transport's pid
+        // For now, use the blocking lock since we know it's not contended
+        // during a sync call like this
+        if let Ok(transport) = self.transport.try_lock() {
+            transport.pid()
+        } else {
+            0
+        }
+    }
+
+    /// Resize the terminal.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resize ioctl fails.
+    pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
+        let mut transport = self.transport.lock().await;
+        transport.resize(cols, rows)
+    }
+
+    /// Send a signal to the child process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if sending the signal fails.
+    pub fn signal(&self, signal: i32) -> Result<()> {
+        if let Ok(transport) = self.transport.try_lock() {
+            transport.signal(signal)
+        } else {
+            Err(ExpectError::Io(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "transport is locked",
+            )))
+        }
+    }
+
+    /// Kill the child process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if killing the process fails.
+    pub fn kill(&self) -> Result<()> {
+        if let Ok(transport) = self.transport.try_lock() {
+            transport.kill()
+        } else {
+            Err(ExpectError::Io(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                "transport is locked",
+            )))
+        }
     }
 }
 

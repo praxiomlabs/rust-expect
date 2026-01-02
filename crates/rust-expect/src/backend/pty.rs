@@ -421,6 +421,196 @@ impl Drop for PtyHandle {
     }
 }
 
+/// Async wrapper around a PTY file descriptor for use with Tokio.
+///
+/// This provides `AsyncRead` and `AsyncWrite` implementations that
+/// integrate with the Tokio runtime.
+#[cfg(unix)]
+pub struct AsyncPty {
+    /// The async file descriptor wrapper.
+    inner: tokio::io::unix::AsyncFd<std::os::unix::io::RawFd>,
+    /// Process ID.
+    pid: u32,
+    /// Terminal dimensions.
+    dimensions: (u16, u16),
+}
+
+#[cfg(unix)]
+impl AsyncPty {
+    /// Create a new async PTY wrapper from a PtyHandle.
+    ///
+    /// Takes ownership of the PtyHandle's file descriptor.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the AsyncFd cannot be created.
+    pub fn from_handle(handle: PtyHandle) -> io::Result<Self> {
+        let fd = handle.master_fd;
+        let pid = handle.pid;
+        let dimensions = handle.dimensions;
+
+        // Prevent the original handle from closing the fd
+        std::mem::forget(handle);
+
+        let inner = tokio::io::unix::AsyncFd::new(fd)?;
+        Ok(Self {
+            inner,
+            pid,
+            dimensions,
+        })
+    }
+
+    /// Get the process ID.
+    #[must_use]
+    pub const fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    /// Get the terminal dimensions.
+    #[must_use]
+    pub const fn dimensions(&self) -> (u16, u16) {
+        self.dimensions
+    }
+
+    /// Resize the terminal.
+    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        let winsize = libc::winsize {
+            ws_row: rows,
+            ws_col: cols,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+
+        // SAFETY: The fd is valid and TIOCSWINSZ is a valid ioctl for PTYs.
+        let result = unsafe { libc::ioctl(*self.inner.get_ref(), libc::TIOCSWINSZ, &winsize) };
+
+        if result != 0 {
+            Err(ExpectError::Io(io::Error::last_os_error()))
+        } else {
+            self.dimensions = (cols, rows);
+            Ok(())
+        }
+    }
+
+    /// Send a signal to the child process.
+    pub fn signal(&self, signal: i32) -> Result<()> {
+        // SAFETY: pid is a valid process ID from fork().
+        let result = unsafe { libc::kill(self.pid as i32, signal) };
+        if result != 0 {
+            Err(ExpectError::Io(io::Error::last_os_error()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Kill the child process.
+    pub fn kill(&self) -> Result<()> {
+        self.signal(libc::SIGKILL)
+    }
+}
+
+#[cfg(unix)]
+impl AsyncRead for AsyncPty {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        loop {
+            let mut guard = match self.inner.poll_read_ready(cx) {
+                Poll::Ready(Ok(guard)) => guard,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            };
+
+            let fd = *self.inner.get_ref();
+            let unfilled = buf.initialize_unfilled();
+
+            // SAFETY: fd is a valid file descriptor, unfilled is a valid buffer.
+            let result = unsafe {
+                libc::read(fd, unfilled.as_mut_ptr() as *mut libc::c_void, unfilled.len())
+            };
+
+            if result >= 0 {
+                buf.advance(result as usize);
+                return Poll::Ready(Ok(()));
+            }
+
+            let err = io::Error::last_os_error();
+            if err.kind() == io::ErrorKind::WouldBlock {
+                guard.clear_ready();
+                continue;
+            }
+            return Poll::Ready(Err(err));
+        }
+    }
+}
+
+#[cfg(unix)]
+impl AsyncWrite for AsyncPty {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        loop {
+            let mut guard = match self.inner.poll_write_ready(cx) {
+                Poll::Ready(Ok(guard)) => guard,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            };
+
+            let fd = *self.inner.get_ref();
+
+            // SAFETY: fd is a valid file descriptor, buf is a valid buffer.
+            let result =
+                unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len()) };
+
+            if result >= 0 {
+                return Poll::Ready(Ok(result as usize));
+            }
+
+            let err = io::Error::last_os_error();
+            if err.kind() == io::ErrorKind::WouldBlock {
+                guard.clear_ready();
+                continue;
+            }
+            return Poll::Ready(Err(err));
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        // PTY doesn't need explicit flushing
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        // Shutdown is handled by Drop
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[cfg(unix)]
+impl Drop for AsyncPty {
+    fn drop(&mut self) {
+        // SAFETY: The fd is valid and owned by us.
+        unsafe {
+            libc::close(*self.inner.get_ref());
+        }
+    }
+}
+
+#[cfg(unix)]
+impl std::fmt::Debug for AsyncPty {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsyncPty")
+            .field("fd", self.inner.get_ref())
+            .field("pid", &self.pid)
+            .field("dimensions", &self.dimensions)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

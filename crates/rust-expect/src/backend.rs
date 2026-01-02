@@ -7,6 +7,10 @@ mod pty;
 
 pub use pty::{EnvMode, PtyConfig, PtyHandle, PtySpawner, PtyTransport};
 
+// Export AsyncPty for Unix platforms
+#[cfg(unix)]
+pub use pty::AsyncPty;
+
 // SSH backend is conditionally compiled
 #[cfg(feature = "ssh")]
 pub mod ssh;

@@ -4,6 +4,7 @@
 //! to control spawned processes, send input, and expect output.
 
 use crate::config::SessionConfig;
+use crate::dialog::{Dialog, DialogExecutor, DialogResult};
 use crate::error::{ExpectError, Result};
 use crate::expect::{ExpectState, MatchResult, Matcher, Pattern, PatternManager, PatternSet};
 use crate::interact::InteractBuilder;
@@ -323,6 +324,94 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         T: 'static,
     {
         InteractBuilder::new(&self.transport)
+    }
+
+    /// Run a dialog on this session.
+    ///
+    /// A dialog is a predefined sequence of expect/send operations.
+    /// This method executes the dialog and returns the result.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::{Session, Dialog, DialogStep};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("/bin/bash", &[]).await?;
+    ///
+    ///     let dialog = Dialog::named("shell_test")
+    ///         .step(DialogStep::new("prompt")
+    ///             .with_expect("$")
+    ///             .with_send("echo hello\n"))
+    ///         .step(DialogStep::new("verify")
+    ///             .with_expect("hello"));
+    ///
+    ///     let result = session.run_dialog(&dialog).await?;
+    ///     assert!(result.success);
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if I/O fails. Step-level timeouts are reported
+    /// in the `DialogResult` rather than as errors.
+    pub async fn run_dialog(&mut self, dialog: &Dialog) -> Result<DialogResult> {
+        let executor = DialogExecutor::default();
+        executor.execute(self, dialog).await
+    }
+
+    /// Run a dialog with a custom executor.
+    ///
+    /// This allows customizing the executor settings (max steps, default timeout).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if I/O fails.
+    pub async fn run_dialog_with(
+        &mut self,
+        dialog: &Dialog,
+        executor: &DialogExecutor,
+    ) -> Result<DialogResult> {
+        executor.execute(self, dialog).await
+    }
+
+    /// Expect end-of-file (process termination).
+    ///
+    /// This is a convenience method for waiting until the process terminates
+    /// and closes its output stream.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::Session;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("echo", &["hello"]).await?;
+    ///     session.expect("hello").await?;
+    ///     session.expect_eof().await?;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session times out before EOF or an I/O error occurs.
+    pub async fn expect_eof(&mut self) -> Result<Match> {
+        self.expect(Pattern::eof()).await
+    }
+
+    /// Expect end-of-file with a specific timeout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session times out before EOF or an I/O error occurs.
+    pub async fn expect_eof_timeout(&mut self, timeout: Duration) -> Result<Match> {
+        let mut patterns = PatternSet::new();
+        patterns.add(Pattern::eof()).add(Pattern::timeout(timeout));
+        self.expect_any(&patterns).await
     }
 }
 

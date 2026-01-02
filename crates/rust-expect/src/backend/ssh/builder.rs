@@ -177,7 +177,8 @@ impl SshSessionBuilder {
 }
 
 /// Create an SSH session from a URI-like string.
-/// Format: [user@]host[:port]
+///
+/// Format: `[user@]host[:port]`
 #[must_use] pub fn parse_ssh_target(target: &str) -> (Option<String>, String, u16) {
     let (user_part, rest) = if let Some(at_pos) = target.find('@') {
         (Some(target[..at_pos].to_string()), &target[at_pos + 1..])

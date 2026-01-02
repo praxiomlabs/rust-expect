@@ -96,7 +96,7 @@ pub use dialog::{Dialog, DialogBuilder, DialogStep};
 pub use health::{HealthChecker, HealthStatus};
 pub use interact::{
     InteractAction, InteractBuilder, InteractContext, InteractEndReason, InteractResult,
-    InteractionMode, TerminalMode, TerminalState,
+    InteractionMode, ResizeContext, ResizeHook, TerminalMode, TerminalState,
 };
 pub use metrics::{Counter, Gauge, Histogram, MetricsRegistry, SessionMetrics};
 pub use multi::{

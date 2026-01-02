@@ -21,7 +21,12 @@ pub enum MockEvent {
     /// Error occurred.
     Error(String),
     /// Window size changed.
-    Resize { rows: u16, cols: u16 },
+    Resize {
+        /// Number of rows.
+        rows: u16,
+        /// Number of columns.
+        cols: u16,
+    },
 }
 
 impl MockEvent {

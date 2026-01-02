@@ -1,8 +1,12 @@
 //! Dialog execution engine.
 
 use super::definition::{Dialog, DialogStep};
+use crate::error::{ExpectError, Result};
+use crate::expect::PatternSet;
+use crate::session::Session;
 use crate::Pattern;
 use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Result of executing a dialog step.
 #[derive(Debug, Clone)]
@@ -138,6 +142,222 @@ impl DialogExecutor {
     pub fn step_pattern(&self, step: &DialogStep, dialog: &Dialog) -> Option<Pattern> {
         step.expect.as_ref().map(|e| {
             Pattern::literal(dialog.substitute(e))
+        })
+    }
+
+    /// Execute a dialog on a session.
+    ///
+    /// This runs through the dialog steps, expecting patterns and sending responses.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::{Session, Dialog, DialogStep, DialogExecutor};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("/bin/bash", &[]).await?;
+    ///
+    ///     let dialog = Dialog::named("login")
+    ///         .step(DialogStep::new("prompt")
+    ///             .with_expect("$")
+    ///             .with_send("echo hello\n"));
+    ///
+    ///     let executor = DialogExecutor::new();
+    ///     let result = executor.execute(&mut session, &dialog).await?;
+    ///     assert!(result.success);
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - A step times out without `continue_on_timeout` set
+    /// - The session closes unexpectedly
+    /// - An I/O error occurs
+    pub async fn execute<T>(
+        &self,
+        session: &mut Session<T>,
+        dialog: &Dialog,
+    ) -> Result<DialogResult>
+    where
+        T: AsyncReadExt + AsyncWriteExt + Unpin + Send,
+    {
+        if dialog.is_empty() {
+            return Ok(DialogResult {
+                dialog_name: dialog.name.clone(),
+                success: true,
+                steps: Vec::new(),
+                output: String::new(),
+                error: None,
+            });
+        }
+
+        let mut step_results = Vec::new();
+        let mut total_output = String::new();
+        let mut step_count = 0;
+
+        // Determine starting step
+        let mut current_step_idx = if let Some(ref entry) = dialog.entry {
+            dialog.steps.iter().position(|s| &s.name == entry).unwrap_or(0)
+        } else {
+            0
+        };
+
+        loop {
+            // Prevent infinite loops
+            step_count += 1;
+            if step_count > self.max_steps {
+                return Ok(DialogResult {
+                    dialog_name: dialog.name.clone(),
+                    success: false,
+                    steps: step_results,
+                    output: total_output,
+                    error: Some(format!("Exceeded maximum steps ({})", self.max_steps)),
+                });
+            }
+
+            // Get current step
+            let step = match dialog.steps.get(current_step_idx) {
+                Some(s) => s,
+                None => break, // No more steps
+            };
+
+            // Execute the step
+            let step_result = self.execute_step(session, step, dialog).await?;
+            let success = step_result.success;
+            total_output.push_str(&step_result.output);
+
+            // Determine next step
+            let next_step = step_result.next_step.clone();
+            step_results.push(step_result);
+
+            if !success {
+                return Ok(DialogResult {
+                    dialog_name: dialog.name.clone(),
+                    success: false,
+                    steps: step_results,
+                    output: total_output,
+                    error: Some(format!("Step '{}' failed", step.name)),
+                });
+            }
+
+            // Move to next step
+            if let Some(next_name) = next_step {
+                if let Some(idx) = dialog.steps.iter().position(|s| s.name == next_name) {
+                    current_step_idx = idx;
+                } else {
+                    // Next step not found, end dialog
+                    break;
+                }
+            } else {
+                // No explicit next, try sequential
+                current_step_idx += 1;
+                if current_step_idx >= dialog.steps.len() {
+                    break;
+                }
+            }
+        }
+
+        Ok(DialogResult {
+            dialog_name: dialog.name.clone(),
+            success: true,
+            steps: step_results,
+            output: total_output,
+            error: None,
+        })
+    }
+
+    /// Execute a single dialog step on a session.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an I/O error occurs (timeouts are handled per-step).
+    pub async fn execute_step<T>(
+        &self,
+        session: &mut Session<T>,
+        step: &DialogStep,
+        dialog: &Dialog,
+    ) -> Result<StepResult>
+    where
+        T: AsyncReadExt + AsyncWriteExt + Unpin + Send,
+    {
+        let timeout = step.timeout.unwrap_or(self.default_timeout);
+        let mut output = String::new();
+        let mut matched_text = None;
+
+        // Handle expect pattern if present
+        if let Some(ref expect_pattern) = step.expect {
+            let pattern = Pattern::literal(dialog.substitute(expect_pattern));
+            let mut patterns = PatternSet::new();
+            patterns.add(pattern).add(Pattern::timeout(timeout));
+
+            match session.expect_any(&patterns).await {
+                Ok(m) => {
+                    output = m.before.clone();
+                    matched_text = Some(m.matched.clone());
+                }
+                Err(ExpectError::Timeout { buffer, .. }) => {
+                    if step.continue_on_timeout {
+                        output = buffer;
+                    } else {
+                        return Ok(StepResult {
+                            step_name: step.name.clone(),
+                            success: false,
+                            output: buffer,
+                            matched: None,
+                            send: None,
+                            error: Some(format!(
+                                "Timeout waiting for pattern '{}' after {:?}",
+                                expect_pattern, timeout
+                            )),
+                            next_step: None,
+                        });
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // Check for branch conditions based on matched text
+        let mut next_step = step.next.clone();
+        if let Some(ref matched) = matched_text {
+            for (branch_pattern, branch_target) in &step.branches {
+                if matched.contains(branch_pattern) {
+                    next_step = Some(branch_target.clone());
+                    break;
+                }
+            }
+        }
+
+        // Handle send if present
+        let substituted_send = if let Some(ref send_text) = step.send {
+            let substituted = dialog.substitute(send_text);
+            session.send_str(&substituted).await?;
+            Some(substituted)
+        } else {
+            None
+        };
+
+        // Determine next step if not set
+        if next_step.is_none() {
+            next_step = dialog
+                .steps
+                .iter()
+                .position(|s| s.name == step.name)
+                .and_then(|i| dialog.steps.get(i + 1))
+                .map(|s| s.name.clone());
+        }
+
+        Ok(StepResult {
+            step_name: step.name.clone(),
+            success: true,
+            output,
+            matched: matched_text,
+            send: substituted_send,
+            error: None,
+            next_step,
         })
     }
 }

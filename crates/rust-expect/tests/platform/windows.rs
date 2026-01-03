@@ -4,11 +4,14 @@
 //! - Windows shell configuration (cmd.exe, PowerShell)
 //! - Windows line ending handling (CRLF)
 //! - Windows path handling in patterns
+//! - Windows PTY backend configuration
+//! - Windows-specific QuickSession helpers
 
 #![cfg(windows)]
 
 use rust_expect::prelude::*;
 use rust_expect::{Dialog, DialogStep};
+use rust_expect::backend::{BackendType, PtyConfig};
 use std::time::Duration;
 
 /// Test Windows line ending detection.
@@ -141,4 +144,125 @@ fn quick_session_windows() {
     let ps_config = QuickSession::powershell();
     assert_eq!(ps_config.command, "powershell.exe");
     assert!(ps_config.args.contains(&"-NoLogo".to_string()));
+}
+
+/// Test PTY backend availability on Windows.
+#[test]
+fn pty_backend_windows() {
+    assert!(BackendType::Pty.is_available());
+    assert_eq!(BackendType::Pty.name(), "pty");
+}
+
+/// Test PtyConfig for Windows.
+#[test]
+fn pty_config_windows() {
+    let config = PtyConfig::default();
+    assert_eq!(config.rows, 24);
+    assert_eq!(config.cols, 80);
+}
+
+/// Test Windows-specific session timeouts.
+#[test]
+fn windows_session_timeout() {
+    let config = SessionBuilder::new()
+        .command("cmd.exe")
+        .timeout(Duration::from_secs(60))
+        .read_timeout(Duration::from_secs(30))
+        .build();
+
+    assert_eq!(config.timeout.default, Duration::from_secs(60));
+    assert_eq!(config.timeout.read, Some(Duration::from_secs(30)));
+}
+
+/// Test Windows-style script patterns.
+#[test]
+fn windows_script_patterns() {
+    // Batch file patterns
+    let batch_pattern = Pattern::regex(r"\.bat|\.cmd").unwrap();
+    assert!(batch_pattern.matches("script.bat").is_some());
+    assert!(batch_pattern.matches("install.cmd").is_some());
+
+    // PowerShell script patterns
+    let ps_pattern = Pattern::regex(r"\.ps1|\.psm1").unwrap();
+    assert!(ps_pattern.matches("setup.ps1").is_some());
+    assert!(ps_pattern.matches("module.psm1").is_some());
+}
+
+/// Test Windows error message patterns.
+#[test]
+fn windows_error_patterns() {
+    // Common Windows error messages
+    let error_pattern = Pattern::regex(r"'[^']+' is not recognized").unwrap();
+    assert!(error_pattern.matches("'foo' is not recognized as an internal or external command").is_some());
+
+    let access_denied = Pattern::literal("Access is denied");
+    assert!(access_denied.matches("Error: Access is denied.").is_some());
+}
+
+/// Test Windows-specific prompt patterns.
+#[test]
+fn windows_prompt_patterns() {
+    // Standard cmd.exe prompt
+    let cmd_prompt = Pattern::regex(r"[A-Z]:\\[^>]*>").unwrap();
+    assert!(cmd_prompt.matches("C:\\Users\\test>").is_some());
+    assert!(cmd_prompt.matches("D:\\Projects\\app>").is_some());
+
+    // PowerShell prompt
+    let ps_prompt = Pattern::regex(r"PS [A-Z]:\\[^>]+> ").unwrap();
+    assert!(ps_prompt.matches("PS C:\\Users\\test> ").is_some());
+}
+
+/// Test Windows registry path patterns.
+#[test]
+fn windows_registry_patterns() {
+    let hklm_pattern = Pattern::literal("HKEY_LOCAL_MACHINE");
+    assert!(hklm_pattern.matches("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft").is_some());
+
+    let reg_pattern = Pattern::regex(r"HKEY_(LOCAL_MACHINE|CURRENT_USER|CLASSES_ROOT)\\").unwrap();
+    assert!(reg_pattern.matches("HKEY_LOCAL_MACHINE\\SOFTWARE").is_some());
+    assert!(reg_pattern.matches("HKEY_CURRENT_USER\\Software").is_some());
+}
+
+/// Test Python configuration on Windows.
+#[test]
+fn quick_session_python_windows() {
+    let config = QuickSession::python();
+    assert_eq!(config.command, "python");
+    assert!(config.args.contains(&"-i".to_string()));
+}
+
+/// Test default shell detection on Windows.
+#[test]
+fn windows_default_shell() {
+    let shell = QuickSession::default_shell();
+    // On Windows without SHELL env var, should default to cmd.exe
+    if std::env::var("SHELL").is_err() {
+        assert_eq!(shell, "cmd.exe");
+    }
+}
+
+/// Test Windows-specific control sequences in Dialog.
+#[test]
+fn dialog_windows_control() {
+    use rust_expect::ControlChar;
+
+    let dialog = Dialog::named("windows_interrupt")
+        .step(DialogStep::new("running")
+            .with_expect("Running...")
+            .with_send_control(ControlChar::CtrlC))
+        .step(DialogStep::new("stopped")
+            .with_expect("Terminated"));
+
+    assert_eq!(dialog.len(), 2);
+}
+
+/// Test Windows-specific timeout configuration.
+#[test]
+fn windows_timeout_config() {
+    use rust_expect::util::TimeoutConfig;
+
+    let config = TimeoutConfig::uniform(Duration::from_secs(30));
+    assert_eq!(config.default, Duration::from_secs(30));
+    assert_eq!(config.read, Some(Duration::from_secs(30)));
+    assert_eq!(config.expect, Some(Duration::from_secs(30)));
 }

@@ -212,6 +212,28 @@ mod russh_impl {
     }
 
     /// Load a private key from a file.
+    ///
+    /// Supports both unencrypted and encrypted private keys. For encrypted keys,
+    /// provide the passphrase to decrypt the key.
+    ///
+    /// # Supported Formats
+    ///
+    /// - OpenSSH format (both encrypted and unencrypted)
+    /// - PKCS#8 format (both encrypted and unencrypted)
+    /// - PEM format
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Load an unencrypted key
+    /// let key = load_private_key(Path::new("~/.ssh/id_ed25519"), None).await?;
+    ///
+    /// // Load an encrypted key with passphrase
+    /// let key = load_private_key(
+    ///     Path::new("~/.ssh/id_rsa"),
+    ///     Some("my_passphrase"),
+    /// ).await?;
+    /// ```
     pub async fn load_private_key(
         path: &Path,
         passphrase: Option<&str>,
@@ -223,16 +245,28 @@ mod russh_impl {
             })
         })?;
 
-        // Parse the key from OpenSSH format
-        // Note: russh's PrivateKey::from_openssh handles both encrypted and unencrypted keys
-        // For encrypted keys, the passphrase needs to be provided through a different mechanism
-        // TODO: Add proper encrypted key support when russh supports it
-        let _ = passphrase; // Acknowledge passphrase parameter (encrypted key support pending)
-
-        let key = PrivateKey::from_openssh(&key_data).map_err(|e| {
+        // Convert bytes to string for decode_secret_key
+        let key_str = String::from_utf8(key_data).map_err(|e| {
             crate::error::ExpectError::Ssh(SshError::Authentication {
                 user: String::new(),
-                reason: format!("Failed to decode key {}: {}", path.display(), e),
+                reason: format!("Key file {} is not valid UTF-8: {}", path.display(), e),
+            })
+        })?;
+
+        // Use russh::keys::decode_secret_key which handles both encrypted and unencrypted keys
+        let key = russh::keys::decode_secret_key(&key_str, passphrase).map_err(|e| {
+            let reason = if passphrase.is_none() && e.to_string().contains("encrypted") {
+                format!(
+                    "Key {} appears to be encrypted but no passphrase was provided. \
+                     Use AuthMethod::public_key_with_passphrase() to specify a passphrase.",
+                    path.display()
+                )
+            } else {
+                format!("Failed to decode key {}: {}", path.display(), e)
+            };
+            crate::error::ExpectError::Ssh(SshError::Authentication {
+                user: String::new(),
+                reason,
             })
         })?;
 

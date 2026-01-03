@@ -165,30 +165,157 @@ pub fn read_asciicast<R: BufRead>(reader: R) -> Result<Transcript> {
 }
 
 fn parse_header(line: &str) -> Result<AsciicastHeader> {
-    // Simple JSON parsing for header
     let mut header = AsciicastHeader::default();
 
-    // Extract width
-    if let Some(start) = line.find("\"width\":") {
-        let rest = &line[start + 8..];
-        if let Some(end) = rest.find(|c: char| !c.is_numeric() && c != ' ') {
-            if let Ok(w) = rest[..end].trim().parse() {
-                header.width = w;
-            }
-        }
+    // Parse numeric fields
+    header.width = parse_json_number(line, "width").unwrap_or(80) as u16;
+    header.height = parse_json_number(line, "height").unwrap_or(24) as u16;
+    header.version = parse_json_number(line, "version").unwrap_or(2) as u8;
+
+    if let Some(ts) = parse_json_number(line, "timestamp") {
+        header.timestamp = Some(ts as u64);
     }
 
-    // Extract height
-    if let Some(start) = line.find("\"height\":") {
-        let rest = &line[start + 9..];
-        if let Some(end) = rest.find(|c: char| !c.is_numeric() && c != ' ') {
-            if let Ok(h) = rest[..end].trim().parse() {
-                header.height = h;
-            }
-        }
+    if let Some(dur) = parse_json_float(line, "duration") {
+        header.duration = Some(dur);
+    }
+
+    if let Some(limit) = parse_json_float(line, "idle_time_limit") {
+        header.idle_time_limit = Some(limit);
+    }
+
+    // Parse string fields
+    header.command = parse_json_string(line, "command");
+    header.title = parse_json_string(line, "title");
+
+    // Parse env object (simplified - handles flat env objects)
+    if let Some(env) = parse_json_object(line, "env") {
+        header.env = env;
     }
 
     Ok(header)
+}
+
+/// Parse a numeric JSON field.
+fn parse_json_number(json: &str, field: &str) -> Option<i64> {
+    let pattern = format!("\"{field}\":");
+    let start = json.find(&pattern)?;
+    let rest = &json[start + pattern.len()..];
+    let rest = rest.trim_start();
+
+    // Find the end of the number
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '-')
+        .unwrap_or(rest.len());
+
+    rest[..end].trim().parse().ok()
+}
+
+/// Parse a floating-point JSON field.
+fn parse_json_float(json: &str, field: &str) -> Option<f64> {
+    let pattern = format!("\"{field}\":");
+    let start = json.find(&pattern)?;
+    let rest = &json[start + pattern.len()..];
+    let rest = rest.trim_start();
+
+    // Find the end of the number (including decimal point and exponent)
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-' && c != 'e' && c != 'E' && c != '+')
+        .unwrap_or(rest.len());
+
+    rest[..end].trim().parse().ok()
+}
+
+/// Parse a string JSON field.
+fn parse_json_string(json: &str, field: &str) -> Option<String> {
+    let pattern = format!("\"{field}\":");
+    let start = json.find(&pattern)?;
+    let rest = &json[start + pattern.len()..];
+    let rest = rest.trim_start();
+
+    // Must start with a quote
+    if !rest.starts_with('"') {
+        return None;
+    }
+
+    // Find the closing quote (handling escapes)
+    let content = &rest[1..];
+    let mut end = 0;
+    let mut escaped = false;
+
+    for (i, c) in content.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if c == '"' {
+            end = i;
+            break;
+        }
+    }
+
+    if end == 0 && !content.is_empty() && !content.starts_with('"') {
+        // No closing quote found, check if string is at end
+        end = content.len();
+    }
+
+    Some(unescape_json(&content[..end]))
+}
+
+/// Parse a JSON object field (simplified, handles flat string-value objects).
+fn parse_json_object(json: &str, field: &str) -> Option<std::collections::HashMap<String, String>> {
+    let pattern = format!("\"{field}\":");
+    let start = json.find(&pattern)?;
+    let rest = &json[start + pattern.len()..];
+    let rest = rest.trim_start();
+
+    // Must start with {
+    if !rest.starts_with('{') {
+        return None;
+    }
+
+    // Find matching closing brace
+    let mut depth = 0;
+    let mut end = 0;
+
+    for (i, c) in rest.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if end == 0 {
+        return None;
+    }
+
+    let obj_str = &rest[1..end - 1]; // Content inside braces
+    let mut result = std::collections::HashMap::new();
+
+    // Parse key-value pairs
+    for pair in obj_str.split(',') {
+        let pair = pair.trim();
+        if let Some(colon) = pair.find(':') {
+            let key = pair[..colon].trim().trim_matches('"');
+            let value = pair[colon + 1..].trim().trim_matches('"');
+            if !key.is_empty() {
+                result.insert(key.to_string(), unescape_json(value));
+            }
+        }
+    }
+
+    Some(result)
 }
 
 fn parse_event(line: &str) -> Result<Option<TranscriptEvent>> {
@@ -295,5 +422,130 @@ mod tests {
 
         let parsed = read_asciicast(buf.as_slice()).unwrap();
         assert_eq!(parsed.events.len(), 1);
+    }
+
+    #[test]
+    fn parse_json_number_basic() {
+        let json = r#"{"version": 2, "width": 120, "height": 40}"#;
+        assert_eq!(parse_json_number(json, "version"), Some(2));
+        assert_eq!(parse_json_number(json, "width"), Some(120));
+        assert_eq!(parse_json_number(json, "height"), Some(40));
+        assert_eq!(parse_json_number(json, "nonexistent"), None);
+    }
+
+    #[test]
+    fn parse_json_number_negative() {
+        let json = r#"{"offset": -100}"#;
+        assert_eq!(parse_json_number(json, "offset"), Some(-100));
+    }
+
+    #[test]
+    fn parse_json_float_basic() {
+        let json = r#"{"duration": 123.456789, "idle_time_limit": 2.5}"#;
+        assert!((parse_json_float(json, "duration").unwrap() - 123.456789).abs() < 0.000001);
+        assert!((parse_json_float(json, "idle_time_limit").unwrap() - 2.5).abs() < 0.000001);
+        assert_eq!(parse_json_float(json, "nonexistent"), None);
+    }
+
+    #[test]
+    fn parse_json_float_scientific() {
+        let json = r#"{"value": 1.5e10}"#;
+        assert!((parse_json_float(json, "value").unwrap() - 1.5e10).abs() < 1.0);
+    }
+
+    #[test]
+    fn parse_json_string_basic() {
+        let json = r#"{"command": "/bin/bash", "title": "My Recording"}"#;
+        assert_eq!(parse_json_string(json, "command"), Some("/bin/bash".to_string()));
+        assert_eq!(parse_json_string(json, "title"), Some("My Recording".to_string()));
+        assert_eq!(parse_json_string(json, "nonexistent"), None);
+    }
+
+    #[test]
+    fn parse_json_string_escaped() {
+        let json = r#"{"path": "C:\\Users\\test", "msg": "say \"hello\""}"#;
+        assert_eq!(parse_json_string(json, "path"), Some("C:\\Users\\test".to_string()));
+        assert_eq!(parse_json_string(json, "msg"), Some("say \"hello\"".to_string()));
+    }
+
+    #[test]
+    fn parse_json_object_basic() {
+        let json = r#"{"env": {"SHELL": "/bin/bash", "TERM": "xterm-256color"}}"#;
+        let env = parse_json_object(json, "env").unwrap();
+        assert_eq!(env.get("SHELL"), Some(&"/bin/bash".to_string()));
+        assert_eq!(env.get("TERM"), Some(&"xterm-256color".to_string()));
+    }
+
+    #[test]
+    fn parse_json_object_empty() {
+        let json = r#"{"env": {}}"#;
+        let env = parse_json_object(json, "env").unwrap();
+        assert!(env.is_empty());
+    }
+
+    #[test]
+    fn parse_header_full() {
+        let header_json = r#"{"version": 2, "width": 120, "height": 40, "timestamp": 1704067200, "duration": 60.5, "idle_time_limit": 2.0, "command": "/bin/zsh", "title": "Demo", "env": {"SHELL": "/bin/zsh"}}"#;
+        let header = parse_header(header_json).unwrap();
+
+        assert_eq!(header.version, 2);
+        assert_eq!(header.width, 120);
+        assert_eq!(header.height, 40);
+        assert_eq!(header.timestamp, Some(1704067200));
+        assert!((header.duration.unwrap() - 60.5).abs() < 0.001);
+        assert!((header.idle_time_limit.unwrap() - 2.0).abs() < 0.001);
+        assert_eq!(header.command, Some("/bin/zsh".to_string()));
+        assert_eq!(header.title, Some("Demo".to_string()));
+        assert_eq!(header.env.get("SHELL"), Some(&"/bin/zsh".to_string()));
+    }
+
+    #[test]
+    fn parse_header_minimal() {
+        let header_json = r#"{"version": 2, "width": 80, "height": 24}"#;
+        let header = parse_header(header_json).unwrap();
+
+        assert_eq!(header.version, 2);
+        assert_eq!(header.width, 80);
+        assert_eq!(header.height, 24);
+        assert_eq!(header.timestamp, None);
+        assert_eq!(header.duration, None);
+        assert_eq!(header.command, None);
+        assert!(header.env.is_empty());
+    }
+
+    #[test]
+    fn unescape_json_sequences() {
+        assert_eq!(unescape_json("hello\\nworld"), "hello\nworld");
+        assert_eq!(unescape_json("tab\\there"), "tab\there");
+        assert_eq!(unescape_json("quote\\\"here"), "quote\"here");
+        assert_eq!(unescape_json("back\\\\slash"), "back\\slash");
+        assert_eq!(unescape_json("return\\rhere"), "return\rhere");
+    }
+
+    #[test]
+    fn roundtrip_with_metadata() {
+        let mut metadata = TranscriptMetadata::new(120, 40);
+        metadata.command = Some("/bin/bash".to_string());
+        metadata.title = Some("Test Recording".to_string());
+        metadata.timestamp = Some(1704067200);
+        metadata.duration = Some(Duration::from_secs_f64(30.5));
+        metadata.env.insert("SHELL".to_string(), "/bin/bash".to_string());
+        metadata.env.insert("TERM".to_string(), "xterm".to_string());
+
+        let mut transcript = Transcript::new(metadata);
+        transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"$ "));
+        transcript.push(TranscriptEvent::input(Duration::from_millis(200), b"ls\n"));
+        transcript.push(TranscriptEvent::output(Duration::from_millis(300), b"file1.txt\nfile2.txt\n"));
+
+        let mut buf = Vec::new();
+        write_asciicast(&mut buf, &transcript).unwrap();
+
+        let parsed = read_asciicast(buf.as_slice()).unwrap();
+        assert_eq!(parsed.metadata.width, 120);
+        assert_eq!(parsed.metadata.height, 40);
+        assert_eq!(parsed.metadata.command, Some("/bin/bash".to_string()));
+        assert_eq!(parsed.metadata.title, Some("Test Recording".to_string()));
+        assert_eq!(parsed.metadata.timestamp, Some(1704067200));
+        assert_eq!(parsed.events.len(), 3);
     }
 }

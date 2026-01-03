@@ -199,12 +199,17 @@ impl ResilientSession {
     }
 
     /// Tick the keepalive manager.
+    /// Returns `true` if the session is still considered alive.
     pub fn keepalive_tick(&mut self) -> bool {
         if !self.is_connected() {
             return false;
         }
 
-        self.keepalive.tick()
+        use super::keepalive::KeepaliveAction;
+        match self.keepalive.tick() {
+            KeepaliveAction::None | KeepaliveAction::SendKeepalive => true,
+            KeepaliveAction::Timeout | KeepaliveAction::Disconnect => false,
+        }
     }
 
     /// Check session health.

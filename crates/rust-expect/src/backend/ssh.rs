@@ -20,7 +20,7 @@ pub mod session;
 pub use auth::{AuthMethod, HostKeyVerification, SshCredentials};
 pub use builder::{parse_ssh_target, SshSessionBuilder};
 pub use channel::{ChannelConfig, ChannelRequest, ChannelType, SshChannel};
-pub use keepalive::{KeepaliveConfig, KeepaliveManager, KeepaliveState};
+pub use keepalive::{KeepaliveAction, KeepaliveConfig, KeepaliveManager, KeepaliveState, KeepaliveStats};
 pub use pool::{ConnectionPool, PoolConfig, PoolStats, PooledConnection};
 pub use resilient::{ResilientConfig, ResilientSession, ResilientState};
 pub use retry::{RetryPolicy, RetryState, RetryStrategy};

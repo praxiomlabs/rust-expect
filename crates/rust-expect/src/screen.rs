@@ -232,34 +232,16 @@ impl Screen {
                 self.buffer.cursor_mut().visible = false;
             }
             AnsiSequence::InsertLines(n) => {
-                // Insert blank lines at cursor
-                for _ in 0..n {
-                    self.buffer.scroll_down(1);
-                }
+                self.buffer.insert_lines(n as usize);
             }
             AnsiSequence::DeleteLines(n) => {
-                // Delete lines at cursor
-                for _ in 0..n {
-                    self.buffer.scroll_up(1);
-                }
+                self.buffer.delete_lines(n as usize);
             }
             AnsiSequence::InsertChars(n) => {
-                // Insert blank chars at cursor (not fully implemented)
-                let row = self.buffer.cursor().row;
-                let col = self.buffer.cursor().col;
-                for _ in 0..n {
-                    self.buffer.set(row, col, Cell::default());
-                }
+                self.buffer.insert_chars(n as usize);
             }
             AnsiSequence::DeleteChars(n) => {
-                // Delete chars at cursor (not fully implemented)
-                let row = self.buffer.cursor().row;
-                let col = self.buffer.cursor().col;
-                for c in col..self.buffer.cols().saturating_sub(n as usize) {
-                    if let Some(cell) = self.buffer.get(row, c + n as usize).copied() {
-                        self.buffer.set(row, c, cell);
-                    }
-                }
+                self.buffer.delete_chars(n as usize);
             }
             AnsiSequence::Reset => {
                 self.buffer.clear();

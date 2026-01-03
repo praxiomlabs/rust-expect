@@ -439,6 +439,121 @@ impl ScreenBuffer {
         self.current_style = Cell::default();
     }
 
+    /// Insert n blank characters at the cursor position.
+    ///
+    /// Characters at and after the cursor are shifted right. Characters shifted
+    /// past the end of the line are lost.
+    pub fn insert_chars(&mut self, n: usize) {
+        if n == 0 || self.cursor.row >= self.rows || self.cursor.col >= self.cols {
+            return;
+        }
+
+        let row = self.cursor.row;
+        let col = self.cursor.col;
+        let n = n.min(self.cols - col);
+
+        // Shift characters to the right
+        let row_start = row * self.cols;
+        for c in (col + n..self.cols).rev() {
+            self.cells[row_start + c] = self.cells[row_start + c - n];
+        }
+
+        // Fill inserted positions with blanks
+        for c in col..col + n {
+            self.cells[row_start + c] = Cell::default();
+        }
+    }
+
+    /// Delete n characters at the cursor position.
+    ///
+    /// Characters after the deleted region are shifted left. Blank characters
+    /// are inserted at the end of the line.
+    pub fn delete_chars(&mut self, n: usize) {
+        if n == 0 || self.cursor.row >= self.rows || self.cursor.col >= self.cols {
+            return;
+        }
+
+        let row = self.cursor.row;
+        let col = self.cursor.col;
+        let n = n.min(self.cols - col);
+
+        let row_start = row * self.cols;
+
+        // Shift characters to the left
+        for c in col..self.cols - n {
+            self.cells[row_start + c] = self.cells[row_start + c + n];
+        }
+
+        // Fill trailing positions with blanks
+        for c in self.cols - n..self.cols {
+            self.cells[row_start + c] = Cell::default();
+        }
+    }
+
+    /// Insert n blank lines at the cursor row.
+    ///
+    /// Lines at and below the cursor are pushed down. Lines pushed past the
+    /// bottom of the scroll region are lost.
+    pub fn insert_lines(&mut self, n: usize) {
+        if n == 0 || self.cursor.row > self.scroll_region.1 {
+            return;
+        }
+
+        let (top, bottom) = self.scroll_region;
+        let start_row = self.cursor.row.max(top);
+        let region_height = bottom - start_row + 1;
+        let n = n.min(region_height);
+
+        // Move lines down within the scroll region
+        for row in (start_row + n..=bottom).rev() {
+            let src_start = (row - n) * self.cols;
+            let dst_start = row * self.cols;
+            for col in 0..self.cols {
+                self.cells[dst_start + col] = self.cells[src_start + col];
+            }
+        }
+
+        // Clear the inserted lines
+        for row in start_row..start_row + n {
+            let row_start = row * self.cols;
+            for col in 0..self.cols {
+                self.cells[row_start + col] = Cell::default();
+            }
+        }
+    }
+
+    /// Delete n lines at the cursor row.
+    ///
+    /// Lines below the deleted region are pulled up. Blank lines are inserted
+    /// at the bottom of the scroll region.
+    pub fn delete_lines(&mut self, n: usize) {
+        if n == 0 || self.cursor.row > self.scroll_region.1 {
+            return;
+        }
+
+        let (top, bottom) = self.scroll_region;
+        let start_row = self.cursor.row.max(top);
+        let region_height = bottom - start_row + 1;
+        let n = n.min(region_height);
+
+        // Move lines up within the scroll region
+        for row in start_row..=bottom.saturating_sub(n) {
+            let src_start = (row + n) * self.cols;
+            let dst_start = row * self.cols;
+            for col in 0..self.cols {
+                self.cells[dst_start + col] = self.cells[src_start + col];
+            }
+        }
+
+        // Clear the vacated lines at the bottom
+        for row in bottom - n + 1..=bottom {
+            let row_start = row * self.cols;
+            for col in 0..self.cols {
+                self.cells[row_start + col] = Cell::default();
+            }
+        }
+    }
+
     /// Get a row as a string.
     #[must_use]
     pub fn row_text(&self, row: usize) -> String {
@@ -545,5 +660,99 @@ mod tests {
         assert_eq!(buf.row_text(0), "Line 2");
         assert_eq!(buf.row_text(1), "Line 3");
         assert!(buf.row_text(2).is_empty());
+    }
+
+    #[test]
+    fn insert_chars_shifts_right() {
+        let mut buf = ScreenBuffer::new(1, 10);
+        // Write "ABCDE" at start
+        for c in "ABCDE".chars() {
+            buf.write_char(c);
+        }
+        // Cursor is now at col 5
+        // Move cursor to col 2 and insert 2 chars
+        buf.goto(0, 2);
+        buf.insert_chars(2);
+
+        // Result should be "AB  CDE" (C, D, E shifted right by 2)
+        assert_eq!(buf.row_text(0), "AB  CDE");
+    }
+
+    #[test]
+    fn insert_chars_at_end_of_line() {
+        let mut buf = ScreenBuffer::new(1, 5);
+        for c in "ABCDE".chars() {
+            buf.write_char(c);
+        }
+        // Move to col 3 and insert 3 chars
+        buf.goto(0, 3);
+        buf.insert_chars(3);
+
+        // D and E should be pushed off, result is "ABC"
+        assert_eq!(buf.row_text(0), "ABC");
+    }
+
+    #[test]
+    fn delete_chars_shifts_left() {
+        let mut buf = ScreenBuffer::new(1, 10);
+        for c in "ABCDEFGH".chars() {
+            buf.write_char(c);
+        }
+        // Move to col 2 and delete 3 chars
+        buf.goto(0, 2);
+        buf.delete_chars(3);
+
+        // C, D, E deleted; F, G, H shift left
+        // Result: "ABFGH"
+        assert_eq!(buf.row_text(0), "ABFGH");
+    }
+
+    #[test]
+    fn insert_lines_pushes_down() {
+        let mut buf = ScreenBuffer::new(5, 10);
+        for (i, text) in ["Line 0", "Line 1", "Line 2", "Line 3", "Line 4"]
+            .iter()
+            .enumerate()
+        {
+            buf.goto(i, 0);
+            for c in text.chars() {
+                buf.write_char(c);
+            }
+        }
+
+        // Insert 2 lines at row 1
+        buf.goto(1, 0);
+        buf.insert_lines(2);
+
+        assert_eq!(buf.row_text(0), "Line 0");
+        assert!(buf.row_text(1).is_empty()); // Inserted blank
+        assert!(buf.row_text(2).is_empty()); // Inserted blank
+        assert_eq!(buf.row_text(3), "Line 1"); // Pushed from row 1
+        assert_eq!(buf.row_text(4), "Line 2"); // Pushed from row 2
+        // Line 3 and Line 4 pushed off bottom
+    }
+
+    #[test]
+    fn delete_lines_pulls_up() {
+        let mut buf = ScreenBuffer::new(5, 10);
+        for (i, text) in ["Line 0", "Line 1", "Line 2", "Line 3", "Line 4"]
+            .iter()
+            .enumerate()
+        {
+            buf.goto(i, 0);
+            for c in text.chars() {
+                buf.write_char(c);
+            }
+        }
+
+        // Delete 2 lines at row 1
+        buf.goto(1, 0);
+        buf.delete_lines(2);
+
+        assert_eq!(buf.row_text(0), "Line 0");
+        assert_eq!(buf.row_text(1), "Line 3"); // Pulled from row 3
+        assert_eq!(buf.row_text(2), "Line 4"); // Pulled from row 4
+        assert!(buf.row_text(3).is_empty()); // Cleared
+        assert!(buf.row_text(4).is_empty()); // Cleared
     }
 }

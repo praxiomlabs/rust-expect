@@ -72,6 +72,9 @@ proptest = "1.9"
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
 
+# Comparative benchmarking (expectrl alternative)
+expectrl = "0.7"
+
 # Random number generation (for human typing simulation)
 rand = "0.9"
 

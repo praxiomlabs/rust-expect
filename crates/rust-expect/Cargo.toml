@@ -64,6 +64,7 @@ russh-keys = { workspace = true, optional = true }
 [dev-dependencies]
 proptest.workspace = true
 criterion.workspace = true
+expectrl.workspace = true
 
 [[bench]]
 name = "pattern_matching"
@@ -71,6 +72,10 @@ harness = false
 
 [[bench]]
 name = "screen_buffer"
+harness = false
+
+[[bench]]
+name = "comparative"
 harness = false
 
 [features]

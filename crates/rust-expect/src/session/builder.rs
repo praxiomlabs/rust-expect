@@ -296,6 +296,274 @@ impl QuickSession {
             .build()
     }
 
+    /// Create a session config for Node.js REPL.
+    #[must_use]
+    pub fn node() -> SessionConfig {
+        SessionBuilder::new()
+            .command("node")
+            .build()
+    }
+
+    /// Create a session config for Ruby IRB.
+    #[must_use]
+    pub fn ruby() -> SessionConfig {
+        SessionBuilder::new()
+            .command("irb")
+            .arg("--simple-prompt")
+            .build()
+    }
+
+    /// Create a session config for MySQL client.
+    #[must_use]
+    pub fn mysql(host: &str, user: &str, database: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("mysql")
+            .arg("-h")
+            .arg(host)
+            .arg("-u")
+            .arg(user)
+            .arg(database)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for MySQL client with password prompt.
+    #[must_use]
+    pub fn mysql_password(host: &str, user: &str, database: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("mysql")
+            .arg("-h")
+            .arg(host)
+            .arg("-u")
+            .arg(user)
+            .arg("-p")
+            .arg(database)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for PostgreSQL client.
+    #[must_use]
+    pub fn psql(host: &str, user: &str, database: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("psql")
+            .arg("-h")
+            .arg(host)
+            .arg("-U")
+            .arg(user)
+            .arg(database)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for Docker exec into a container.
+    #[must_use]
+    pub fn docker_exec(container: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("docker")
+            .arg("exec")
+            .arg("-it")
+            .arg(container)
+            .arg("/bin/sh")
+            .build()
+    }
+
+    /// Create a session config for Docker exec with a specific shell.
+    #[must_use]
+    pub fn docker_exec_shell(container: &str, shell: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("docker")
+            .arg("exec")
+            .arg("-it")
+            .arg(container)
+            .arg(shell)
+            .build()
+    }
+
+    /// Create a session config for Docker run with interactive shell.
+    #[must_use]
+    pub fn docker_run(image: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("docker")
+            .arg("run")
+            .arg("-it")
+            .arg("--rm")
+            .arg(image)
+            .build()
+    }
+
+    /// Create a session config for Redis CLI.
+    #[must_use]
+    pub fn redis_cli(host: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("redis-cli")
+            .arg("-h")
+            .arg(host)
+            .build()
+    }
+
+    /// Create a session config for MongoDB shell.
+    #[must_use]
+    pub fn mongosh(uri: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("mongosh")
+            .arg(uri)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for SQLite.
+    #[must_use]
+    pub fn sqlite(database: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("sqlite3")
+            .arg(database)
+            .build()
+    }
+
+    /// Create a session config for GDB debugger.
+    #[must_use]
+    pub fn gdb(program: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("gdb")
+            .arg(program)
+            .build()
+    }
+
+    /// Create a session config for LLDB debugger.
+    #[must_use]
+    pub fn lldb(program: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("lldb")
+            .arg(program)
+            .build()
+    }
+
+    /// Create a session config for Lua REPL.
+    #[must_use]
+    pub fn lua() -> SessionConfig {
+        SessionBuilder::new()
+            .command("lua")
+            .arg("-i")
+            .build()
+    }
+
+    /// Create a session config for Perl debugger.
+    #[must_use]
+    pub fn perl() -> SessionConfig {
+        SessionBuilder::new()
+            .command("perl")
+            .arg("-de0")
+            .build()
+    }
+
+    /// Create a session config for R REPL.
+    #[must_use]
+    pub fn r() -> SessionConfig {
+        SessionBuilder::new()
+            .command("R")
+            .arg("--no-save")
+            .arg("--no-restore")
+            .build()
+    }
+
+    /// Create a session config for Julia REPL.
+    #[must_use]
+    pub fn julia() -> SessionConfig {
+        SessionBuilder::new()
+            .command("julia")
+            .build()
+    }
+
+    /// Create a session config for Scala REPL.
+    #[must_use]
+    pub fn scala() -> SessionConfig {
+        SessionBuilder::new()
+            .command("scala")
+            .build()
+    }
+
+    /// Create a session config for Elixir IEx.
+    #[must_use]
+    pub fn iex() -> SessionConfig {
+        SessionBuilder::new()
+            .command("iex")
+            .build()
+    }
+
+    /// Create a session config for Clojure REPL.
+    #[must_use]
+    pub fn clojure() -> SessionConfig {
+        SessionBuilder::new()
+            .command("clj")
+            .build()
+    }
+
+    /// Create a session config for Haskell GHCi.
+    #[must_use]
+    pub fn ghci() -> SessionConfig {
+        SessionBuilder::new()
+            .command("ghci")
+            .build()
+    }
+
+    /// Create a session config for OCaml REPL.
+    #[must_use]
+    pub fn ocaml() -> SessionConfig {
+        SessionBuilder::new()
+            .command("ocaml")
+            .build()
+    }
+
+    /// Create a session config for kubectl exec into a pod.
+    #[must_use]
+    pub fn kubectl_exec(pod: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("kubectl")
+            .arg("exec")
+            .arg("-it")
+            .arg(pod)
+            .arg("--")
+            .arg("/bin/sh")
+            .build()
+    }
+
+    /// Create a session config for kubectl exec with namespace.
+    #[must_use]
+    pub fn kubectl_exec_ns(namespace: &str, pod: &str, shell: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("kubectl")
+            .arg("exec")
+            .arg("-it")
+            .arg("-n")
+            .arg(namespace)
+            .arg(pod)
+            .arg("--")
+            .arg(shell)
+            .build()
+    }
+
+    /// Create a session config for screen attach.
+    #[must_use]
+    pub fn screen_attach(session_name: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("screen")
+            .arg("-r")
+            .arg(session_name)
+            .build()
+    }
+
+    /// Create a session config for tmux attach.
+    #[must_use]
+    pub fn tmux_attach(session_name: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("tmux")
+            .arg("attach")
+            .arg("-t")
+            .arg(session_name)
+            .build()
+    }
+
     /// Get the default shell for the current platform.
     #[must_use]
     pub fn default_shell() -> String {
@@ -401,5 +669,128 @@ mod tests {
         #[cfg(not(windows))]
         assert_eq!(config.command, "python3");
         assert!(config.args.contains(&"-i".to_string()));
+    }
+
+    #[test]
+    fn quick_session_node() {
+        let config = QuickSession::node();
+        assert_eq!(config.command, "node");
+    }
+
+    #[test]
+    fn quick_session_ruby() {
+        let config = QuickSession::ruby();
+        assert_eq!(config.command, "irb");
+        assert!(config.args.contains(&"--simple-prompt".to_string()));
+    }
+
+    #[test]
+    fn quick_session_mysql() {
+        let config = QuickSession::mysql("localhost", "root", "testdb");
+        assert_eq!(config.command, "mysql");
+        assert!(config.args.contains(&"-h".to_string()));
+        assert!(config.args.contains(&"localhost".to_string()));
+        assert!(config.args.contains(&"-u".to_string()));
+        assert!(config.args.contains(&"root".to_string()));
+        assert!(config.args.contains(&"testdb".to_string()));
+    }
+
+    #[test]
+    fn quick_session_psql() {
+        let config = QuickSession::psql("localhost", "postgres", "mydb");
+        assert_eq!(config.command, "psql");
+        assert!(config.args.contains(&"-h".to_string()));
+        assert!(config.args.contains(&"-U".to_string()));
+        assert!(config.args.contains(&"postgres".to_string()));
+    }
+
+    #[test]
+    fn quick_session_docker_exec() {
+        let config = QuickSession::docker_exec("my-container");
+        assert_eq!(config.command, "docker");
+        assert!(config.args.contains(&"exec".to_string()));
+        assert!(config.args.contains(&"-it".to_string()));
+        assert!(config.args.contains(&"my-container".to_string()));
+        assert!(config.args.contains(&"/bin/sh".to_string()));
+    }
+
+    #[test]
+    fn quick_session_docker_run() {
+        let config = QuickSession::docker_run("ubuntu:latest");
+        assert_eq!(config.command, "docker");
+        assert!(config.args.contains(&"run".to_string()));
+        assert!(config.args.contains(&"-it".to_string()));
+        assert!(config.args.contains(&"--rm".to_string()));
+        assert!(config.args.contains(&"ubuntu:latest".to_string()));
+    }
+
+    #[test]
+    fn quick_session_redis() {
+        let config = QuickSession::redis_cli("redis.example.com");
+        assert_eq!(config.command, "redis-cli");
+        assert!(config.args.contains(&"-h".to_string()));
+        assert!(config.args.contains(&"redis.example.com".to_string()));
+    }
+
+    #[test]
+    fn quick_session_sqlite() {
+        let config = QuickSession::sqlite("test.db");
+        assert_eq!(config.command, "sqlite3");
+        assert!(config.args.contains(&"test.db".to_string()));
+    }
+
+    #[test]
+    fn quick_session_gdb() {
+        let config = QuickSession::gdb("./my_program");
+        assert_eq!(config.command, "gdb");
+        assert!(config.args.contains(&"./my_program".to_string()));
+    }
+
+    #[test]
+    fn quick_session_kubectl() {
+        let config = QuickSession::kubectl_exec("my-pod");
+        assert_eq!(config.command, "kubectl");
+        assert!(config.args.contains(&"exec".to_string()));
+        assert!(config.args.contains(&"-it".to_string()));
+        assert!(config.args.contains(&"my-pod".to_string()));
+        assert!(config.args.contains(&"--".to_string()));
+        assert!(config.args.contains(&"/bin/sh".to_string()));
+    }
+
+    #[test]
+    fn quick_session_kubectl_ns() {
+        let config = QuickSession::kubectl_exec_ns("production", "api-pod", "/bin/bash");
+        assert_eq!(config.command, "kubectl");
+        assert!(config.args.contains(&"-n".to_string()));
+        assert!(config.args.contains(&"production".to_string()));
+        assert!(config.args.contains(&"api-pod".to_string()));
+        assert!(config.args.contains(&"/bin/bash".to_string()));
+    }
+
+    #[test]
+    fn quick_session_repls() {
+        // Test various REPL helpers
+        assert_eq!(QuickSession::lua().command, "lua");
+        assert_eq!(QuickSession::julia().command, "julia");
+        assert_eq!(QuickSession::scala().command, "scala");
+        assert_eq!(QuickSession::iex().command, "iex");
+        assert_eq!(QuickSession::clojure().command, "clj");
+        assert_eq!(QuickSession::ghci().command, "ghci");
+        assert_eq!(QuickSession::ocaml().command, "ocaml");
+        assert_eq!(QuickSession::r().command, "R");
+    }
+
+    #[test]
+    fn quick_session_tmux_screen() {
+        let config = QuickSession::tmux_attach("mysession");
+        assert_eq!(config.command, "tmux");
+        assert!(config.args.contains(&"attach".to_string()));
+        assert!(config.args.contains(&"-t".to_string()));
+        assert!(config.args.contains(&"mysession".to_string()));
+
+        let config = QuickSession::screen_attach("myscreen");
+        assert_eq!(config.command, "screen");
+        assert!(config.args.contains(&"-r".to_string()));
+        assert!(config.args.contains(&"myscreen".to_string()));
     }
 }

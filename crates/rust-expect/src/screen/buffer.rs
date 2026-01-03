@@ -609,6 +609,349 @@ impl fmt::Debug for ScreenBuffer {
     }
 }
 
+/// Type of change detected in a cell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeType {
+    /// No change.
+    None,
+    /// Character changed.
+    Char,
+    /// Foreground color changed.
+    FgColor,
+    /// Background color changed.
+    BgColor,
+    /// Attributes changed.
+    Attrs,
+    /// Multiple properties changed.
+    Multiple,
+}
+
+/// A change to a single cell.
+#[derive(Debug, Clone)]
+pub struct CellChange {
+    /// Row position.
+    pub row: usize,
+    /// Column position.
+    pub col: usize,
+    /// Old cell value.
+    pub old: Cell,
+    /// New cell value.
+    pub new: Cell,
+    /// Type of change.
+    pub change_type: ChangeType,
+}
+
+impl CellChange {
+    /// Create a new cell change.
+    #[must_use]
+    pub fn new(row: usize, col: usize, old: Cell, new: Cell) -> Self {
+        let change_type = Self::compute_change_type(&old, &new);
+        Self {
+            row,
+            col,
+            old,
+            new,
+            change_type,
+        }
+    }
+
+    /// Compute the type of change between two cells.
+    fn compute_change_type(old: &Cell, new: &Cell) -> ChangeType {
+        let mut changes = 0;
+        let mut last_type = ChangeType::None;
+
+        if old.char != new.char {
+            changes += 1;
+            last_type = ChangeType::Char;
+        }
+        if old.fg != new.fg {
+            changes += 1;
+            last_type = ChangeType::FgColor;
+        }
+        if old.bg != new.bg {
+            changes += 1;
+            last_type = ChangeType::BgColor;
+        }
+        if old.attrs != new.attrs {
+            changes += 1;
+            last_type = ChangeType::Attrs;
+        }
+
+        match changes {
+            0 => ChangeType::None,
+            1 => last_type,
+            _ => ChangeType::Multiple,
+        }
+    }
+
+    /// Check if this is a meaningful change (not just whitespace).
+    #[must_use]
+    pub fn is_significant(&self) -> bool {
+        // A change is significant if either old or new is not an empty cell
+        !self.old.is_empty() || !self.new.is_empty()
+    }
+}
+
+/// A diff between two screen buffers.
+#[derive(Debug, Clone)]
+pub struct ScreenDiff {
+    /// Changed cells.
+    changes: Vec<CellChange>,
+    /// Whether cursor position changed.
+    cursor_changed: bool,
+    /// Old cursor position.
+    old_cursor: Cursor,
+    /// New cursor position.
+    new_cursor: Cursor,
+    /// Whether dimensions changed.
+    dimensions_changed: bool,
+    /// Old dimensions (rows, cols).
+    old_dims: (usize, usize),
+    /// New dimensions (rows, cols).
+    new_dims: (usize, usize),
+}
+
+impl ScreenDiff {
+    /// Compute the diff between two screen buffers.
+    #[must_use]
+    pub fn compute(old: &ScreenBuffer, new: &ScreenBuffer) -> Self {
+        let mut changes = Vec::new();
+
+        let dimensions_changed = old.rows != new.rows || old.cols != new.cols;
+        let cursor_changed = old.cursor != new.cursor;
+
+        // Compare cells in the overlapping region
+        let min_rows = old.rows.min(new.rows);
+        let min_cols = old.cols.min(new.cols);
+
+        for row in 0..min_rows {
+            for col in 0..min_cols {
+                let old_cell = old.get(row, col).copied().unwrap_or_default();
+                let new_cell = new.get(row, col).copied().unwrap_or_default();
+
+                if old_cell != new_cell {
+                    changes.push(CellChange::new(row, col, old_cell, new_cell));
+                }
+            }
+        }
+
+        // Handle cells in rows that only exist in the new buffer
+        if new.rows > old.rows {
+            for row in old.rows..new.rows {
+                for col in 0..new.cols {
+                    let new_cell = new.get(row, col).copied().unwrap_or_default();
+                    if !new_cell.is_empty() {
+                        changes.push(CellChange::new(row, col, Cell::default(), new_cell));
+                    }
+                }
+            }
+        }
+
+        // Handle cells in columns that only exist in the new buffer
+        if new.cols > old.cols {
+            for row in 0..min_rows {
+                for col in old.cols..new.cols {
+                    let new_cell = new.get(row, col).copied().unwrap_or_default();
+                    if !new_cell.is_empty() {
+                        changes.push(CellChange::new(row, col, Cell::default(), new_cell));
+                    }
+                }
+            }
+        }
+
+        Self {
+            changes,
+            cursor_changed,
+            old_cursor: old.cursor,
+            new_cursor: new.cursor,
+            dimensions_changed,
+            old_dims: (old.rows, old.cols),
+            new_dims: (new.rows, new.cols),
+        }
+    }
+
+    /// Check if there are any changes.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty() && !self.cursor_changed && !self.dimensions_changed
+    }
+
+    /// Get the number of cell changes.
+    #[must_use]
+    pub fn change_count(&self) -> usize {
+        self.changes.len()
+    }
+
+    /// Get all cell changes.
+    #[must_use]
+    pub fn changes(&self) -> &[CellChange] {
+        &self.changes
+    }
+
+    /// Get significant changes only (non-whitespace).
+    #[must_use]
+    pub fn significant_changes(&self) -> Vec<&CellChange> {
+        self.changes.iter().filter(|c| c.is_significant()).collect()
+    }
+
+    /// Check if cursor changed.
+    #[must_use]
+    pub fn cursor_changed(&self) -> bool {
+        self.cursor_changed
+    }
+
+    /// Get the old cursor position.
+    #[must_use]
+    pub fn old_cursor(&self) -> Cursor {
+        self.old_cursor
+    }
+
+    /// Get the new cursor position.
+    #[must_use]
+    pub fn new_cursor(&self) -> Cursor {
+        self.new_cursor
+    }
+
+    /// Check if dimensions changed.
+    #[must_use]
+    pub fn dimensions_changed(&self) -> bool {
+        self.dimensions_changed
+    }
+
+    /// Get changed rows (sorted, deduplicated).
+    #[must_use]
+    pub fn changed_rows(&self) -> Vec<usize> {
+        let mut rows: Vec<usize> = self.changes.iter().map(|c| c.row).collect();
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+
+    /// Get changes for a specific row.
+    #[must_use]
+    pub fn row_changes(&self, row: usize) -> Vec<&CellChange> {
+        self.changes.iter().filter(|c| c.row == row).collect()
+    }
+
+    /// Generate a human-readable diff report.
+    #[must_use]
+    pub fn report(&self) -> String {
+        let mut output = String::new();
+
+        if self.is_empty() {
+            output.push_str("No changes detected.\n");
+            return output;
+        }
+
+        if self.dimensions_changed {
+            output.push_str(&format!(
+                "Dimensions changed: {}x{} -> {}x{}\n",
+                self.old_dims.1, self.old_dims.0,
+                self.new_dims.1, self.new_dims.0
+            ));
+        }
+
+        if self.cursor_changed {
+            output.push_str(&format!(
+                "Cursor moved: ({}, {}) -> ({}, {})\n",
+                self.old_cursor.row, self.old_cursor.col,
+                self.new_cursor.row, self.new_cursor.col
+            ));
+        }
+
+        let significant = self.significant_changes();
+        if !significant.is_empty() {
+            output.push_str(&format!("{} cell(s) changed:\n", significant.len()));
+
+            for row in self.changed_rows() {
+                let row_changes: Vec<_> = significant.iter()
+                    .filter(|c| c.row == row)
+                    .collect();
+
+                if !row_changes.is_empty() {
+                    output.push_str(&format!("  Row {}:\n", row));
+                    for change in row_changes {
+                        let old_char = if change.old.char.is_control() {
+                            format!("\\x{:02x}", change.old.char as u8)
+                        } else {
+                            change.old.char.to_string()
+                        };
+                        let new_char = if change.new.char.is_control() {
+                            format!("\\x{:02x}", change.new.char as u8)
+                        } else {
+                            change.new.char.to_string()
+                        };
+                        output.push_str(&format!(
+                            "    Col {}: '{}' -> '{}' ({:?})\n",
+                            change.col, old_char, new_char, change.change_type
+                        ));
+                    }
+                }
+            }
+        }
+
+        output
+    }
+
+    /// Generate a visual side-by-side diff for a specific row.
+    #[must_use]
+    pub fn row_visual_diff(&self, old: &ScreenBuffer, new: &ScreenBuffer, row: usize) -> String {
+        let old_text = old.row_text(row);
+        let new_text = new.row_text(row);
+
+        if old_text == new_text {
+            format!("  {}: {}", row, old_text)
+        } else {
+            format!("- {}: {}\n+ {}: {}", row, old_text, row, new_text)
+        }
+    }
+
+    /// Generate a complete visual diff output.
+    #[must_use]
+    pub fn visual_diff(&self, old: &ScreenBuffer, new: &ScreenBuffer) -> String {
+        let mut output = String::new();
+        let max_rows = old.rows.max(new.rows);
+
+        for row in 0..max_rows {
+            let old_text = if row < old.rows { old.row_text(row) } else { String::new() };
+            let new_text = if row < new.rows { new.row_text(row) } else { String::new() };
+
+            if old_text != new_text {
+                if !old_text.is_empty() || row < old.rows {
+                    output.push_str(&format!("- {}: {}\n", row, old_text));
+                }
+                if !new_text.is_empty() || row < new.rows {
+                    output.push_str(&format!("+ {}: {}\n", row, new_text));
+                }
+            } else if !old_text.is_empty() {
+                output.push_str(&format!("  {}: {}\n", row, old_text));
+            }
+        }
+
+        output
+    }
+}
+
+impl ScreenBuffer {
+    /// Compute the diff between this buffer and another.
+    #[must_use]
+    pub fn diff(&self, other: &ScreenBuffer) -> ScreenDiff {
+        ScreenDiff::compute(self, other)
+    }
+
+    /// Check if this buffer equals another (content and cursor).
+    #[must_use]
+    pub fn equals(&self, other: &ScreenBuffer) -> bool {
+        self.diff(other).is_empty()
+    }
+
+    /// Create a snapshot (clone) of this buffer for later comparison.
+    #[must_use]
+    pub fn snapshot(&self) -> ScreenBuffer {
+        self.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -754,5 +1097,181 @@ mod tests {
         assert_eq!(buf.row_text(2), "Line 4"); // Pulled from row 4
         assert!(buf.row_text(3).is_empty()); // Cleared
         assert!(buf.row_text(4).is_empty()); // Cleared
+    }
+
+    #[test]
+    fn diff_no_changes() {
+        let buf1 = ScreenBuffer::new(3, 10);
+        let buf2 = ScreenBuffer::new(3, 10);
+
+        let diff = buf1.diff(&buf2);
+        assert!(diff.is_empty());
+        assert_eq!(diff.change_count(), 0);
+        assert!(!diff.cursor_changed());
+        assert!(!diff.dimensions_changed());
+    }
+
+    #[test]
+    fn diff_character_changes() {
+        let mut buf1 = ScreenBuffer::new(3, 10);
+        let mut buf2 = ScreenBuffer::new(3, 10);
+
+        for c in "Hello".chars() {
+            buf1.write_char(c);
+        }
+        buf1.goto(0, 0);
+
+        for c in "World".chars() {
+            buf2.write_char(c);
+        }
+        buf2.goto(0, 0);
+
+        let diff = buf1.diff(&buf2);
+        assert!(!diff.is_empty());
+        // "Hello" vs "World": H!=W, e!=o, l!=r, l==l (same!), o!=d = 4 changes
+        assert_eq!(diff.change_count(), 4);
+        assert_eq!(diff.changed_rows(), vec![0]);
+    }
+
+    #[test]
+    fn diff_cursor_moved() {
+        let mut buf1 = ScreenBuffer::new(3, 10);
+        let mut buf2 = buf1.snapshot();
+
+        buf2.goto(2, 5);
+
+        let diff = buf1.diff(&buf2);
+        assert!(!diff.is_empty());
+        assert!(diff.cursor_changed());
+        assert_eq!(diff.old_cursor().row, 0);
+        assert_eq!(diff.old_cursor().col, 0);
+        assert_eq!(diff.new_cursor().row, 2);
+        assert_eq!(diff.new_cursor().col, 5);
+    }
+
+    #[test]
+    fn diff_dimensions_changed() {
+        let buf1 = ScreenBuffer::new(3, 10);
+        let buf2 = ScreenBuffer::new(5, 15);
+
+        let diff = buf1.diff(&buf2);
+        assert!(diff.dimensions_changed());
+    }
+
+    #[test]
+    fn diff_significant_changes() {
+        let mut buf1 = ScreenBuffer::new(3, 10);
+        let mut buf2 = ScreenBuffer::new(3, 10);
+
+        for c in "Hi".chars() {
+            buf2.write_char(c);
+        }
+        buf2.goto(0, 0);
+
+        let diff = buf1.diff(&buf2);
+        let significant = diff.significant_changes();
+        assert_eq!(significant.len(), 2); // Only "Hi" are significant
+    }
+
+    #[test]
+    fn diff_report() {
+        let buf1 = ScreenBuffer::new(3, 10);
+        let mut buf2 = ScreenBuffer::new(3, 10);
+
+        for c in "ABC".chars() {
+            buf2.write_char(c);
+        }
+
+        let diff = buf1.diff(&buf2);
+        let report = diff.report();
+
+        assert!(report.contains("3 cell(s) changed"));
+        assert!(report.contains("Row 0"));
+    }
+
+    #[test]
+    fn diff_visual_output() {
+        let mut buf1 = ScreenBuffer::new(3, 10);
+        let mut buf2 = ScreenBuffer::new(3, 10);
+
+        for c in "Line 1".chars() {
+            buf1.write_char(c);
+        }
+        buf1.goto(0, 0);
+
+        for c in "Line 2".chars() {
+            buf2.write_char(c);
+        }
+        buf2.goto(0, 0);
+
+        let diff = buf1.diff(&buf2);
+        let visual = diff.visual_diff(&buf1, &buf2);
+
+        assert!(visual.contains("- 0: Line 1"));
+        assert!(visual.contains("+ 0: Line 2"));
+    }
+
+    #[test]
+    fn buffer_equals() {
+        let buf1 = ScreenBuffer::new(3, 10);
+        let buf2 = ScreenBuffer::new(3, 10);
+        let buf3 = ScreenBuffer::new(5, 10);
+
+        assert!(buf1.equals(&buf2));
+        assert!(!buf1.equals(&buf3));
+    }
+
+    #[test]
+    fn buffer_snapshot() {
+        let mut buf = ScreenBuffer::new(3, 10);
+        for c in "Test".chars() {
+            buf.write_char(c);
+        }
+
+        let snapshot = buf.snapshot();
+        assert!(buf.equals(&snapshot));
+
+        buf.clear();
+        assert!(!buf.equals(&snapshot));
+    }
+
+    #[test]
+    fn cell_change_types() {
+        let old = Cell::new('A');
+        let new_char = Cell::new('B');
+        let change = CellChange::new(0, 0, old, new_char);
+        assert_eq!(change.change_type, ChangeType::Char);
+
+        let new_fg = Cell::new('A').with_fg(Color::Red);
+        let change = CellChange::new(0, 0, old, new_fg);
+        assert_eq!(change.change_type, ChangeType::FgColor);
+
+        let new_multiple = Cell::new('B').with_fg(Color::Red);
+        let change = CellChange::new(0, 0, old, new_multiple);
+        assert_eq!(change.change_type, ChangeType::Multiple);
+    }
+
+    #[test]
+    fn row_changes_filter() {
+        let buf1 = ScreenBuffer::new(3, 10);
+        let mut buf2 = ScreenBuffer::new(3, 10);
+
+        buf2.goto(0, 0);
+        for c in "Row 0".chars() {
+            buf2.write_char(c);
+        }
+        buf2.goto(1, 0);
+        for c in "Row 1".chars() {
+            buf2.write_char(c);
+        }
+
+        let diff = buf1.diff(&buf2);
+        let row0_changes = diff.row_changes(0);
+        let row1_changes = diff.row_changes(1);
+
+        // "Row 0" and "Row 1" each have a space at position 3 that matches
+        // the default cell (space), so only 4 characters differ per row
+        assert_eq!(row0_changes.len(), 4); // R, o, w, 0
+        assert_eq!(row1_changes.len(), 4); // R, o, w, 1
     }
 }

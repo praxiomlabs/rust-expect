@@ -20,7 +20,7 @@ pub mod buffer;
 pub mod parser;
 pub mod query;
 
-pub use buffer::{Attributes, Cell, Color, Cursor, ScreenBuffer};
+pub use buffer::{Attributes, Cell, CellChange, ChangeType, Color, Cursor, ScreenBuffer, ScreenDiff};
 pub use parser::{AnsiParser, AnsiSequence, EraseMode, ParseResult};
 pub use query::{Region, ScreenQuery, ScreenQueryExt};
 

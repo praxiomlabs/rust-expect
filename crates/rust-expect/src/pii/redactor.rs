@@ -104,17 +104,20 @@ impl PiiRedactor {
 
     /// Get the replacement string for a match.
     fn get_replacement(&self, m: &PiiMatch) -> String {
-        // Check for custom placeholder first
-        if let Some(custom) = self.custom_placeholders.get(&m.pii_type) {
-            return custom.clone();
+        // Check for custom placeholder first (for built-in types only)
+        if !m.is_custom() {
+            if let Some(custom) = self.custom_placeholders.get(&m.pii_type) {
+                return custom.clone();
+            }
         }
 
         match self.style {
-            RedactionStyle::Placeholder => m.pii_type.placeholder().to_string(),
+            // Use PiiMatch::placeholder() which handles both built-in and custom patterns
+            RedactionStyle::Placeholder => m.placeholder().to_string(),
             RedactionStyle::Asterisks => "*".repeat(m.len()),
             RedactionStyle::Xs => "X".repeat(m.len()),
             RedactionStyle::PartialMask => self.partial_mask(&m.text),
-            RedactionStyle::Custom => m.pii_type.placeholder().to_string(),
+            RedactionStyle::Custom => m.placeholder().to_string(),
         }
     }
 
@@ -268,5 +271,41 @@ mod tests {
 
         let combined = format!("{out1}{out2}{out3}");
         assert!(!combined.contains("user@example.com"));
+    }
+
+    #[test]
+    fn redact_custom_pattern() {
+        let detector = PiiDetector::new()
+            .add_pattern("employee_id", r"EMP-\d{6}", "[EMPLOYEE ID REDACTED]", 0.9);
+        let redactor = PiiRedactor::with_detector(detector);
+
+        let result = redactor.redact("Contact EMP-123456 for assistance");
+        assert!(result.contains("[EMPLOYEE ID REDACTED]"));
+        assert!(!result.contains("EMP-123456"));
+    }
+
+    #[test]
+    fn redact_custom_with_builtin() {
+        let detector = PiiDetector::new()
+            .add_pattern("project", r"PROJ-[A-Z]{4}", "[PROJECT]", 0.9);
+        let redactor = PiiRedactor::with_detector(detector);
+
+        let result = redactor.redact("PROJ-ABCD owner: user@example.com");
+        assert!(result.contains("[PROJECT]"));
+        assert!(result.contains("[EMAIL REDACTED]"));
+        assert!(!result.contains("PROJ-ABCD"));
+        assert!(!result.contains("user@example.com"));
+    }
+
+    #[test]
+    fn redact_custom_asterisks() {
+        let detector = PiiDetector::custom_only()
+            .add_pattern("code", r"CODE-\d{4}", "[CODE]", 0.9);
+        let redactor = PiiRedactor::with_detector(detector)
+            .style(RedactionStyle::Asterisks);
+
+        let result = redactor.redact("Use CODE-1234 to access");
+        assert!(result.contains("*********")); // 9 asterisks for "CODE-1234"
+        assert!(!result.contains("CODE-1234"));
     }
 }

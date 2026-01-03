@@ -8,6 +8,7 @@
 //! - Email addresses
 //! - Phone numbers
 //! - API keys and tokens
+//! - Custom patterns (user-defined)
 //!
 //! # Example
 //!
@@ -18,6 +19,23 @@
 //! let safe_text = redactor.redact("SSN: 123-45-6789, Email: user@example.com");
 //! assert!(!safe_text.contains("123-45-6789"));
 //! ```
+//!
+//! # Custom Patterns
+//!
+//! You can add custom detection patterns for organization-specific data:
+//!
+//! ```rust
+//! use rust_expect::pii::{PiiDetector, PiiRedactor};
+//!
+//! let detector = PiiDetector::new()
+//!     .add_pattern("employee_id", r"EMP-\d{6}", "[EMPLOYEE ID]", 0.9)
+//!     .add_pattern("project_code", r"PROJ-[A-Z]{4}", "[PROJECT]", 0.85);
+//!
+//! let redactor = PiiRedactor::with_detector(detector);
+//! let safe = redactor.redact("Contact EMP-123456 about PROJ-DEMO");
+//! assert!(safe.contains("[EMPLOYEE ID]"));
+//! assert!(safe.contains("[PROJECT]"));
+//! ```
 
 pub mod api_key;
 pub mod credit_card;
@@ -25,7 +43,7 @@ pub mod detector;
 pub mod redactor;
 pub mod ssn;
 
-pub use detector::{PiiDetector, PiiMatch, PiiType};
+pub use detector::{CustomPattern, PiiDetector, PiiMatch, PiiType};
 pub use redactor::{PiiRedactor, RedactionStyle, StreamingRedactor};
 
 /// Quick check if text contains any PII.

@@ -1,19 +1,11 @@
 //! Credit card detection and validation.
 
-use regex::Regex;
-use std::sync::LazyLock;
-
-static CARD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(\d{4})[- ]?(\d{4})[- ]?(\d{4})[- ]?(\d{4})\b")
-        .expect("Credit card pattern is a valid regex")
-});
-
 /// Credit card type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CardType {
     /// Visa card (starts with 4).
     Visa,
-    /// MasterCard (starts with 51-55).
+    /// `MasterCard` (starts with 51-55).
     MasterCard,
     /// American Express (starts with 34 or 37).
     Amex,

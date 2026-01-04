@@ -41,10 +41,12 @@ pub mod api_key;
 pub mod credit_card;
 pub mod detector;
 pub mod redactor;
+pub mod registry;
 pub mod ssn;
 
 pub use detector::{CustomPattern, PiiDetector, PiiMatch, PiiType};
 pub use redactor::{PiiRedactor, RedactionStyle, StreamingRedactor};
+pub use registry::{PatternEntry, PatternRegistry, PatternSet};
 
 /// Quick check if text contains any PII.
 #[must_use]

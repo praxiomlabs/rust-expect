@@ -69,7 +69,7 @@ impl PiiType {
 
     /// Get the default redaction placeholder for this PII type.
     ///
-    /// For `Custom` types, this returns "[REDACTED]". Use `PiiMatch::placeholder()`
+    /// For `Custom` types, this returns `"[REDACTED]"`. Use `PiiMatch::placeholder()`
     /// to get the actual custom placeholder.
     #[must_use]
     pub const fn placeholder(&self) -> &'static str {
@@ -235,7 +235,7 @@ static IP_ADDRESS_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 /// with custom names and placeholders.
 #[derive(Debug, Clone)]
 pub struct CustomPattern {
-    /// Name of the pattern (e.g., "employee_id").
+    /// Name of the pattern (e.g., `"employee_id"`).
     name: String,
     /// Compiled regex pattern.
     regex: Regex,

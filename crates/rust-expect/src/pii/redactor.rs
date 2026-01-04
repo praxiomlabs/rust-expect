@@ -8,7 +8,7 @@ use super::detector::{PiiDetector, PiiMatch, PiiType};
 /// Redaction style.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RedactionStyle {
-    /// Replace with a placeholder (e.g., `[REDACTED]`).
+    /// Replace with a placeholder (e.g., `\[REDACTED\]`).
     Placeholder,
     /// Replace with asterisks.
     Asterisks,

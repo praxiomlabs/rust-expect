@@ -12,5 +12,5 @@ mod mock_session;
 pub use assertions::{assert_output_contains, assert_output_matches, OutputAssertions};
 pub use builders::{ExpectTestBuilder, SessionTestBuilder};
 pub use fake_pty::{FakePty, FakePtyPair};
-pub use fixtures::{Fixtures, TestFixture};
+pub use fixtures::{find_fixtures_dir, Fixtures, TestFixture};
 pub use mock_session::{RecordedInteraction, TestSession, TestSessionBuilder};

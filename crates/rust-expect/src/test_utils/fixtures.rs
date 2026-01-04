@@ -198,6 +198,23 @@ impl Fixtures {
 }
 
 /// Find the fixtures directory relative to the project root.
+///
+/// Searches up to 5 parent directories looking for either a `fixtures`
+/// directory or a `tests/fixtures` directory.
+///
+/// # Returns
+///
+/// Returns `Some(path)` if a fixtures directory is found, `None` otherwise.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use rust_expect::test_utils::find_fixtures_dir;
+///
+/// if let Some(fixtures_path) = find_fixtures_dir() {
+///     println!("Found fixtures at: {}", fixtures_path.display());
+/// }
+/// ```
 #[must_use]
 pub fn find_fixtures_dir() -> Option<PathBuf> {
     let mut path = std::env::current_dir().ok()?;
@@ -252,5 +269,17 @@ mod tests {
         assert!(fixtures.get("login_prompt").is_some());
         assert!(fixtures.get("shell_prompt").is_some());
         assert!(fixtures.get("ansi_output").is_some());
+    }
+
+    #[test]
+    fn test_find_fixtures_dir() {
+        // This function searches for fixtures directories relative to cwd
+        // It may or may not find one depending on where tests are run
+        let result = find_fixtures_dir();
+        // The function should return Some if a fixtures dir exists, None otherwise
+        // We just verify it doesn't panic and returns a valid Option
+        if let Some(path) = result {
+            assert!(path.is_dir(), "found path should be a directory");
+        }
     }
 }

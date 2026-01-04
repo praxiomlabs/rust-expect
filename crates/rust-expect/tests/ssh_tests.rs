@@ -5,7 +5,7 @@
 
 #![cfg(feature = "ssh")]
 
-use rust_expect::backend::ssh::{AuthMethod, SshConfig, SshCredentials};
+use rust_expect::backend::ssh::{AuthMethod, HostKeyVerification, SshConfig, SshCredentials};
 use std::time::Duration;
 
 #[test]
@@ -137,4 +137,89 @@ fn auth_method_agent() {
 
     assert!(!method.is_password());
     assert!(!method.is_public_key());
+}
+
+// Host key verification tests
+
+#[test]
+fn host_key_verification_default() {
+    let verification = HostKeyVerification::default();
+    assert_eq!(verification, HostKeyVerification::KnownHosts);
+}
+
+#[test]
+fn host_key_verification_reject_unknown() {
+    let verification = HostKeyVerification::RejectUnknown;
+    let config = SshConfig::new("example.com").host_key_verification(verification);
+    assert_eq!(config.host_key_verification, HostKeyVerification::RejectUnknown);
+}
+
+#[test]
+fn host_key_verification_known_hosts() {
+    let verification = HostKeyVerification::KnownHosts;
+    let config = SshConfig::new("example.com").host_key_verification(verification);
+    assert_eq!(config.host_key_verification, HostKeyVerification::KnownHosts);
+}
+
+#[test]
+fn host_key_verification_tofu() {
+    let verification = HostKeyVerification::Tofu;
+    let config = SshConfig::new("example.com").host_key_verification(verification);
+    assert_eq!(config.host_key_verification, HostKeyVerification::Tofu);
+}
+
+#[test]
+#[cfg(feature = "insecure-skip-verify")]
+fn host_key_verification_accept_all() {
+    let verification = HostKeyVerification::AcceptAll;
+    let config = SshConfig::new("example.com").host_key_verification(verification);
+    assert_eq!(config.host_key_verification, HostKeyVerification::AcceptAll);
+}
+
+// Auth method with passphrase tests
+
+#[test]
+fn auth_method_public_key_with_passphrase() {
+    let method = AuthMethod::public_key_with_passphrase("/path/to/key", "my_passphrase");
+
+    assert!(method.is_public_key());
+    if let AuthMethod::PublicKey { passphrase, .. } = method {
+        assert_eq!(passphrase, Some("my_passphrase".to_string()));
+    } else {
+        panic!("Expected PublicKey variant");
+    }
+}
+
+#[test]
+fn ssh_credentials_with_key_passphrase() {
+    let creds = SshCredentials::new("testuser")
+        .with_key_passphrase("/path/to/key", "passphrase");
+
+    assert_eq!(creds.username, "testuser");
+    assert_eq!(creds.auth_methods.len(), 1);
+    assert!(creds.auth_methods[0].is_public_key());
+}
+
+// Combined configuration tests
+
+#[test]
+fn ssh_full_config() {
+    let creds = SshCredentials::new("admin")
+        .with_agent()
+        .with_key("/path/to/key")
+        .with_password("fallback");
+
+    let config = SshConfig::new("secure-server.com")
+        .port(22)
+        .credentials(creds)
+        .connect_timeout(Duration::from_secs(30))
+        .host_key_verification(HostKeyVerification::KnownHosts)
+        .with_compression();
+
+    assert_eq!(config.host, "secure-server.com");
+    assert_eq!(config.port, 22);
+    assert!(config.compression);
+    assert_eq!(config.credentials.auth_methods.len(), 3);
+    assert_eq!(config.connect_timeout, Duration::from_secs(30));
+    assert_eq!(config.host_key_verification, HostKeyVerification::KnownHosts);
 }

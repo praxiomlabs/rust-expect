@@ -114,9 +114,9 @@ mod cross_platform {
         assert_eq!(uniform.close, Duration::from_secs(30));
 
         // Default timeout (check that default() works correctly)
-        let default = TimeoutConfig::default();
+        let default_config = TimeoutConfig::default();
         // Default expect timeout is 30 seconds
-        assert_eq!(default.expect, Duration::from_secs(30));
+        assert_eq!(default_config.expect, Duration::from_secs(30));
     }
 
     /// Verify pattern matching with Windows-style content works cross-platform.

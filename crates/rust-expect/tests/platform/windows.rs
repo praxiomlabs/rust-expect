@@ -157,8 +157,9 @@ fn pty_backend_windows() {
 #[test]
 fn pty_config_windows() {
     let config = PtyConfig::default();
-    assert_eq!(config.rows, 24);
-    assert_eq!(config.cols, 80);
+    // dimensions is (cols, rows)
+    assert_eq!(config.dimensions.1, 24); // rows
+    assert_eq!(config.dimensions.0, 80); // cols
 }
 
 /// Test Windows-specific session timeouts.
@@ -167,11 +168,9 @@ fn windows_session_timeout() {
     let config = SessionBuilder::new()
         .command("cmd.exe")
         .timeout(Duration::from_secs(60))
-        .read_timeout(Duration::from_secs(30))
         .build();
 
     assert_eq!(config.timeout.default, Duration::from_secs(60));
-    assert_eq!(config.timeout.read, Some(Duration::from_secs(30)));
 }
 
 /// Test Windows-style script patterns.
@@ -262,7 +261,9 @@ fn windows_timeout_config() {
     use rust_expect::util::TimeoutConfig;
 
     let config = TimeoutConfig::uniform(Duration::from_secs(30));
-    assert_eq!(config.default, Duration::from_secs(30));
-    assert_eq!(config.read, Some(Duration::from_secs(30)));
-    assert_eq!(config.expect, Some(Duration::from_secs(30)));
+    assert_eq!(config.expect, Duration::from_secs(30));
+    assert_eq!(config.read, Duration::from_secs(30));
+    assert_eq!(config.write, Duration::from_secs(30));
+    assert_eq!(config.connect, Duration::from_secs(30));
+    assert_eq!(config.close, Duration::from_secs(30));
 }

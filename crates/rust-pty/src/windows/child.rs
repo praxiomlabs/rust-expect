@@ -13,9 +13,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use windows_sys::Win32::Foundation::{
-    CloseHandle, BOOL, FALSE, HANDLE, INVALID_HANDLE_VALUE, TRUE,
-};
+use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::Console::HPCON;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -26,8 +24,18 @@ use windows_sys::Win32::System::Threading::{
     CreateProcessW, GetExitCodeProcess, InitializeProcThreadAttributeList,
     UpdateProcThreadAttribute, WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT,
     INFINITE, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-    STARTUPINFOEXW, STARTUPINFOW, WAIT_OBJECT_0,
+    STARTUPINFOEXW,
 };
+
+/// Windows BOOL type (i32 in windows-sys 0.61+)
+type BOOL = i32;
+/// Windows FALSE constant
+const FALSE: BOOL = 0;
+/// Windows TRUE constant (not currently used but kept for completeness)
+#[allow(dead_code)]
+const TRUE: BOOL = 1;
+/// Wait result when object is signaled (value 0)
+const WAIT_OBJECT_0: u32 = 0;
 
 use crate::config::{PtyConfig, PtySignal};
 use crate::error::{PtyError, Result};
@@ -78,10 +86,12 @@ impl WindowsPtyChild {
             return Ok(status);
         }
 
-        let handle = self.process.as_raw_handle() as HANDLE;
+        // Cast to usize to make it Send (raw pointers are not Send)
+        let handle_val = self.process.as_raw_handle() as usize;
 
         // Wait in a blocking task
         let exit_code = tokio::task::spawn_blocking(move || {
+            let handle = handle_val as HANDLE;
             // SAFETY: handle is valid
             let wait_result = unsafe { WaitForSingleObject(handle, INFINITE) };
             if wait_result != WAIT_OBJECT_0 {
@@ -160,8 +170,10 @@ impl WindowsPtyChild {
                     Ok(())
                 }
             }
-            PtySignal::Terminate | PtySignal::Kill => self.kill(),
-            PtySignal::Hangup => self.kill(),
+            PtySignal::Terminate | PtySignal::Kill | PtySignal::Hangup => {
+                // Terminate the process (Windows equivalent of SIGTERM/SIGKILL)
+                self.terminate_impl()
+            }
             PtySignal::WindowChange => {
                 // Window changes are handled via ConPTY resize
                 Ok(())
@@ -169,8 +181,10 @@ impl WindowsPtyChild {
         }
     }
 
-    /// Kill the child process.
-    pub fn kill(&mut self) -> Result<()> {
+    /// Internal termination implementation that doesn't require &mut self.
+    fn terminate_impl(&self) -> Result<()> {
+        use windows_sys::Win32::System::Threading::TerminateProcess;
+
         if let Some(ref job) = self.job {
             // Terminate all processes in the job
             // SAFETY: job handle is valid
@@ -178,14 +192,17 @@ impl WindowsPtyChild {
                 return Err(PtyError::Signal(io::Error::last_os_error()));
             }
         } else {
-            use windows_sys::Win32::System::Threading::TerminateProcess;
-
             // SAFETY: process handle is valid
             if unsafe { TerminateProcess(self.process.as_raw_handle() as HANDLE, 1) } == FALSE {
                 return Err(PtyError::Signal(io::Error::last_os_error()));
             }
         }
+        Ok(())
+    }
 
+    /// Kill the child process.
+    pub fn kill(&mut self) -> Result<()> {
+        self.terminate_impl()?;
         self.running.store(false, Ordering::SeqCst);
         Ok(())
     }
@@ -418,7 +435,7 @@ fn create_job_object() -> Result<Option<OwnedHandle>> {
     // SAFETY: null parameters create an unnamed job
     let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
 
-    if job == 0 {
+    if job.is_null() {
         return Ok(None);
     }
 

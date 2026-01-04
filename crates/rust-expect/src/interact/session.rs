@@ -348,6 +348,9 @@ where
     transport: Arc<Mutex<T>>,
     output_hooks: Vec<OutputPatternHook>,
     input_hooks: Vec<InputPatternHook>,
+    /// Resize hook - used on Unix via SIGWINCH signal handling.
+    /// On Windows, terminal resize events aren't currently supported.
+    #[cfg_attr(windows, allow(dead_code))]
     resize_hook: Option<ResizeHook>,
     hook_manager: HookManager,
     mode: InteractionMode,
@@ -355,6 +358,9 @@ where
     buffer_size: usize,
     escape_sequence: Option<Vec<u8>>,
     timeout: Option<Duration>,
+    /// Current terminal size - tracked for resize delta detection on Unix.
+    /// On Windows, terminal resize events aren't currently supported.
+    #[cfg_attr(windows, allow(dead_code))]
     current_size: Option<TerminalSize>,
 }
 
@@ -751,6 +757,10 @@ where
     }
 
     /// Handle a window resize event.
+    ///
+    /// This is called on Unix when SIGWINCH is received. On Windows, terminal
+    /// resize events aren't currently supported via signals.
+    #[cfg_attr(windows, allow(dead_code))]
     async fn handle_resize(&mut self) -> Result<Option<InteractResult>> {
         // Get the new terminal size
         let new_size = match super::terminal::Terminal::size() {

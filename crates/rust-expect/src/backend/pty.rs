@@ -294,9 +294,10 @@ impl PtySpawner {
         // Create configuration for rust-pty
         let pty_config = rust_pty::PtyConfig {
             window_size: self.config.dimensions,
-            inherit_env: match self.config.env_mode {
-                EnvMode::Clear => false,
-                _ => true,
+            // If env_mode is Clear, use empty env; otherwise inherit (env: None)
+            env: match self.config.env_mode {
+                EnvMode::Clear => Some(std::collections::HashMap::new()),
+                _ => None,
             },
             ..Default::default()
         };
@@ -433,7 +434,6 @@ impl WindowsPtyHandle {
     /// Get the process ID.
     #[must_use]
     pub fn pid(&self) -> u32 {
-        use rust_pty::PtyChild;
         self.child.pid()
     }
 
@@ -458,13 +458,11 @@ impl WindowsPtyHandle {
     /// Check if the child process is still running.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        use rust_pty::PtyChild;
         self.child.is_running()
     }
 
     /// Kill the process.
     pub fn kill(&mut self) -> Result<()> {
-        use rust_pty::PtyChild;
         self.child.kill().map_err(|e| ExpectError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("kill failed: {e}"),
@@ -697,7 +695,6 @@ impl WindowsAsyncPty {
     ///
     /// Takes ownership of the handle.
     pub fn from_handle(handle: WindowsPtyHandle) -> Self {
-        use rust_pty::PtyChild;
         let pid = handle.child.pid();
         let dimensions = handle.dimensions;
         Self {
@@ -735,13 +732,11 @@ impl WindowsAsyncPty {
     /// Check if the child process is still running.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        use rust_pty::PtyChild;
         self.child.is_running()
     }
 
     /// Kill the child process.
     pub fn kill(&mut self) -> Result<()> {
-        use rust_pty::PtyChild;
         self.child.kill().map_err(|e| ExpectError::Io(io::Error::new(
             io::ErrorKind::Other,
             format!("kill failed: {e}"),

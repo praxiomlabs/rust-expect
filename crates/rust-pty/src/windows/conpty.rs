@@ -3,11 +3,9 @@
 //! This module provides the core ConPTY functionality, wrapping the Windows
 //! Pseudo Console API introduced in Windows 10 1809.
 
-use std::io;
-use std::os::windows::io::{AsRawHandle, OwnedHandle, RawHandle};
-use std::ptr;
+use std::os::windows::io::{AsRawHandle, OwnedHandle};
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, S_OK};
+use windows_sys::Win32::Foundation::{HANDLE, S_OK};
 use windows_sys::Win32::System::Console::{
     ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
 };
@@ -149,20 +147,20 @@ impl Drop for ConPty {
 /// ConPTY was introduced in Windows 10 version 1809 (build 17763).
 #[must_use]
 pub fn is_conpty_available() -> bool {
-    // Check Windows version
-    // For simplicity, we try to create a minimal ConPTY to verify availability
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 
     // Check if CreatePseudoConsole exists in kernel32
+    // SAFETY: kernel32.dll is always loaded in Windows processes
     let kernel32 = unsafe { GetModuleHandleW(windows_sys::w!("kernel32.dll")) };
-    if kernel32 == 0 {
+    if kernel32.is_null() {
         return false;
     }
 
+    // SAFETY: kernel32 handle is valid
     let proc = unsafe {
         GetProcAddress(
             kernel32,
-            b"CreatePseudoConsole\0".as_ptr() as *const i8,
+            windows_sys::s!("CreatePseudoConsole"),
         )
     };
 

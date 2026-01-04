@@ -79,29 +79,26 @@ impl PtySystem for WindowsPtySystem {
                 output_pipe.read,
             )?);
 
-            // Clone handles for the master
-            // Note: In a real implementation, we'd properly duplicate handles
+            // Clone handles for the master using proper handle duplication
             let conpty_for_resize = Arc::clone(&conpty);
 
             // Spawn child process
             let child = spawn_child(conpty.handle(), program, args, config)?;
 
+            // Duplicate handles for the master (Windows requires explicit handle duplication)
+            let input_handle = conpty
+                .input()
+                .try_clone()
+                .map_err(|e| PtyError::Spawn(e))?;
+            let output_handle = conpty
+                .output()
+                .try_clone()
+                .map_err(|e| PtyError::Spawn(e))?;
+
             // Create master wrapper
             let master = WindowsPtyMaster::new(
-                // We need to extract handles from ConPty
-                // This is simplified - real implementation would handle this better
-                std::mem::ManuallyDrop::new(unsafe {
-                    std::os::windows::io::OwnedHandle::from_raw_handle(
-                        conpty.input().as_raw_handle(),
-                    )
-                })
-                .clone(),
-                std::mem::ManuallyDrop::new(unsafe {
-                    std::os::windows::io::OwnedHandle::from_raw_handle(
-                        conpty.output().as_raw_handle(),
-                    )
-                })
-                .clone(),
+                input_handle,
+                output_handle,
                 move |size| conpty_for_resize.resize(size),
                 window_size,
             );

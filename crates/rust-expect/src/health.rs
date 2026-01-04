@@ -251,8 +251,15 @@ pub fn process_alive(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
+/// Check if a process is alive by PID.
+///
+/// On non-Unix platforms (like Windows), this currently returns `false` as the
+/// implementation requires platform-specific APIs. Future versions may add
+/// proper Windows support via `OpenProcess` and handle checking.
+#[must_use]
 #[cfg(not(unix))]
 pub fn process_alive(_pid: i32) -> bool {
+    // TODO: Implement using OpenProcess on Windows
     false
 }
 

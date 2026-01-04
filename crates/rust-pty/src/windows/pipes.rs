@@ -64,8 +64,7 @@ pub fn create_output_pipe() -> io::Result<PipePair> {
 
 /// Set a handle to be inheritable by child processes.
 pub fn set_inheritable(handle: &OwnedHandle, inheritable: bool) -> io::Result<()> {
-    use windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT;
-    use windows_sys::Win32::System::Threading::SetHandleInformation;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
 
     let flags = if inheritable { HANDLE_FLAG_INHERIT } else { 0 };
 

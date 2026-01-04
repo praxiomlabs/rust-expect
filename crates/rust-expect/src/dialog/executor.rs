@@ -330,11 +330,14 @@ impl DialogExecutor {
             }
         }
 
-        // Handle send if present
+        // Handle send if present (text or control character)
         let substituted_send = if let Some(ref send_text) = step.send {
             let substituted = dialog.substitute(send_text);
             session.send_str(&substituted).await?;
             Some(substituted)
+        } else if let Some(ctrl) = step.send_control {
+            session.send_control(ctrl).await?;
+            Some(format!("<{:?}>", ctrl))
         } else {
             None
         };

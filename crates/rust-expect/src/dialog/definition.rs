@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::types::ControlChar;
+
 /// A dialog step definition.
 #[derive(Debug, Clone)]
 #[derive(Default)]
@@ -13,6 +15,8 @@ pub struct DialogStep {
     pub expect: Option<String>,
     /// Response to send.
     pub send: Option<String>,
+    /// Control character to send (alternative to text).
+    pub send_control: Option<ControlChar>,
     /// Timeout for this step.
     pub timeout: Option<Duration>,
     /// Whether to continue on timeout.
@@ -66,11 +70,26 @@ impl DialogStep {
         self
     }
 
+    /// Chain: set a control character to send (e.g., Ctrl+C).
+    #[must_use]
+    pub fn with_send_control(mut self, ctrl: ControlChar) -> Self {
+        self.send_control = Some(ctrl);
+        self
+    }
+
     /// Chain: set the text to send after expecting.
     /// Alias for `with_send`, for fluent API.
     #[must_use]
     pub fn then_send(mut self, text: impl Into<String>) -> Self {
         self.send = Some(text.into());
+        self
+    }
+
+    /// Chain: set a control character to send after expecting.
+    /// Alias for `with_send_control`, for fluent API.
+    #[must_use]
+    pub fn then_send_control(mut self, ctrl: ControlChar) -> Self {
+        self.send_control = Some(ctrl);
         self
     }
 
@@ -112,6 +131,12 @@ impl DialogStep {
     #[must_use]
     pub fn send_text(&self) -> Option<&str> {
         self.send.as_deref()
+    }
+
+    /// Get the control character to send.
+    #[must_use]
+    pub const fn send_control(&self) -> Option<ControlChar> {
+        self.send_control
     }
 
     /// Get the timeout.

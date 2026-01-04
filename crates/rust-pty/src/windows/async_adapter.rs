@@ -12,10 +12,12 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::sync::mpsc;
 
-use windows_sys::Win32::Foundation::{HANDLE, FALSE};
+use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
+
+/// Windows FALSE constant (0)
+const FALSE: i32 = 0;
 
 use crate::config::WindowSize;
 use crate::error::{PtyError, Result};
@@ -75,89 +77,17 @@ impl WindowsPtyMaster {
             window_size: WindowSize::default(),
         }
     }
-
-    /// Read from the PTY output.
-    async fn read_async(&self, buf: &mut [u8]) -> io::Result<usize> {
-        if !self.is_open() {
-            return Ok(0); // EOF
-        }
-
-        let handle = Arc::clone(&self.output);
-        let mut temp_buf = vec![0u8; buf.len()];
-
-        let result = tokio::task::spawn_blocking(move || {
-            let raw = handle.as_raw_handle() as HANDLE;
-            let mut bytes_read: u32 = 0;
-
-            // SAFETY: handle and buffer are valid
-            let success = unsafe {
-                ReadFile(
-                    raw,
-                    temp_buf.as_mut_ptr(),
-                    temp_buf.len() as u32,
-                    &mut bytes_read,
-                    std::ptr::null_mut(),
-                )
-            };
-
-            if success == FALSE {
-                Err(io::Error::last_os_error())
-            } else {
-                temp_buf.truncate(bytes_read as usize);
-                Ok(temp_buf)
-            }
-        })
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))??;
-
-        let len = result.len().min(buf.len());
-        buf[..len].copy_from_slice(&result[..len]);
-        Ok(len)
-    }
-
-    /// Write to the PTY input.
-    async fn write_async(&self, buf: &[u8]) -> io::Result<usize> {
-        if !self.is_open() {
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "PTY closed"));
-        }
-
-        let handle = Arc::clone(&self.input);
-        let data = buf.to_vec();
-
-        tokio::task::spawn_blocking(move || {
-            let raw = handle.as_raw_handle() as HANDLE;
-            let mut bytes_written: u32 = 0;
-
-            // SAFETY: handle and buffer are valid
-            let success = unsafe {
-                WriteFile(
-                    raw,
-                    data.as_ptr(),
-                    data.len() as u32,
-                    &mut bytes_written,
-                    std::ptr::null_mut(),
-                )
-            };
-
-            if success == FALSE {
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(bytes_written as usize)
-            }
-        })
-        .await
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
-    }
 }
 
 impl AsyncRead for WindowsPtyMaster {
     fn poll_read(
         self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
+        _cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        // For simplicity, use a future-based approach
-        // In production, you'd want proper overlapped I/O
+        // NOTE: This is a simplified synchronous implementation. For production use,
+        // you would want proper overlapped I/O or IOCP integration with tokio.
+        // The _cx parameter is unused because we're doing blocking I/O.
         let this = self.get_mut();
 
         if !this.open.load(Ordering::SeqCst) {
@@ -274,7 +204,6 @@ impl PtyMaster for WindowsPtyMaster {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    // Tests would require actual Windows environment
+    // Tests would require actual Windows environment with ConPTY support.
+    // Integration tests should be run manually on a Windows machine.
 }

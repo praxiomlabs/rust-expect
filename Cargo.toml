@@ -111,6 +111,8 @@ features = [
     "Win32_Security",
     "Win32_System_JobObjects",
     "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_Storage_FileSystem",
 ]
 
 # Unix signal handling

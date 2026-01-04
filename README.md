@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/rust-expect.svg)](https://crates.io/crates/rust-expect)
 [![Documentation](https://docs.rs/rust-expect/badge.svg)](https://docs.rs/rust-expect)
 [![License](https://img.shields.io/crates/l/rust-expect.svg)](LICENSE)
-[![CI](https://github.com/YOUR_USERNAME/rust-expect/workflows/CI/badge.svg)](https://github.com/YOUR_USERNAME/rust-expect/actions)
+[![CI](https://github.com/jkindrix/rust-expect/workflows/CI/badge.svg)](https://github.com/jkindrix/rust-expect/actions)
 
 A modern, async-first terminal automation library for Rust, inspired by the classic Expect tool.
 
@@ -127,16 +127,27 @@ This workspace includes:
 
 See the [examples](crates/rust-expect/examples) directory:
 
-- `basic_session.rs` - Basic session usage
-- `dialog.rs` - Dialog-based automation
-- `screen_buffer.rs` - Screen buffer operations
-- `ssh_session.rs` - SSH session management
+| Example | Description | Required Features |
+|---------|-------------|-------------------|
+| `basic.rs` | Core spawn/expect workflow | - |
+| `dialog.rs` | Dialog-based automation | - |
+| `patterns.rs` | Pattern matching capabilities | - |
+| `screen_buffer.rs` | Virtual terminal with ANSI | `screen` |
+| `pii_redaction.rs` | Sensitive data masking | `pii-redaction` |
+| `ssh.rs` | SSH session concepts | `ssh` |
+| `mock_testing.rs` | Mock backend for testing | `mock` |
+| `metrics.rs` | Prometheus/OpenTelemetry | `metrics` |
+| `transcript.rs` | Recording and playback | - |
+| `interactive.rs` | Interactive terminal mode | - |
+| `multi_session.rs` | Managing multiple sessions | - |
+| `sync_api.rs` | Synchronous API usage | - |
 
 Run examples with:
 
 ```bash
-cargo run --example basic_session
-cargo run --example dialog --features mock
+cargo run --example basic
+cargo run --example screen_buffer --features screen
+cargo run --example ssh --features ssh
 ```
 
 ## Documentation

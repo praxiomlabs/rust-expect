@@ -31,7 +31,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Platform Support
 
-Currently supports Unix-like systems (Linux, macOS, BSD).
+- **Unix**: Linux, macOS, BSD (via rustix PTY)
+- **Windows**: Windows 10 1809+ (via ConPTY)
 
 ## License
 

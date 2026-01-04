@@ -17,7 +17,37 @@ pub enum AuthMethod {
     /// SSH agent authentication.
     Agent,
     /// Keyboard-interactive authentication.
-    KeyboardInteractive,
+    ///
+    /// This authentication method is commonly used by SSH servers that delegate
+    /// authentication to PAM or other backends. Many servers that appear to support
+    /// password authentication actually use keyboard-interactive behind the scenes.
+    ///
+    /// The `responses` field contains pre-defined answers to server prompts.
+    /// For simple password-based keyboard-interactive (the most common case),
+    /// provide a single response containing the password.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_expect::backend::ssh::AuthMethod;
+    ///
+    /// // For password-like keyboard-interactive (most common)
+    /// let auth = AuthMethod::keyboard_interactive(vec!["my_password".to_string()]);
+    ///
+    /// // For multi-factor authentication with multiple prompts
+    /// let auth = AuthMethod::keyboard_interactive(vec![
+    ///     "password".to_string(),
+    ///     "123456".to_string(), // OTP code
+    /// ]);
+    /// ```
+    KeyboardInteractive {
+        /// Pre-defined responses to server prompts.
+        ///
+        /// These responses are provided in order as the server sends prompts.
+        /// If there are more prompts than responses, empty strings are used.
+        /// If there are more responses than prompts, extra responses are ignored.
+        responses: Vec<String>,
+    },
     /// No authentication (for tunnels).
     None,
 }
@@ -54,6 +84,56 @@ impl AuthMethod {
     #[must_use]
     pub const fn agent() -> Self {
         Self::Agent
+    }
+
+    /// Create keyboard-interactive auth with responses.
+    ///
+    /// This is useful for servers that use keyboard-interactive as a wrapper
+    /// for password authentication (common with PAM-based servers) or for
+    /// multi-factor authentication with known prompts.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_expect::backend::ssh::AuthMethod;
+    ///
+    /// // Simple password-like keyboard-interactive
+    /// let auth = AuthMethod::keyboard_interactive(vec!["my_password".to_string()]);
+    ///
+    /// // Multi-factor with password and OTP
+    /// let auth = AuthMethod::keyboard_interactive(vec![
+    ///     "password".to_string(),
+    ///     "123456".to_string(),
+    /// ]);
+    /// ```
+    #[must_use]
+    pub fn keyboard_interactive(responses: Vec<String>) -> Self {
+        Self::KeyboardInteractive { responses }
+    }
+
+    /// Create keyboard-interactive auth with a single password response.
+    ///
+    /// This is a convenience method for the common case where keyboard-interactive
+    /// is used as a wrapper for password authentication.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use rust_expect::backend::ssh::AuthMethod;
+    ///
+    /// let auth = AuthMethod::keyboard_interactive_password("my_password");
+    /// ```
+    #[must_use]
+    pub fn keyboard_interactive_password(password: impl Into<String>) -> Self {
+        Self::KeyboardInteractive {
+            responses: vec![password.into()],
+        }
+    }
+
+    /// Check if this is keyboard-interactive auth.
+    #[must_use]
+    pub const fn is_keyboard_interactive(&self) -> bool {
+        matches!(self, Self::KeyboardInteractive { .. })
     }
 
     /// Check if this is password auth.
@@ -107,10 +187,38 @@ impl SshCredentials {
         self.with_auth(AuthMethod::public_key(private_key))
     }
 
+    /// Add public key authentication with passphrase.
+    #[must_use]
+    pub fn with_key_passphrase(
+        self,
+        private_key: impl Into<PathBuf>,
+        passphrase: impl Into<String>,
+    ) -> Self {
+        self.with_auth(AuthMethod::public_key_with_passphrase(private_key, passphrase))
+    }
+
     /// Add agent authentication.
     #[must_use]
     pub fn with_agent(self) -> Self {
         self.with_auth(AuthMethod::Agent)
+    }
+
+    /// Add keyboard-interactive authentication with a password response.
+    ///
+    /// This is useful for servers that use keyboard-interactive as a wrapper
+    /// for password authentication (common with PAM-based SSH servers).
+    #[must_use]
+    pub fn with_keyboard_interactive(self, password: impl Into<String>) -> Self {
+        self.with_auth(AuthMethod::keyboard_interactive_password(password))
+    }
+
+    /// Add keyboard-interactive authentication with multiple responses.
+    ///
+    /// This is useful for multi-factor authentication where the server
+    /// may prompt for multiple pieces of information.
+    #[must_use]
+    pub fn with_keyboard_interactive_responses(self, responses: Vec<String>) -> Self {
+        self.with_auth(AuthMethod::keyboard_interactive(responses))
     }
 
     /// Create with default authentication (agent, then default keys).
@@ -178,6 +286,41 @@ mod tests {
         let auth = AuthMethod::password("secret");
         assert!(auth.is_password());
         assert!(!auth.is_public_key());
+        assert!(!auth.is_keyboard_interactive());
+    }
+
+    #[test]
+    fn auth_method_keyboard_interactive() {
+        // Single response (password-like)
+        let auth = AuthMethod::keyboard_interactive_password("secret");
+        assert!(auth.is_keyboard_interactive());
+        assert!(!auth.is_password());
+        assert!(!auth.is_public_key());
+
+        if let AuthMethod::KeyboardInteractive { responses } = auth {
+            assert_eq!(responses.len(), 1);
+            assert_eq!(responses[0], "secret");
+        } else {
+            panic!("Expected KeyboardInteractive variant");
+        }
+    }
+
+    #[test]
+    fn auth_method_keyboard_interactive_multi_response() {
+        // Multiple responses (MFA)
+        let auth = AuthMethod::keyboard_interactive(vec![
+            "password".to_string(),
+            "123456".to_string(),
+        ]);
+        assert!(auth.is_keyboard_interactive());
+
+        if let AuthMethod::KeyboardInteractive { responses } = auth {
+            assert_eq!(responses.len(), 2);
+            assert_eq!(responses[0], "password");
+            assert_eq!(responses[1], "123456");
+        } else {
+            panic!("Expected KeyboardInteractive variant");
+        }
     }
 
     #[test]
@@ -188,5 +331,47 @@ mod tests {
 
         assert_eq!(creds.username, "user");
         assert_eq!(creds.auth_methods.len(), 2);
+    }
+
+    #[test]
+    fn credentials_keyboard_interactive() {
+        let creds = SshCredentials::new("user")
+            .with_keyboard_interactive("password");
+
+        assert_eq!(creds.username, "user");
+        assert_eq!(creds.auth_methods.len(), 1);
+        assert!(creds.auth_methods[0].is_keyboard_interactive());
+    }
+
+    #[test]
+    fn credentials_keyboard_interactive_multi_response() {
+        let creds = SshCredentials::new("user")
+            .with_keyboard_interactive_responses(vec![
+                "password".to_string(),
+                "otp_code".to_string(),
+            ]);
+
+        assert_eq!(creds.username, "user");
+        assert_eq!(creds.auth_methods.len(), 1);
+
+        if let AuthMethod::KeyboardInteractive { responses } = &creds.auth_methods[0] {
+            assert_eq!(responses.len(), 2);
+        } else {
+            panic!("Expected KeyboardInteractive variant");
+        }
+    }
+
+    #[test]
+    fn credentials_multiple_auth_methods() {
+        // Test combining keyboard-interactive with other methods
+        let creds = SshCredentials::new("user")
+            .with_agent()
+            .with_keyboard_interactive("password")
+            .with_password("fallback");
+
+        assert_eq!(creds.auth_methods.len(), 3);
+        assert!(matches!(creds.auth_methods[0], AuthMethod::Agent));
+        assert!(creds.auth_methods[1].is_keyboard_interactive());
+        assert!(creds.auth_methods[2].is_password());
     }
 }

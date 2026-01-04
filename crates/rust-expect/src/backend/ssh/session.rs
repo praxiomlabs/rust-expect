@@ -134,6 +134,8 @@ mod russh_impl {
         pub host_key_verification: HostKeyVerification,
         /// The host we're connecting to.
         pub host: String,
+        /// The port we're connecting to.
+        pub port: u16,
     }
 
     impl client::Handler for SshClientHandler {
@@ -162,29 +164,24 @@ mod russh_impl {
                     Ok(false)
                 }
                 HostKeyVerification::KnownHosts => {
-                    // Check against known_hosts file
-                    check_known_hosts(&self.host, server_public_key)
+                    // Check against known_hosts file using russh-keys
+                    check_known_hosts(&self.host, self.port, server_public_key)
                 }
                 HostKeyVerification::Tofu => {
-                    // Trust on first use - accept and optionally save
-                    tracing::info!(
-                        host = %self.host,
-                        key = ?server_public_key,
-                        "Trusting host key on first use"
-                    );
-                    Ok(true)
+                    // Trust on first use - accept and save to known_hosts
+                    handle_tofu(&self.host, self.port, server_public_key)
                 }
             }
         }
     }
 
-    /// Check a server key against the known_hosts file.
+    /// Check a server key against the `known_hosts` file.
     fn check_known_hosts(
         host: &str,
-        _server_public_key: &PublicKey,
+        port: u16,
+        server_public_key: &PublicKey,
     ) -> Result<bool, russh::Error> {
-        // Try to find and parse the known_hosts file
-        let known_hosts_path = dirs_known_hosts_path();
+        let known_hosts_path = get_known_hosts_path();
 
         if !known_hosts_path.exists() {
             tracing::warn!(
@@ -195,19 +192,216 @@ mod russh_impl {
             return Ok(false);
         }
 
-        // For now, accept if the known_hosts file exists
-        // A full implementation would parse the file and compare keys
-        // This is a reasonable default that provides basic security
-        tracing::debug!(
+        // Read and parse the known_hosts file
+        let contents = match std::fs::read_to_string(&known_hosts_path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    host = %host,
+                    error = %e,
+                    "Failed to read known_hosts file"
+                );
+                return Ok(false);
+            }
+        };
+
+        // Build the host pattern to search for
+        // Standard SSH uses "host" for port 22, "[host]:port" for non-standard ports
+        let host_pattern = if port == 22 {
+            host.to_string()
+        } else {
+            format!("[{host}]:{port}")
+        };
+
+        // Parse each line looking for matching host entries
+        for line in contents.lines() {
+            let line = line.trim();
+
+            // Skip empty lines and comments
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            // Skip markers like @cert-authority and @revoked for now
+            if line.starts_with('@') {
+                continue;
+            }
+
+            // Parse: hostnames keytype base64key [comment]
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 {
+                continue;
+            }
+
+            let hostnames = parts[0];
+            let key_type = parts[1];
+            let key_data = parts[2];
+
+            // Check if this line matches our host
+            let host_matches = hostnames.split(',').any(|h| {
+                let h = h.trim();
+                h == host || h == host_pattern || h == format!("{host},*") || h == "*"
+            });
+
+            if !host_matches {
+                continue;
+            }
+
+            // Try to parse and compare the key
+            if let Some(stored_key) = parse_known_hosts_key(key_type, key_data) {
+                if keys_match(&stored_key, server_public_key) {
+                    tracing::debug!(
+                        host = %host,
+                        "Host key verified against known_hosts"
+                    );
+                    return Ok(true);
+                } else {
+                    // Key mismatch - potential MITM attack!
+                    tracing::error!(
+                        host = %host,
+                        "HOST KEY MISMATCH! Possible man-in-the-middle attack!"
+                    );
+                    return Ok(false);
+                }
+            }
+        }
+
+        // Host not found in known_hosts
+        tracing::warn!(
             host = %host,
-            "known_hosts file exists, accepting key (full verification pending)"
+            "Host not found in known_hosts file"
         );
+        Ok(false)
+    }
+
+    /// Parse a public key from `known_hosts` format.
+    fn parse_known_hosts_key(key_type: &str, key_data: &str) -> Option<PublicKey> {
+        // The key_type should match what's in the decoded data
+        // Common types: ssh-rsa, ssh-ed25519, ecdsa-sha2-nistp256, etc.
+        match key_type {
+            "ssh-ed25519" | "ssh-rsa" | "ecdsa-sha2-nistp256" |
+            "ecdsa-sha2-nistp384" | "ecdsa-sha2-nistp521" => {
+                // Try to parse using russh-keys (takes base64 directly)
+                russh::keys::parse_public_key_base64(key_data).ok()
+            }
+            _ => {
+                tracing::debug!(key_type = %key_type, "Unknown key type in known_hosts");
+                None
+            }
+        }
+    }
+
+    /// Compare two public keys for equality.
+    fn keys_match(stored: &PublicKey, server: &PublicKey) -> bool {
+        // Compare the key fingerprints using SHA-256 (standard for OpenSSH)
+        use russh::keys::HashAlg;
+        stored.fingerprint(HashAlg::Sha256) == server.fingerprint(HashAlg::Sha256)
+    }
+
+    /// Handle Trust On First Use - accept and save the key.
+    fn handle_tofu(
+        host: &str,
+        port: u16,
+        server_public_key: &PublicKey,
+    ) -> Result<bool, russh::Error> {
+        let known_hosts_path = get_known_hosts_path();
+
+        // Create .ssh directory if it doesn't exist
+        if let Some(parent) = known_hosts_path.parent() {
+            if !parent.exists() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to create .ssh directory, accepting key without saving"
+                    );
+                    return Ok(true);
+                }
+                // Set proper permissions on Unix
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+                }
+            }
+        }
+
+        // Format the host entry
+        let host_entry = if port == 22 {
+            host.to_string()
+        } else {
+            format!("[{host}]:{port}")
+        };
+
+        // Get the key in OpenSSH format
+        let key_str = format_public_key_openssh(server_public_key);
+
+        // Append to known_hosts
+        let line = format!("{host_entry} {key_str}\n");
+
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&known_hosts_path)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                if let Err(e) = file.write_all(line.as_bytes()) {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to write to known_hosts, accepting key without saving"
+                    );
+                } else {
+                    tracing::info!(
+                        host = %host,
+                        path = %known_hosts_path.display(),
+                        "Added host key to known_hosts (TOFU)"
+                    );
+
+                    // Set proper permissions on Unix
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(
+                            &known_hosts_path,
+                            std::fs::Permissions::from_mode(0o644)
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to open known_hosts for writing, accepting key without saving"
+                );
+            }
+        }
+
         Ok(true)
     }
 
-    /// Get the default known_hosts path.
-    fn dirs_known_hosts_path() -> std::path::PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    /// Format a public key in OpenSSH format for `known_hosts`.
+    fn format_public_key_openssh(key: &PublicKey) -> String {
+        // Use the built-in to_openssh method which returns "key_type base64_data [comment]"
+        // For known_hosts we strip the comment portion
+        key.to_openssh()
+            .unwrap_or_else(|_| format!("{} <encoding-error>", key.algorithm().as_str()))
+            .split_whitespace()
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Get the default `known_hosts` path.
+    fn get_known_hosts_path() -> std::path::PathBuf {
+        // Check for custom path in environment
+        if let Ok(path) = std::env::var("SSH_KNOWN_HOSTS") {
+            return std::path::PathBuf::from(path);
+        }
+
+        // Use standard location
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
         std::path::PathBuf::from(home).join(".ssh").join("known_hosts")
     }
 
@@ -357,15 +551,345 @@ mod russh_impl {
                     }
                 }
                 AuthMethod::Agent => {
-                    tracing::debug!(user = %username, "SSH agent authentication not yet implemented");
-                    // Agent authentication requires additional setup with russh
-                    // This would involve connecting to the SSH agent socket
+                    tracing::debug!(user = %username, "Attempting SSH agent authentication");
+
+                    // Connect to the SSH agent
+                    #[cfg(unix)]
+                    match russh::keys::agent::client::AgentClient::connect_env().await {
+                        Ok(mut agent) => {
+                            // Get list of keys from agent
+                            match agent.request_identities().await {
+                                Ok(keys) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        key_count = keys.len(),
+                                        "Found keys in SSH agent"
+                                    );
+
+                                    // Try each key from the agent
+                                    for key in keys {
+                                        // Get the best supported RSA hash algorithm if applicable
+                                        let rsa_hash = handle
+                                            .best_supported_rsa_hash()
+                                            .await
+                                            .ok()
+                                            .flatten()
+                                            .flatten();
+
+                                        match handle.authenticate_publickey_with(
+                                            username,
+                                            key.clone(),
+                                            rsa_hash,
+                                            &mut agent,
+                                        ).await {
+                                            Ok(auth_result) if auth_result.success() => {
+                                                tracing::info!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "SSH agent authentication successful"
+                                                );
+                                                return Ok(true);
+                                            }
+                                            Ok(_) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "SSH agent key rejected, trying next"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    error = %e,
+                                                    "SSH agent authentication error"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    tracing::debug!(
+                                        user = %username,
+                                        "All SSH agent keys exhausted"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        error = %e,
+                                        "Failed to get identities from SSH agent"
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                user = %username,
+                                error = %e,
+                                "Failed to connect to SSH agent"
+                            );
+                        }
+                    }
+
+                    // Windows: Try Pageant first, then OpenSSH agent via named pipe
+                    #[cfg(windows)]
+                    {
+                        // Try Pageant first (PuTTY SSH agent)
+                        tracing::debug!(user = %username, "Trying Pageant SSH agent");
+                        match russh::keys::agent::client::AgentClient::connect_pageant().await {
+                            Ok(mut agent) => {
+                                match agent.request_identities().await {
+                                    Ok(keys) => {
+                                        tracing::debug!(
+                                            user = %username,
+                                            key_count = keys.len(),
+                                            "Found keys in Pageant"
+                                        );
+
+                                        for key in keys {
+                                            let rsa_hash = handle
+                                                .best_supported_rsa_hash()
+                                                .await
+                                                .ok()
+                                                .flatten()
+                                                .flatten();
+
+                                            match handle.authenticate_publickey_with(
+                                                username,
+                                                key.clone(),
+                                                rsa_hash,
+                                                &mut agent,
+                                            ).await {
+                                                Ok(auth_result) if auth_result.success() => {
+                                                    tracing::info!(
+                                                        user = %username,
+                                                        key_type = %key.algorithm().as_str(),
+                                                        "Pageant authentication successful"
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                Ok(_) => {
+                                                    tracing::debug!(
+                                                        user = %username,
+                                                        key_type = %key.algorithm().as_str(),
+                                                        "Pageant key rejected, trying next"
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    tracing::debug!(
+                                                        user = %username,
+                                                        error = %e,
+                                                        "Pageant authentication error"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!(
+                                            user = %username,
+                                            error = %e,
+                                            "Failed to get identities from Pageant"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!(
+                                    user = %username,
+                                    error = %e,
+                                    "Failed to connect to Pageant, trying OpenSSH agent"
+                                );
+                            }
+                        }
+
+                        // Try Windows OpenSSH agent via named pipe
+                        const OPENSSH_AGENT_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
+                        tracing::debug!(
+                            user = %username,
+                            pipe = OPENSSH_AGENT_PIPE,
+                            "Trying OpenSSH agent via named pipe"
+                        );
+
+                        match russh::keys::agent::client::AgentClient::connect_named_pipe(
+                            OPENSSH_AGENT_PIPE
+                        ).await {
+                            Ok(mut agent) => {
+                                match agent.request_identities().await {
+                                    Ok(keys) => {
+                                        tracing::debug!(
+                                            user = %username,
+                                            key_count = keys.len(),
+                                            "Found keys in OpenSSH agent"
+                                        );
+
+                                        for key in keys {
+                                            let rsa_hash = handle
+                                                .best_supported_rsa_hash()
+                                                .await
+                                                .ok()
+                                                .flatten()
+                                                .flatten();
+
+                                            match handle.authenticate_publickey_with(
+                                                username,
+                                                key.clone(),
+                                                rsa_hash,
+                                                &mut agent,
+                                            ).await {
+                                                Ok(auth_result) if auth_result.success() => {
+                                                    tracing::info!(
+                                                        user = %username,
+                                                        key_type = %key.algorithm().as_str(),
+                                                        "OpenSSH agent authentication successful"
+                                                    );
+                                                    return Ok(true);
+                                                }
+                                                Ok(_) => {
+                                                    tracing::debug!(
+                                                        user = %username,
+                                                        key_type = %key.algorithm().as_str(),
+                                                        "OpenSSH agent key rejected, trying next"
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    tracing::debug!(
+                                                        user = %username,
+                                                        error = %e,
+                                                        "OpenSSH agent authentication error"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        tracing::debug!(
+                                            user = %username,
+                                            "All OpenSSH agent keys exhausted"
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!(
+                                            user = %username,
+                                            error = %e,
+                                            "Failed to get identities from OpenSSH agent"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::debug!(
+                                    user = %username,
+                                    error = %e,
+                                    "Failed to connect to OpenSSH agent"
+                                );
+                            }
+                        }
+                    }
+
+                    #[cfg(not(any(unix, windows)))]
+                    {
+                        tracing::debug!(
+                            user = %username,
+                            "SSH agent authentication not supported on this platform"
+                        );
+                    }
                 }
-                AuthMethod::KeyboardInteractive => {
+                AuthMethod::KeyboardInteractive { responses } => {
                     tracing::debug!(
                         user = %username,
-                        "Keyboard-interactive authentication not yet implemented"
+                        response_count = responses.len(),
+                        "Attempting keyboard-interactive authentication"
                     );
+
+                    // Start the keyboard-interactive authentication
+                    match handle
+                        .authenticate_keyboard_interactive_start(username.clone(), None)
+                        .await
+                    {
+                        Ok(auth_response) => {
+                            use russh::client::KeyboardInteractiveAuthResponse;
+
+                            let mut current_response = auth_response;
+                            let mut response_index = 0;
+
+                            // Loop to handle multiple rounds of prompts
+                            loop {
+                                match current_response {
+                                    KeyboardInteractiveAuthResponse::Success => {
+                                        tracing::info!(
+                                            user = %username,
+                                            "Keyboard-interactive authentication successful"
+                                        );
+                                        return Ok(true);
+                                    }
+                                    KeyboardInteractiveAuthResponse::Failure {
+                                        remaining_methods,
+                                        partial_success,
+                                    } => {
+                                        tracing::debug!(
+                                            user = %username,
+                                            partial_success = partial_success,
+                                            remaining = ?remaining_methods,
+                                            "Keyboard-interactive authentication failed"
+                                        );
+                                        break; // Try next auth method
+                                    }
+                                    KeyboardInteractiveAuthResponse::InfoRequest {
+                                        name,
+                                        instructions,
+                                        prompts,
+                                    } => {
+                                        tracing::debug!(
+                                            user = %username,
+                                            name = %name,
+                                            instructions = %instructions,
+                                            prompt_count = prompts.len(),
+                                            "Received keyboard-interactive prompts"
+                                        );
+
+                                        // Build responses for the prompts
+                                        let mut prompt_responses = Vec::with_capacity(prompts.len());
+                                        for prompt in &prompts {
+                                            let response = if response_index < responses.len() {
+                                                responses[response_index].clone()
+                                            } else {
+                                                tracing::warn!(
+                                                    user = %username,
+                                                    prompt = %prompt.prompt,
+                                                    "No response available for prompt, using empty string"
+                                                );
+                                                String::new()
+                                            };
+                                            prompt_responses.push(response);
+                                            response_index += 1;
+                                        }
+
+                                        // Send responses
+                                        match handle
+                                            .authenticate_keyboard_interactive_respond(prompt_responses)
+                                            .await
+                                        {
+                                            Ok(next_response) => {
+                                                current_response = next_response;
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    error = %e,
+                                                    "Keyboard-interactive response error"
+                                                );
+                                                break; // Try next auth method
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!(
+                                user = %username,
+                                error = %e,
+                                "Keyboard-interactive start error"
+                            );
+                        }
+                    }
                 }
                 AuthMethod::None => {
                     tracing::debug!(user = %username, "Attempting none authentication");
@@ -475,6 +999,7 @@ impl SshSession {
         let handler = russh_impl::SshClientHandler {
             host_key_verification: self.config.host_key_verification,
             host: self.config.host.clone(),
+            port: self.config.port,
         };
 
         // Connect to the server
@@ -612,6 +1137,105 @@ impl SshSession {
         })?;
 
         Ok(channel)
+    }
+
+    /// Open an interactive shell session with a PTY.
+    ///
+    /// This is a convenience method that opens a channel, requests a PTY,
+    /// and starts a shell, returning a stream that implements `AsyncRead` and `AsyncWrite`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::backend::ssh::{SshSession, SshConfig, SshCredentials};
+    /// use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    ///
+    /// let config = SshConfig::new("example.com")
+    ///     .username("user")
+    ///     .credentials(SshCredentials::new("user").with_password("pass"));
+    ///
+    /// let mut session = SshSession::new(config);
+    /// session.connect_async().await?;
+    ///
+    /// let mut shell = session.shell().await?;
+    /// shell.write_all(b"ls -la\n").await?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session is not connected, channel opening fails,
+    /// PTY request fails, or shell request fails.
+    pub async fn shell(&mut self) -> crate::error::Result<super::channel::SshChannelStream> {
+        self.shell_with_config(super::channel::ChannelConfig::default()).await
+    }
+
+    /// Open an interactive shell session with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session is not connected, channel opening fails,
+    /// PTY request fails (if enabled), or shell request fails.
+    pub async fn shell_with_config(
+        &mut self,
+        config: super::channel::ChannelConfig,
+    ) -> crate::error::Result<super::channel::SshChannelStream> {
+        let channel = self.open_channel().await?;
+        let mut stream = super::channel::SshChannelStream::new(channel, config);
+
+        // Request PTY if configured
+        if stream.config().pty {
+            stream.request_pty().await?;
+        }
+
+        // Request shell
+        stream.request_shell().await?;
+
+        Ok(stream)
+    }
+
+    /// Execute a command and return a stream for reading output.
+    ///
+    /// This opens a channel, optionally requests a PTY, and executes the specified command.
+    /// The returned stream can be used to read command output and write stdin.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut exec = session.exec("uname -a").await?;
+    /// let mut output = String::new();
+    /// exec.read_to_string(&mut output).await?;
+    /// println!("Output: {}", output);
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session is not connected or command execution fails.
+    pub async fn exec(&mut self, command: &str) -> crate::error::Result<super::channel::SshChannelStream> {
+        self.exec_with_config(command, super::channel::ChannelConfig::default().no_pty()).await
+    }
+
+    /// Execute a command with custom configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session is not connected or command execution fails.
+    pub async fn exec_with_config(
+        &mut self,
+        command: &str,
+        config: super::channel::ChannelConfig,
+    ) -> crate::error::Result<super::channel::SshChannelStream> {
+        let channel = self.open_channel().await?;
+        let mut stream = super::channel::SshChannelStream::new(channel, config);
+
+        // Request PTY if configured
+        if stream.config().pty {
+            stream.request_pty().await?;
+        }
+
+        // Execute command
+        stream.exec(command).await?;
+
+        Ok(stream)
     }
 }
 

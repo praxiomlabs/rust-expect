@@ -21,9 +21,10 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
-    InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
-    STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+    CreateProcessW, GetExitCodeProcess, InitializeProcThreadAttributeList,
+    UpdateProcThreadAttribute, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT,
+    EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTUPINFOEXW,
 };
 
 /// Windows BOOL type (i32 in windows-sys 0.61+)
@@ -280,7 +281,7 @@ where
             ptr::null(),
             ptr::null(),
             FALSE,
-            EXTENDED_STARTUPINFO_PRESENT,
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
             if env_block.is_empty() {
                 ptr::null()
             } else {

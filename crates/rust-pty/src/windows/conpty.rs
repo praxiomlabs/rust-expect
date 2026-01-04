@@ -22,6 +22,9 @@ pub struct ConPty {
     input_write: OwnedHandle,
     /// The output pipe (for reading from the PTY).
     output_read: OwnedHandle,
+    /// Pipe handles passed to CreatePseudoConsole that must be closed after child spawn.
+    /// These are kept alive until close_pty_pipes() is called.
+    pty_pipes: Option<(OwnedHandle, OwnedHandle)>,
 }
 
 // SAFETY: ConPTY handles can be safely sent between threads
@@ -78,16 +81,24 @@ impl ConPty {
             return Err(PtyError::ConPtyNotAvailable);
         }
 
-        // The input_read and output_write handles are now owned by ConPTY
-        // We intentionally leak them here since ConPTY will close them
-        std::mem::forget(input_read);
-        std::mem::forget(output_write);
-
+        // Store the pipe handles - they must be closed AFTER CreateProcess
+        // per Microsoft documentation to enable proper channel detection
         Ok(Self {
             handle: hpc,
             input_write,
             output_read,
+            pty_pipes: Some((input_read, output_write)),
         })
+    }
+
+    /// Close the PTY pipe handles after child process is spawned.
+    ///
+    /// This must be called after CreateProcess to enable proper channel detection.
+    /// Closing these handles signals to ConPTY that no more handles exist on
+    /// the "other side" of the pipes.
+    pub fn close_pty_pipes(&mut self) {
+        // Drop the handles, which closes them
+        self.pty_pipes = None;
     }
 
     /// Get the ConPTY handle.

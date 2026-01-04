@@ -8,8 +8,9 @@ use std::io;
 use std::os::windows::io::{AsRawHandle, OwnedHandle, RawHandle};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -22,6 +23,17 @@ const FALSE: i32 = 0;
 use crate::config::WindowSize;
 use crate::error::{PtyError, Result};
 use crate::traits::PtyMaster;
+
+/// Result from a pending read operation.
+#[derive(Debug)]
+enum PendingReadState {
+    /// No read in progress.
+    Idle,
+    /// Read is in progress, will wake the waker when done.
+    InProgress(Option<Waker>),
+    /// Read completed with data.
+    Ready(io::Result<Vec<u8>>),
+}
 
 /// Async wrapper for Windows ConPTY I/O.
 ///
@@ -39,6 +51,8 @@ pub struct WindowsPtyMaster {
     open: Arc<AtomicBool>,
     /// Current window size.
     window_size: WindowSize,
+    /// Pending read state (protected by mutex for Sync).
+    pending_read: Arc<Mutex<PendingReadState>>,
 }
 
 impl std::fmt::Debug for WindowsPtyMaster {
@@ -64,6 +78,7 @@ impl WindowsPtyMaster {
             resize_fn: Some(Box::new(resize_fn)),
             open: Arc::new(AtomicBool::new(true)),
             window_size: initial_size,
+            pending_read: Arc::new(Mutex::new(PendingReadState::Idle)),
         }
     }
 
@@ -75,6 +90,7 @@ impl WindowsPtyMaster {
             resize_fn: None,
             open: Arc::new(AtomicBool::new(true)),
             window_size: WindowSize::default(),
+            pending_read: Arc::new(Mutex::new(PendingReadState::Idle)),
         }
     }
 }
@@ -82,50 +98,107 @@ impl WindowsPtyMaster {
 impl AsyncRead for WindowsPtyMaster {
     fn poll_read(
         self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        // NOTE: This is a simplified synchronous implementation. For production use,
-        // you would want proper overlapped I/O or IOCP integration with tokio.
-        // The _cx parameter is unused because we're doing blocking I/O.
         let this = self.get_mut();
 
         if !this.open.load(Ordering::SeqCst) {
             return Poll::Ready(Ok(())); // EOF
         }
 
-        // Create a temporary buffer
-        let unfilled = buf.initialize_unfilled();
-        let handle = Arc::clone(&this.output);
-        let buf_len = unfilled.len();
+        // Check current state
+        let mut state = this.pending_read.lock().unwrap();
+        match std::mem::replace(&mut *state, PendingReadState::Idle) {
+            PendingReadState::Idle => {
+                // Start a new blocking read operation
+                let handle = Arc::clone(&this.output);
+                let open = Arc::clone(&this.open);
+                let pending_read = Arc::clone(&this.pending_read);
+                let buf_capacity = buf.remaining();
 
-        // We need to spawn a blocking read
-        // This is a simplified implementation - production code would use
-        // proper overlapped I/O or IOCP
-        let mut bytes_read: u32 = 0;
+                // Store waker before spawning
+                *state = PendingReadState::InProgress(Some(cx.waker().clone()));
+                drop(state); // Release lock before spawning
 
-        // SAFETY: handle and buffer are valid
-        let success = unsafe {
-            ReadFile(
-                handle.as_raw_handle() as HANDLE,
-                unfilled.as_mut_ptr(),
-                buf_len as u32,
-                &mut bytes_read,
-                std::ptr::null_mut(),
-            )
-        };
+                // Spawn the blocking read
+                tokio::task::spawn(async move {
+                    let result = tokio::task::spawn_blocking(move || {
+                        if !open.load(Ordering::SeqCst) {
+                            return Ok(Vec::new()); // EOF
+                        }
 
-        if success == FALSE {
-            let err = io::Error::last_os_error();
-            // ERROR_BROKEN_PIPE means the child closed
-            if err.raw_os_error() == Some(109) {
-                return Poll::Ready(Ok(())); // EOF
+                        let mut buffer = vec![0u8; buf_capacity.min(4096)];
+                        let mut bytes_read: u32 = 0;
+
+                        // Cast handle to usize for Send (handle values are pointers)
+                        let raw_handle = handle.as_raw_handle() as usize;
+
+                        // SAFETY: handle and buffer are valid
+                        let success = unsafe {
+                            ReadFile(
+                                raw_handle as HANDLE,
+                                buffer.as_mut_ptr(),
+                                buffer.len() as u32,
+                                &mut bytes_read,
+                                std::ptr::null_mut(),
+                            )
+                        };
+
+                        if success == FALSE {
+                            let err = io::Error::last_os_error();
+                            // ERROR_BROKEN_PIPE means the child closed
+                            if err.raw_os_error() == Some(109) {
+                                return Ok(Vec::new()); // EOF
+                            }
+                            return Err(err);
+                        }
+
+                        buffer.truncate(bytes_read as usize);
+                        Ok(buffer)
+                    })
+                    .await
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                    .and_then(|r| r);
+
+                    // Store result and wake
+                    let mut state = pending_read.lock().unwrap();
+                    let waker = match std::mem::replace(&mut *state, PendingReadState::Ready(result)) {
+                        PendingReadState::InProgress(waker) => waker,
+                        _ => None,
+                    };
+                    drop(state);
+                    if let Some(w) = waker {
+                        w.wake();
+                    }
+                });
+
+                Poll::Pending
             }
-            return Poll::Ready(Err(err));
+            PendingReadState::InProgress(waker) => {
+                // Update waker in case it changed
+                *state = PendingReadState::InProgress(Some(cx.waker().clone()));
+                drop(waker); // Drop old waker
+                Poll::Pending
+            }
+            PendingReadState::Ready(result) => {
+                // Leave state as Idle (already set by mem::replace)
+                match result {
+                    Ok(data) => {
+                        if data.is_empty() {
+                            Poll::Ready(Ok(())) // EOF
+                        } else {
+                            let unfilled = buf.initialize_unfilled();
+                            let to_copy = data.len().min(unfilled.len());
+                            unfilled[..to_copy].copy_from_slice(&data[..to_copy]);
+                            buf.advance(to_copy);
+                            Poll::Ready(Ok(()))
+                        }
+                    }
+                    Err(e) => Poll::Ready(Err(e)),
+                }
+            }
         }
-
-        buf.advance(bytes_read as usize);
-        Poll::Ready(Ok(()))
     }
 }
 

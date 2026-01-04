@@ -71,19 +71,21 @@ impl PtySystem for WindowsPtySystem {
 
             // Create ConPTY
             let window_size = WindowSize::from(config.window_size);
-            let conpty = Arc::new(ConPty::new(
+            let mut conpty = ConPty::new(
                 window_size,
                 input_pipe.read,
                 output_pipe.write,
                 input_pipe.write,
                 output_pipe.read,
-            )?);
-
-            // Clone handles for the master using proper handle duplication
-            let conpty_for_resize = Arc::clone(&conpty);
+            )?;
 
             // Spawn child process
             let child = spawn_child(conpty.handle(), program, args, config)?;
+
+            // Close the PTY pipe handles after CreateProcess per Microsoft docs.
+            // This signals to ConPTY that no other handles exist on the "other side"
+            // of the pipes, enabling proper channel detection.
+            conpty.close_pty_pipes();
 
             // Duplicate handles for the master (Windows requires explicit handle duplication)
             let input_handle = conpty.input().try_clone().map_err(|e| PtyError::Spawn(e))?;
@@ -91,6 +93,10 @@ impl PtySystem for WindowsPtySystem {
                 .output()
                 .try_clone()
                 .map_err(|e| PtyError::Spawn(e))?;
+
+            // Now wrap in Arc for shared ownership
+            let conpty = Arc::new(conpty);
+            let conpty_for_resize = Arc::clone(&conpty);
 
             // Create master wrapper
             let master = WindowsPtyMaster::new(

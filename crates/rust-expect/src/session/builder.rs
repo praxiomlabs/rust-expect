@@ -251,11 +251,11 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for PowerShell.
+    /// Create a session config for `PowerShell`.
     ///
-    /// Works with both Windows PowerShell (powershell.exe) and
-    /// PowerShell Core (pwsh.exe). Defaults to powershell.exe on Windows,
-    /// pwsh on other platforms.
+    /// Works with both Windows `PowerShell` (`powershell.exe`) and
+    /// `PowerShell` Core (`pwsh.exe`). Defaults to `powershell.exe` on Windows,
+    /// `pwsh` on other platforms.
     #[must_use]
     pub fn powershell() -> SessionConfig {
         let command = if cfg!(windows) {
@@ -313,7 +313,7 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for MySQL client.
+    /// Create a session config for `MySQL` client.
     #[must_use]
     pub fn mysql(host: &str, user: &str, database: &str) -> SessionConfig {
         SessionBuilder::new()
@@ -327,7 +327,7 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for MySQL client with password prompt.
+    /// Create a session config for `MySQL` client with password prompt.
     #[must_use]
     pub fn mysql_password(host: &str, user: &str, database: &str) -> SessionConfig {
         SessionBuilder::new()
@@ -342,7 +342,7 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for PostgreSQL client.
+    /// Create a session config for `PostgreSQL` client.
     #[must_use]
     pub fn psql(host: &str, user: &str, database: &str) -> SessionConfig {
         SessionBuilder::new()
@@ -402,7 +402,7 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for MongoDB shell.
+    /// Create a session config for `MongoDB` shell.
     #[must_use]
     pub fn mongosh(uri: &str) -> SessionConfig {
         SessionBuilder::new()
@@ -412,7 +412,7 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for SQLite.
+    /// Create a session config for `SQLite`.
     #[must_use]
     pub fn sqlite(database: &str) -> SessionConfig {
         SessionBuilder::new()
@@ -483,7 +483,7 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for Elixir IEx.
+    /// Create a session config for Elixir `IEx`.
     #[must_use]
     pub fn iex() -> SessionConfig {
         SessionBuilder::new()
@@ -499,7 +499,7 @@ impl QuickSession {
             .build()
     }
 
-    /// Create a session config for Haskell GHCi.
+    /// Create a session config for Haskell `GHCi`.
     #[must_use]
     pub fn ghci() -> SessionConfig {
         SessionBuilder::new()
@@ -561,6 +561,260 @@ impl QuickSession {
             .arg("attach")
             .arg("-t")
             .arg(session_name)
+            .build()
+    }
+
+    /// Create a session config for SSH with a specific port.
+    #[must_use]
+    pub fn ssh_port(host: &str, port: u16) -> SessionConfig {
+        SessionBuilder::new()
+            .command("ssh")
+            .arg("-p")
+            .arg(port.to_string())
+            .arg(host)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for SSH with user and port.
+    #[must_use]
+    pub fn ssh_full(user: &str, host: &str, port: u16) -> SessionConfig {
+        SessionBuilder::new()
+            .command("ssh")
+            .arg("-p")
+            .arg(port.to_string())
+            .arg(format!("{user}@{host}"))
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for SSH with a specific identity file.
+    #[must_use]
+    pub fn ssh_key(user: &str, host: &str, key_file: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("ssh")
+            .arg("-i")
+            .arg(key_file)
+            .arg(format!("{user}@{host}"))
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for Vagrant SSH.
+    #[must_use]
+    pub fn vagrant_ssh() -> SessionConfig {
+        SessionBuilder::new()
+            .command("vagrant")
+            .arg("ssh")
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for Vagrant SSH to a specific machine.
+    #[must_use]
+    pub fn vagrant_ssh_machine(machine: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("vagrant")
+            .arg("ssh")
+            .arg(machine)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for SFTP.
+    #[must_use]
+    pub fn sftp(host: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("sftp")
+            .arg(host)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for SFTP with user.
+    #[must_use]
+    pub fn sftp_user(user: &str, host: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("sftp")
+            .arg(format!("{user}@{host}"))
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for FTP.
+    #[must_use]
+    pub fn ftp(host: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("ftp")
+            .arg(host)
+            .timeout(Duration::from_secs(30))
+            .build()
+    }
+
+    /// Create a session config for netcat interactive mode.
+    #[must_use]
+    pub fn netcat(host: &str, port: u16) -> SessionConfig {
+        SessionBuilder::new()
+            .command("nc")
+            .arg(host)
+            .arg(port.to_string())
+            .build()
+    }
+
+    /// Create a session config for socat interactive mode.
+    #[must_use]
+    pub fn socat(address: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("socat")
+            .arg("-")
+            .arg(address)
+            .build()
+    }
+
+    /// Create a session config for minicom serial terminal.
+    #[must_use]
+    pub fn minicom(device: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("minicom")
+            .arg("-D")
+            .arg(device)
+            .build()
+    }
+
+    /// Create a session config for screen serial terminal.
+    #[must_use]
+    pub fn screen_serial(device: &str, baud_rate: u32) -> SessionConfig {
+        SessionBuilder::new()
+            .command("screen")
+            .arg(device)
+            .arg(baud_rate.to_string())
+            .build()
+    }
+
+    /// Create a session config for picocom serial terminal.
+    #[must_use]
+    pub fn picocom(device: &str, baud_rate: u32) -> SessionConfig {
+        SessionBuilder::new()
+            .command("picocom")
+            .arg("-b")
+            .arg(baud_rate.to_string())
+            .arg(device)
+            .build()
+    }
+
+    /// Create a session config for AWS SSM session.
+    #[must_use]
+    pub fn aws_ssm(instance_id: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("aws")
+            .arg("ssm")
+            .arg("start-session")
+            .arg("--target")
+            .arg(instance_id)
+            .timeout(Duration::from_secs(60))
+            .build()
+    }
+
+    /// Create a session config for Azure VM serial console.
+    #[must_use]
+    pub fn az_serial_console(resource_group: &str, vm_name: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("az")
+            .arg("serial-console")
+            .arg("connect")
+            .arg("--resource-group")
+            .arg(resource_group)
+            .arg("--name")
+            .arg(vm_name)
+            .timeout(Duration::from_secs(60))
+            .build()
+    }
+
+    /// Create a session config for GCP SSH.
+    #[must_use]
+    pub fn gcloud_ssh(instance: &str, zone: &str) -> SessionConfig {
+        SessionBuilder::new()
+            .command("gcloud")
+            .arg("compute")
+            .arg("ssh")
+            .arg(instance)
+            .arg("--zone")
+            .arg(zone)
+            .timeout(Duration::from_secs(60))
+            .build()
+    }
+
+    /// Create a session config for Rust REPL (evcxr).
+    #[must_use]
+    pub fn evcxr() -> SessionConfig {
+        SessionBuilder::new()
+            .command("evcxr")
+            .build()
+    }
+
+    /// Create a session config for Go playground.
+    #[must_use]
+    pub fn gore() -> SessionConfig {
+        SessionBuilder::new()
+            .command("gore")
+            .build()
+    }
+
+    /// Create a session config for PHP interactive mode.
+    #[must_use]
+    pub fn php() -> SessionConfig {
+        SessionBuilder::new()
+            .command("php")
+            .arg("-a")
+            .build()
+    }
+
+    /// Create a session config for Swift REPL.
+    #[must_use]
+    pub fn swift() -> SessionConfig {
+        SessionBuilder::new()
+            .command("swift")
+            .build()
+    }
+
+    /// Create a session config for Kotlin REPL.
+    #[must_use]
+    pub fn kotlin() -> SessionConfig {
+        SessionBuilder::new()
+            .command("kotlin")
+            .build()
+    }
+
+    /// Create a session config for Groovy console.
+    #[must_use]
+    pub fn groovysh() -> SessionConfig {
+        SessionBuilder::new()
+            .command("groovysh")
+            .build()
+    }
+
+    /// Create a session config for TypeScript REPL (ts-node).
+    #[must_use]
+    pub fn ts_node() -> SessionConfig {
+        SessionBuilder::new()
+            .command("ts-node")
+            .build()
+    }
+
+    /// Create a session config for Deno REPL.
+    #[must_use]
+    pub fn deno() -> SessionConfig {
+        SessionBuilder::new()
+            .command("deno")
+            .build()
+    }
+
+    /// Create a session config for Bun REPL.
+    #[must_use]
+    pub fn bun() -> SessionConfig {
+        SessionBuilder::new()
+            .command("bun")
+            .arg("repl")
             .build()
     }
 
@@ -792,5 +1046,149 @@ mod tests {
         assert_eq!(config.command, "screen");
         assert!(config.args.contains(&"-r".to_string()));
         assert!(config.args.contains(&"myscreen".to_string()));
+    }
+
+    #[test]
+    fn quick_session_ssh_variants() {
+        // ssh_port
+        let config = QuickSession::ssh_port("example.com", 2222);
+        assert_eq!(config.command, "ssh");
+        assert!(config.args.contains(&"-p".to_string()));
+        assert!(config.args.contains(&"2222".to_string()));
+        assert!(config.args.contains(&"example.com".to_string()));
+
+        // ssh_full
+        let config = QuickSession::ssh_full("admin", "server.com", 2222);
+        assert_eq!(config.command, "ssh");
+        assert!(config.args.contains(&"-p".to_string()));
+        assert!(config.args.contains(&"2222".to_string()));
+        assert!(config.args.contains(&"admin@server.com".to_string()));
+
+        // ssh_key
+        let config = QuickSession::ssh_key("root", "host.com", "/path/to/key");
+        assert_eq!(config.command, "ssh");
+        assert!(config.args.contains(&"-i".to_string()));
+        assert!(config.args.contains(&"/path/to/key".to_string()));
+        assert!(config.args.contains(&"root@host.com".to_string()));
+    }
+
+    #[test]
+    fn quick_session_vagrant() {
+        let config = QuickSession::vagrant_ssh();
+        assert_eq!(config.command, "vagrant");
+        assert!(config.args.contains(&"ssh".to_string()));
+
+        let config = QuickSession::vagrant_ssh_machine("web");
+        assert_eq!(config.command, "vagrant");
+        assert!(config.args.contains(&"ssh".to_string()));
+        assert!(config.args.contains(&"web".to_string()));
+    }
+
+    #[test]
+    fn quick_session_file_transfer() {
+        let config = QuickSession::sftp("server.com");
+        assert_eq!(config.command, "sftp");
+        assert!(config.args.contains(&"server.com".to_string()));
+
+        let config = QuickSession::sftp_user("admin", "server.com");
+        assert_eq!(config.command, "sftp");
+        assert!(config.args.contains(&"admin@server.com".to_string()));
+
+        let config = QuickSession::ftp("ftp.example.com");
+        assert_eq!(config.command, "ftp");
+        assert!(config.args.contains(&"ftp.example.com".to_string()));
+    }
+
+    #[test]
+    fn quick_session_network_tools() {
+        let config = QuickSession::netcat("localhost", 8080);
+        assert_eq!(config.command, "nc");
+        assert!(config.args.contains(&"localhost".to_string()));
+        assert!(config.args.contains(&"8080".to_string()));
+
+        let config = QuickSession::socat("TCP:server:1234");
+        assert_eq!(config.command, "socat");
+        assert!(config.args.contains(&"-".to_string()));
+        assert!(config.args.contains(&"TCP:server:1234".to_string()));
+    }
+
+    #[test]
+    fn quick_session_serial_terminals() {
+        let config = QuickSession::minicom("/dev/ttyUSB0");
+        assert_eq!(config.command, "minicom");
+        assert!(config.args.contains(&"-D".to_string()));
+        assert!(config.args.contains(&"/dev/ttyUSB0".to_string()));
+
+        let config = QuickSession::screen_serial("/dev/ttyACM0", 115200);
+        assert_eq!(config.command, "screen");
+        assert!(config.args.contains(&"/dev/ttyACM0".to_string()));
+        assert!(config.args.contains(&"115200".to_string()));
+
+        let config = QuickSession::picocom("/dev/ttyS0", 9600);
+        assert_eq!(config.command, "picocom");
+        assert!(config.args.contains(&"-b".to_string()));
+        assert!(config.args.contains(&"9600".to_string()));
+        assert!(config.args.contains(&"/dev/ttyS0".to_string()));
+    }
+
+    #[test]
+    fn quick_session_cloud_providers() {
+        let config = QuickSession::aws_ssm("i-1234567890abcdef0");
+        assert_eq!(config.command, "aws");
+        assert!(config.args.contains(&"ssm".to_string()));
+        assert!(config.args.contains(&"start-session".to_string()));
+        assert!(config.args.contains(&"--target".to_string()));
+        assert!(config.args.contains(&"i-1234567890abcdef0".to_string()));
+
+        let config = QuickSession::az_serial_console("my-rg", "my-vm");
+        assert_eq!(config.command, "az");
+        assert!(config.args.contains(&"serial-console".to_string()));
+        assert!(config.args.contains(&"connect".to_string()));
+        assert!(config.args.contains(&"--resource-group".to_string()));
+        assert!(config.args.contains(&"my-rg".to_string()));
+        assert!(config.args.contains(&"--name".to_string()));
+        assert!(config.args.contains(&"my-vm".to_string()));
+
+        let config = QuickSession::gcloud_ssh("instance-1", "us-central1-a");
+        assert_eq!(config.command, "gcloud");
+        assert!(config.args.contains(&"compute".to_string()));
+        assert!(config.args.contains(&"ssh".to_string()));
+        assert!(config.args.contains(&"instance-1".to_string()));
+        assert!(config.args.contains(&"--zone".to_string()));
+        assert!(config.args.contains(&"us-central1-a".to_string()));
+    }
+
+    #[test]
+    fn quick_session_additional_repls() {
+        // Rust REPL
+        assert_eq!(QuickSession::evcxr().command, "evcxr");
+
+        // Go REPL
+        assert_eq!(QuickSession::gore().command, "gore");
+
+        // PHP
+        let config = QuickSession::php();
+        assert_eq!(config.command, "php");
+        assert!(config.args.contains(&"-a".to_string()));
+
+        // Swift
+        assert_eq!(QuickSession::swift().command, "swift");
+
+        // Kotlin
+        assert_eq!(QuickSession::kotlin().command, "kotlin");
+
+        // Groovy
+        assert_eq!(QuickSession::groovysh().command, "groovysh");
+
+        // TypeScript
+        assert_eq!(QuickSession::ts_node().command, "ts-node");
+
+        // Deno
+        assert_eq!(QuickSession::deno().command, "deno");
+
+        // Bun
+        let config = QuickSession::bun();
+        assert_eq!(config.command, "bun");
+        assert!(config.args.contains(&"repl".to_string()));
     }
 }

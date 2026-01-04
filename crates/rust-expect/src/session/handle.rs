@@ -118,8 +118,14 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         }
 
         let mut transport = self.transport.lock().await;
-        transport.write_all(data).await.map_err(ExpectError::Io)?;
-        transport.flush().await.map_err(ExpectError::Io)?;
+        transport
+            .write_all(data)
+            .await
+            .map_err(|e| ExpectError::io_context("writing to process", e))?;
+        transport
+            .flush()
+            .await
+            .map_err(|e| ExpectError::io_context("flushing process output", e))?;
         Ok(())
     }
 
@@ -252,7 +258,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 self.matcher.append(&buf[..n]);
                 Ok(n)
             }
-            Ok(Err(e)) => Err(ExpectError::Io(e)),
+            Ok(Err(e)) => Err(ExpectError::io_context("reading from process", e)),
             Err(_) => {
                 // Timeout, but not an error - caller will handle
                 Ok(0)
@@ -479,7 +485,8 @@ impl Session<AsyncPty> {
         let handle = spawner.spawn(command, &args_owned).await?;
 
         // Wrap in AsyncPty for async I/O
-        let async_pty = AsyncPty::from_handle(handle).map_err(ExpectError::Io)?;
+        let async_pty = AsyncPty::from_handle(handle)
+            .map_err(|e| ExpectError::io_context("creating async PTY wrapper", e))?;
 
         // Create the session
         let mut session = Session::new(async_pty, config);
@@ -520,10 +527,10 @@ impl Session<AsyncPty> {
         if let Ok(transport) = self.transport.try_lock() {
             transport.signal(signal)
         } else {
-            Err(ExpectError::Io(std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "transport is locked",
-            )))
+            Err(ExpectError::io_context(
+                "sending signal to process",
+                std::io::Error::new(std::io::ErrorKind::WouldBlock, "transport is locked"),
+            ))
         }
     }
 
@@ -536,10 +543,10 @@ impl Session<AsyncPty> {
         if let Ok(transport) = self.transport.try_lock() {
             transport.kill()
         } else {
-            Err(ExpectError::Io(std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "transport is locked",
-            )))
+            Err(ExpectError::io_context(
+                "killing process",
+                std::io::Error::new(std::io::ErrorKind::WouldBlock, "transport is locked"),
+            ))
         }
     }
 }
@@ -645,10 +652,10 @@ impl Session<WindowsAsyncPty> {
         if let Ok(mut transport) = self.transport.try_lock() {
             transport.kill()
         } else {
-            Err(ExpectError::Io(std::io::Error::new(
-                std::io::ErrorKind::WouldBlock,
-                "transport is locked",
-            )))
+            Err(ExpectError::io_context(
+                "killing process",
+                std::io::Error::new(std::io::ErrorKind::WouldBlock, "transport is locked"),
+            ))
         }
     }
 }

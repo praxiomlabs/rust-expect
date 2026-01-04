@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of rust-expect
 - Core session management with async/await support
 - Pattern matching with literal, regex, and glob patterns
-- PTY (pseudo-terminal) support for Unix systems
+- PTY (pseudo-terminal) support for Unix and Windows (ConPTY)
 - Dialog system for scripted interactions
 - Human-like typing simulation
 

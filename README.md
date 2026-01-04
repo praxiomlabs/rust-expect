@@ -11,7 +11,7 @@ A modern, async-first terminal automation library for Rust, inspired by the clas
 
 - **Async/Await First**: Built on Tokio for efficient, non-blocking I/O
 - **Pattern Matching**: Support for literal strings, regex, and glob patterns
-- **PTY Support**: Full pseudo-terminal support on Unix systems
+- **PTY Support**: Full pseudo-terminal support on Unix and Windows
 - **SSH Integration**: Built-in SSH session management (optional)
 - **Screen Emulation**: Virtual terminal with ANSI escape sequence support
 - **PII Redaction**: Automatic sensitive data masking for logs
@@ -121,7 +121,7 @@ This workspace includes:
 
 - **[rust-expect](crates/rust-expect)**: Main library with session management, expect operations, and optional features
 - **[rust-expect-macros](crates/rust-expect-macros)**: Procedural macros for pattern definitions
-- **[rust-pty](crates/rust-pty)**: Low-level PTY abstraction for Unix systems
+- **[rust-pty](crates/rust-pty)**: Low-level PTY abstraction for Unix and Windows
 
 ## Examples
 

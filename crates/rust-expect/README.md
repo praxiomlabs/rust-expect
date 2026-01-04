@@ -6,7 +6,7 @@ A modern, async-first terminal automation library for Rust, inspired by the clas
 
 - **Async/Await First**: Built on Tokio for efficient, non-blocking I/O
 - **Pattern Matching**: Literal strings, regular expressions, and glob patterns
-- **PTY Support**: Full pseudo-terminal support on Unix systems
+- **PTY Support**: Full pseudo-terminal support on Unix and Windows
 - **SSH Integration**: Built-in SSH session management (optional)
 - **Screen Emulation**: Virtual terminal with ANSI escape sequence support
 - **PII Redaction**: Automatic sensitive data masking

@@ -196,7 +196,7 @@ is feature-complete and ready for initial release. Key achievements:
 | Task | Status | Description |
 |------|--------|-------------|
 | User guide | 🟡 Pending | Comprehensive getting started guide |
-| Migration guide | 🟡 Pending | From pexpect/expectrl |
+| Migration guide | 🟢 Done | From pexpect/expectrl (see MIGRATION.md) |
 | API reference | 🟢 Done | Generated rustdoc with examples |
 
 ### Ecosystem
@@ -210,7 +210,7 @@ is feature-complete and ready for initial release. Key achievements:
 ### Exit Criteria
 
 - [x] All public APIs documented with examples
-- [ ] Migration guide from pexpect/expectrl
+- [x] Migration guide from pexpect/expectrl
 - [ ] Published to crates.io
 - [x] No known critical bugs
 

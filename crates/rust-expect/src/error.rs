@@ -124,6 +124,16 @@ pub enum ExpectError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// An I/O error occurred with additional context.
+    #[error("{context}: {source}")]
+    IoWithContext {
+        /// What operation was being performed.
+        context: String,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+
     /// Timeout waiting for pattern match.
     #[error("{}", format_timeout_error(*duration, pattern, buffer))]
     Timeout {
@@ -412,6 +422,22 @@ impl ExpectError {
         }
     }
 
+    /// Create an I/O error with context.
+    pub fn io_context(context: impl Into<String>, source: std::io::Error) -> Self {
+        Self::IoWithContext {
+            context: context.into(),
+            source,
+        }
+    }
+
+    /// Wrap an I/O result with context.
+    pub fn with_io_context<T>(
+        result: std::io::Result<T>,
+        context: impl Into<String>,
+    ) -> Result<T> {
+        result.map_err(|e| Self::io_context(context, e))
+    }
+
     /// Check if this is a timeout error.
     #[must_use]
     pub const fn is_timeout(&self) -> bool {
@@ -630,5 +656,33 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("end of file"));
         assert!(msg.contains("final output"));
+    }
+
+    #[test]
+    fn io_with_context_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = ExpectError::io_context("reading config file", io_err);
+        let msg = err.to_string();
+        assert!(msg.contains("reading config file"));
+        assert!(msg.contains("file not found"));
+    }
+
+    #[test]
+    fn with_io_context_helper() {
+        let result: std::io::Result<()> = Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "access denied",
+        ));
+        let err = ExpectError::with_io_context(result, "writing to log file").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("writing to log file"));
+        assert!(msg.contains("access denied"));
+    }
+
+    #[test]
+    fn with_io_context_success() {
+        let result: std::io::Result<i32> = Ok(42);
+        let value = ExpectError::with_io_context(result, "some operation").unwrap();
+        assert_eq!(value, 42);
     }
 }

@@ -501,13 +501,13 @@ pub struct AsyncPty {
 
 #[cfg(unix)]
 impl AsyncPty {
-    /// Create a new async PTY wrapper from a PtyHandle.
+    /// Create a new async PTY wrapper from a `PtyHandle`.
     ///
-    /// Takes ownership of the PtyHandle's file descriptor.
+    /// Takes ownership of the `PtyHandle`'s file descriptor.
     ///
     /// # Errors
     ///
-    /// Returns an error if the AsyncFd cannot be created.
+    /// Returns an error if the `AsyncFd` cannot be created.
     pub fn from_handle(handle: PtyHandle) -> io::Result<Self> {
         let fd = handle.master_fd;
         let pid = handle.pid;

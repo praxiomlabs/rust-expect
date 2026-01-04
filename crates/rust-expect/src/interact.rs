@@ -28,7 +28,7 @@
 //!
 //! Understanding hook execution order is important when using multiple hooks:
 //!
-//! ## Pattern Hooks (on_output, on_input)
+//! ## Pattern Hooks (`on_output`, `on_input`)
 //!
 //! Pattern hooks are evaluated in **registration order**. The first matching
 //! hook's action is executed:
@@ -44,7 +44,7 @@
 //! If output contains "error", the first hook matches and stops. The regex
 //! hook is never reached even though it also matches.
 //!
-//! ## Processing Hooks (HookManager)
+//! ## Processing Hooks (`HookManager`)
 //!
 //! Processing hooks form a **pipeline**. Each hook receives the output of the
 //! previous hook:
@@ -56,7 +56,7 @@
 //!     .build();
 //! ```
 //!
-//! ## Resize Hooks (on_resize)
+//! ## Resize Hooks (`on_resize`)
 //!
 //! Only one resize hook can be registered. If multiple are set, the last one
 //! wins:

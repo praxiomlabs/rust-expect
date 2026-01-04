@@ -52,7 +52,7 @@ impl SyncSession {
         let runtime = Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(crate::error::ExpectError::Io)?;
+            .map_err(|e| crate::error::ExpectError::io_context("creating tokio runtime", e))?;
 
         let inner = runtime.block_on(Session::spawn(command, args))?;
 
@@ -68,7 +68,7 @@ impl SyncSession {
         let runtime = Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(crate::error::ExpectError::Io)?;
+            .map_err(|e| crate::error::ExpectError::io_context("creating tokio runtime", e))?;
 
         let inner = runtime.block_on(Session::spawn_with_config(command, args, config))?;
 
@@ -205,7 +205,7 @@ impl SyncSession {
         let runtime = Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(crate::error::ExpectError::Io)?;
+            .map_err(|e| crate::error::ExpectError::io_context("creating tokio runtime", e))?;
 
         let inner = runtime.block_on(Session::spawn(command, args))?;
 
@@ -221,7 +221,7 @@ impl SyncSession {
         let runtime = Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(crate::error::ExpectError::Io)?;
+            .map_err(|e| crate::error::ExpectError::io_context("creating tokio runtime", e))?;
 
         let inner = runtime.block_on(Session::spawn_with_config(command, args, config))?;
 
@@ -396,7 +396,7 @@ where
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(crate::error::ExpectError::Io)?;
+        .map_err(|e| crate::error::ExpectError::io_context("creating tokio runtime for block_on", e))?;
 
     Ok(runtime.block_on(future))
 }

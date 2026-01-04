@@ -107,7 +107,7 @@ pub fn write_asciicast<W: Write>(writer: &mut W, transcript: &Transcript) -> Res
 
     // Write header
     writeln!(writer, "{}", header.to_json())
-        .map_err(ExpectError::Io)?;
+        .map_err(|e| ExpectError::io_context("writing asciicast header", e))?;
 
     // Write events
     for event in &transcript.events {
@@ -120,7 +120,7 @@ pub fn write_asciicast<W: Write>(writer: &mut W, transcript: &Transcript) -> Res
         };
         let data = String::from_utf8_lossy(&event.data);
         writeln!(writer, "[{:.6}, \"{}\", \"{}\"]", time, event_type, escape_json(&data))
-            .map_err(ExpectError::Io)?;
+            .map_err(|e| ExpectError::io_context("writing asciicast event", e))?;
     }
 
     Ok(())
@@ -134,7 +134,7 @@ pub fn read_asciicast<R: BufRead>(reader: R) -> Result<Transcript> {
     let header_line = lines
         .next()
         .ok_or_else(|| ExpectError::config("Empty asciicast file"))?
-        .map_err(ExpectError::Io)?;
+        .map_err(|e| ExpectError::io_context("reading asciicast header line", e))?;
 
     let header = parse_header(&header_line)?;
 
@@ -152,7 +152,7 @@ pub fn read_asciicast<R: BufRead>(reader: R) -> Result<Transcript> {
 
     // Parse events
     for line in lines {
-        let line = line.map_err(ExpectError::Io)?;
+        let line = line.map_err(|e| ExpectError::io_context("reading asciicast event line", e))?;
         if line.trim().is_empty() {
             continue;
         }
@@ -379,8 +379,35 @@ fn unescape_json(s: &str) -> String {
                 Some('n') => result.push('\n'),
                 Some('r') => result.push('\r'),
                 Some('t') => result.push('\t'),
+                Some('b') => result.push('\u{0008}'), // backspace
+                Some('f') => result.push('\u{000C}'), // form feed
                 Some('"') => result.push('"'),
                 Some('\\') => result.push('\\'),
+                Some('/') => result.push('/'),
+                Some('u') => {
+                    // Parse \uXXXX unicode escape
+                    let mut hex = String::with_capacity(4);
+                    for _ in 0..4 {
+                        if let Some(&c) = chars.peek() {
+                            if c.is_ascii_hexdigit() {
+                                hex.push(chars.next().unwrap());
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if hex.len() == 4 {
+                        if let Ok(code) = u32::from_str_radix(&hex, 16) {
+                            if let Some(ch) = char::from_u32(code) {
+                                result.push(ch);
+                                continue;
+                            }
+                        }
+                    }
+                    // Invalid escape, keep as-is
+                    result.push_str("\\u");
+                    result.push_str(&hex);
+                }
                 Some(c) => {
                     result.push('\\');
                     result.push(c);
@@ -520,6 +547,69 @@ mod tests {
         assert_eq!(unescape_json("quote\\\"here"), "quote\"here");
         assert_eq!(unescape_json("back\\\\slash"), "back\\slash");
         assert_eq!(unescape_json("return\\rhere"), "return\rhere");
+    }
+
+    #[test]
+    fn unescape_json_backspace_formfeed() {
+        assert_eq!(unescape_json("back\\bspace"), "back\u{0008}space");
+        assert_eq!(unescape_json("form\\ffeed"), "form\u{000C}feed");
+    }
+
+    #[test]
+    fn unescape_json_forward_slash() {
+        // Forward slash can be escaped but doesn't need to be
+        assert_eq!(unescape_json("path\\/to\\/file"), "path/to/file");
+        assert_eq!(unescape_json("path/to/file"), "path/to/file");
+    }
+
+    #[test]
+    fn unescape_json_unicode() {
+        // Basic ASCII via unicode escape
+        assert_eq!(unescape_json("\\u0041"), "A");
+        assert_eq!(unescape_json("\\u0048\\u0069"), "Hi");
+
+        // Control characters
+        assert_eq!(unescape_json("\\u001b"), "\u{001b}"); // ESC
+        assert_eq!(unescape_json("\\u0000"), "\u{0000}"); // NULL
+
+        // Non-ASCII unicode
+        assert_eq!(unescape_json("\\u00e9"), "é");
+        assert_eq!(unescape_json("\\u4e2d\\u6587"), "中文");
+
+        // Mixed content
+        assert_eq!(unescape_json("hello\\u0020world"), "hello world");
+        assert_eq!(unescape_json("\\u0041\\u0042\\u0043"), "ABC");
+    }
+
+    #[test]
+    fn unescape_json_unicode_invalid() {
+        // Invalid: not enough hex digits
+        assert_eq!(unescape_json("\\u00"), "\\u00");
+        assert_eq!(unescape_json("\\u0"), "\\u0");
+        assert_eq!(unescape_json("\\u"), "\\u");
+
+        // Invalid: non-hex characters
+        assert_eq!(unescape_json("\\u00GH"), "\\u00GH");
+    }
+
+    #[test]
+    fn unescape_json_mixed_escapes() {
+        // Combine various escape types
+        assert_eq!(
+            unescape_json("line1\\nline2\\ttab\\u0021"),
+            "line1\nline2\ttab!"
+        );
+        assert_eq!(
+            unescape_json("\\\"quoted\\\" and \\u003Ctag\\u003E"),
+            "\"quoted\" and <tag>"
+        );
+    }
+
+    #[test]
+    fn escape_json_control_chars() {
+        // Control characters should be escaped as \uXXXX
+        assert_eq!(escape_json("\u{001b}"), "\\u001b"); // ESC
+        assert_eq!(escape_json("\u{0007}"), "\\u0007"); // BEL
     }
 
     #[test]

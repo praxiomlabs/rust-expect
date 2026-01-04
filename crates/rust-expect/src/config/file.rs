@@ -187,8 +187,9 @@ impl ConfigLoader {
 
     /// Load a config file.
     pub fn load(&self, path: &Path) -> Result<ConfigValue> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| ExpectError::Io(e))?;
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            ExpectError::io_context(format!("reading config file '{}'", path.display()), e)
+        })?;
 
         let format = ConfigFormat::from_path(path)
             .or(self.default_format)

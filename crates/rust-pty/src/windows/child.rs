@@ -229,12 +229,12 @@ where
     I: IntoIterator,
     I::Item: AsRef<OsStr>,
 {
-    // Build command line
-    let mut cmdline = to_wide_string(program.as_ref());
+    // Build command line with proper escaping
+    // The program name is escaped the same way as arguments
+    let mut cmdline = escape_argument(program.as_ref());
     for arg in args {
         cmdline.push(b' ' as u16);
-        // TODO: Proper escaping for Windows command line
-        cmdline.extend(to_wide_string(arg.as_ref()));
+        cmdline.extend(escape_argument(arg.as_ref()));
     }
     cmdline.push(0); // Null terminator
 
@@ -314,6 +314,86 @@ where
 /// Convert an OsStr to a wide string (UTF-16).
 fn to_wide_string(s: &OsStr) -> Vec<u16> {
     s.encode_wide().collect()
+}
+
+/// Escape a command-line argument for Windows.
+///
+/// This implements proper Windows command-line escaping according to the
+/// Microsoft C/C++ argument parsing rules:
+/// - Arguments containing spaces, tabs, or quotes are wrapped in double quotes
+/// - Backslashes before quotes are doubled
+/// - Quotes inside the argument are escaped as \"
+/// - Trailing backslashes are doubled (since they precede the closing quote)
+///
+/// # References
+/// - <https://docs.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments>
+/// - <https://daviddeley.com/autohotkey/parameters/parameters.htm>
+fn escape_argument(arg: &OsStr) -> Vec<u16> {
+    let arg_str = arg.to_string_lossy();
+
+    // Check if argument needs quoting
+    let needs_quoting = arg_str.is_empty()
+        || arg_str.contains(' ')
+        || arg_str.contains('\t')
+        || arg_str.contains('"')
+        || arg_str.contains('\\');
+
+    if !needs_quoting {
+        return to_wide_string(arg);
+    }
+
+    let mut result = Vec::new();
+    result.push(b'"' as u16); // Opening quote
+
+    let chars: Vec<char> = arg_str.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        if c == '\\' {
+            // Count consecutive backslashes
+            let mut num_backslashes = 0;
+            while i < chars.len() && chars[i] == '\\' {
+                num_backslashes += 1;
+                i += 1;
+            }
+
+            if i < chars.len() && chars[i] == '"' {
+                // Backslashes before a quote: double them and escape the quote
+                for _ in 0..(num_backslashes * 2) {
+                    result.push(b'\\' as u16);
+                }
+                result.push(b'\\' as u16);
+                result.push(b'"' as u16);
+                i += 1;
+            } else if i >= chars.len() {
+                // Trailing backslashes: double them (they'll precede closing quote)
+                for _ in 0..(num_backslashes * 2) {
+                    result.push(b'\\' as u16);
+                }
+            } else {
+                // Backslashes not before a quote: keep them as-is
+                for _ in 0..num_backslashes {
+                    result.push(b'\\' as u16);
+                }
+            }
+        } else if c == '"' {
+            // Quote without preceding backslash: escape it
+            result.push(b'\\' as u16);
+            result.push(b'"' as u16);
+            i += 1;
+        } else {
+            // Regular character
+            for code_unit in c.encode_utf16(&mut [0u16; 2]) {
+                result.push(*code_unit);
+            }
+            i += 1;
+        }
+    }
+
+    result.push(b'"' as u16); // Closing quote
+    result
 }
 
 /// Build a Windows environment block from a HashMap.
@@ -425,5 +505,108 @@ mod tests {
         let s = OsStr::new("hello");
         let wide = to_wide_string(s);
         assert_eq!(wide, vec![b'h' as u16, b'e' as u16, b'l' as u16, b'l' as u16, b'o' as u16]);
+    }
+
+    /// Helper to convert escaped Vec<u16> back to String for testing.
+    fn wide_to_string(wide: &[u16]) -> String {
+        String::from_utf16_lossy(wide)
+    }
+
+    #[test]
+    fn escape_simple_argument() {
+        // Simple argument without special characters - no quoting needed
+        let arg = OsStr::new("hello");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "hello");
+    }
+
+    #[test]
+    fn escape_argument_with_space() {
+        // Argument with space needs quoting
+        let arg = OsStr::new("hello world");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"hello world\"");
+    }
+
+    #[test]
+    fn escape_argument_with_tab() {
+        // Argument with tab needs quoting
+        let arg = OsStr::new("hello\tworld");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"hello\tworld\"");
+    }
+
+    #[test]
+    fn escape_empty_argument() {
+        // Empty argument needs quoting
+        let arg = OsStr::new("");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"\"");
+    }
+
+    #[test]
+    fn escape_argument_with_quote() {
+        // Embedded quote needs escaping
+        let arg = OsStr::new("say \"hello\"");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"say \\\"hello\\\"\"");
+    }
+
+    #[test]
+    fn escape_argument_with_backslash() {
+        // Backslash not before quote - kept as-is inside quotes
+        let arg = OsStr::new("C:\\Users\\test");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"C:\\Users\\test\"");
+    }
+
+    #[test]
+    fn escape_argument_with_trailing_backslash() {
+        // Trailing backslashes need to be doubled (they precede closing quote)
+        let arg = OsStr::new("C:\\Users\\");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"C:\\Users\\\\\"");
+    }
+
+    #[test]
+    fn escape_argument_with_multiple_trailing_backslashes() {
+        // Multiple trailing backslashes all need doubling
+        let arg = OsStr::new("path\\\\");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"path\\\\\\\\\"");
+    }
+
+    #[test]
+    fn escape_argument_backslash_before_quote() {
+        // Backslash before quote: double the backslash and escape the quote
+        let arg = OsStr::new("test\\\"value");
+        let escaped = escape_argument(arg);
+        // \\ before " -> \\\\ + \"
+        assert_eq!(wide_to_string(&escaped), "\"test\\\\\\\"value\"");
+    }
+
+    #[test]
+    fn escape_argument_multiple_backslashes_before_quote() {
+        // Multiple backslashes before quote
+        let arg = OsStr::new("test\\\\\"value");
+        let escaped = escape_argument(arg);
+        // \\\\ before " -> \\\\\\\\ + \"
+        assert_eq!(wide_to_string(&escaped), "\"test\\\\\\\\\\\"value\"");
+    }
+
+    #[test]
+    fn escape_complex_path() {
+        // Complex Windows path with spaces
+        let arg = OsStr::new("C:\\Program Files\\My App\\bin");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"C:\\Program Files\\My App\\bin\"");
+    }
+
+    #[test]
+    fn escape_unc_path() {
+        // UNC path
+        let arg = OsStr::new("\\\\server\\share\\folder");
+        let escaped = escape_argument(arg);
+        assert_eq!(wide_to_string(&escaped), "\"\\\\server\\share\\folder\"");
     }
 }

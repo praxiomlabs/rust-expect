@@ -5,7 +5,7 @@
 If you discover a security vulnerability in rust-expect, please report it by:
 
 1. **Do NOT** open a public GitHub issue
-2. Use GitHub's private vulnerability reporting feature at [Security Advisories](https://github.com/jkindrix/rust-expect/security/advisories/new)
+2. Use GitHub's private vulnerability reporting feature at [Security Advisories](https://github.com/praxiomlabs/rust-expect/security/advisories/new)
 3. Include detailed information about the vulnerability
 4. Allow reasonable time for a fix before public disclosure (typically 90 days)
 

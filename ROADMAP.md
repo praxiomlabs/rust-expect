@@ -255,7 +255,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow.
 
 ```bash
 # Clone and build
-git clone https://github.com/jkindrix/rust-expect
+git clone https://github.com/praxiomlabs/rust-expect
 cd rust-expect
 cargo build --workspace --all-features
 

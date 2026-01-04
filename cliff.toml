@@ -72,6 +72,6 @@ skip_tags = ""
 sort_commits = "oldest"
 # Link to commit on GitHub
 link_parsers = [
-    { pattern = "#(\\d+)", href = "https://github.com/jkindrix/rust-expect/issues/$1" },
+    { pattern = "#(\\d+)", href = "https://github.com/praxiomlabs/rust-expect/issues/$1" },
     { pattern = "RFC(\\d+)", text = "ietf-rfc-$1", href = "https://datatracker.ietf.org/doc/html/rfc$1" },
 ]

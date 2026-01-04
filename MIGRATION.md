@@ -428,5 +428,5 @@ let first = expect_any(&mut multi.sessions_mut(), "$").await?;
 ## Getting Help
 
 - [API Documentation](https://docs.rs/rust-expect)
-- [GitHub Issues](https://github.com/jkindrix/rust-expect/issues)
-- [Examples](https://github.com/jkindrix/rust-expect/tree/main/crates/rust-expect/examples)
+- [GitHub Issues](https://github.com/praxiomlabs/rust-expect/issues)
+- [Examples](https://github.com/praxiomlabs/rust-expect/tree/main/crates/rust-expect/examples)

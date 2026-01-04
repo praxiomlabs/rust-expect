@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/rust-expect.svg)](https://crates.io/crates/rust-expect)
 [![Documentation](https://docs.rs/rust-expect/badge.svg)](https://docs.rs/rust-expect)
 [![License](https://img.shields.io/crates/l/rust-expect.svg)](LICENSE)
-[![CI](https://github.com/jkindrix/rust-expect/workflows/CI/badge.svg)](https://github.com/jkindrix/rust-expect/actions)
+[![CI](https://github.com/praxiomlabs/rust-expect/workflows/CI/badge.svg)](https://github.com/praxiomlabs/rust-expect/actions)
 
 A modern, async-first terminal automation library for Rust, inspired by the classic Expect tool.
 

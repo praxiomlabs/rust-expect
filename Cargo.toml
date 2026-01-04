@@ -39,6 +39,16 @@ libc = "0.2"
 
 # Logging and tracing
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# OpenTelemetry for distributed tracing
+opentelemetry = "0.28"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.28", features = ["tonic", "grpc-tonic"] }
+tracing-opentelemetry = "0.29"
+
+# Prometheus metrics export
+prometheus = "0.13"
 
 # Error handling
 thiserror = "2.0"
@@ -81,6 +91,9 @@ rand = "0.9"
 # Futures utilities for async combinators
 futures = "0.3"
 tokio-stream = "0.1"
+
+# Zero-copy byte buffers
+bytes = "1.10"
 
 # Workspace crates (internal)
 rust-pty = { path = "crates/rust-pty" }

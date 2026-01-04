@@ -48,6 +48,9 @@ rand.workspace = true
 futures.workspace = true
 tokio-stream.workspace = true
 
+# Zero-copy byte buffers
+bytes.workspace = true
+
 # libc for low-level Unix operations
 libc.workspace = true
 
@@ -60,6 +63,16 @@ bitflags = { workspace = true, optional = true }
 # SSH support (optional)
 russh = { workspace = true, optional = true }
 russh-keys = { workspace = true, optional = true }
+
+# OpenTelemetry for distributed tracing (optional)
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+# Prometheus metrics (optional)
+prometheus = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
@@ -97,7 +110,14 @@ pii-redaction = []
 legacy-encoding = []
 
 # Enable Prometheus/OpenTelemetry metrics
-metrics = []
+metrics = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:tracing-opentelemetry",
+    "dep:tracing-subscriber",
+    "dep:prometheus",
+]
 
 # Enable test utilities
 test-utils = []

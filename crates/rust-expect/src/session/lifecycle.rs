@@ -290,7 +290,10 @@ mod tests {
 
     #[test]
     fn signal_control_char() {
-        assert_eq!(Signal::Interrupt.as_control_char(), Some(ControlChar::CtrlC));
+        assert_eq!(
+            Signal::Interrupt.as_control_char(),
+            Some(ControlChar::CtrlC)
+        );
         assert_eq!(Signal::Terminate.as_control_char(), None);
     }
 }

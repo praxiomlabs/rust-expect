@@ -247,9 +247,7 @@ impl AnsiParser {
                 self.state = ParserState::CsiIntermediate;
                 None
             }
-            b'@'..=b'~' => {
-                self.finalize_csi(byte)
-            }
+            b'@'..=b'~' => self.finalize_csi(byte),
             _ => {
                 self.reset();
                 None
@@ -262,7 +260,10 @@ impl AnsiParser {
             b'0'..=b'9' => {
                 let digit = u16::from(byte - b'0');
                 self.current_param = Some(
-                    self.current_param.unwrap_or(0).saturating_mul(10).saturating_add(digit)
+                    self.current_param
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(digit),
                 );
                 None
             }
@@ -337,19 +338,13 @@ impl AnsiParser {
                 col: params.get(1).copied().unwrap_or(1),
             },
             // Erase operations
-            (b'J', "") => AnsiSequence::EraseDisplay(
-                params.first().copied().unwrap_or(0).into()
-            ),
-            (b'K', "") => AnsiSequence::EraseLine(
-                params.first().copied().unwrap_or(0).into()
-            ),
+            (b'J', "") => AnsiSequence::EraseDisplay(params.first().copied().unwrap_or(0).into()),
+            (b'K', "") => AnsiSequence::EraseLine(params.first().copied().unwrap_or(0).into()),
             (b'X', "") => AnsiSequence::EraseChars(params.first().copied().unwrap_or(1)),
             // Graphics
-            (b'm', "") => AnsiSequence::SetGraphics(if params.is_empty() {
-                vec![0]
-            } else {
-                params
-            }),
+            (b'm', "") => {
+                AnsiSequence::SetGraphics(if params.is_empty() { vec![0] } else { params })
+            }
             // Scrolling
             (b'S', "") => AnsiSequence::ScrollUp(params.first().copied().unwrap_or(1)),
             (b'T', "") => AnsiSequence::ScrollDown(params.first().copied().unwrap_or(1)),
@@ -372,7 +367,11 @@ impl AnsiParser {
             (b'l', "?") if params.first() == Some(&25) => AnsiSequence::HideCursor,
             _ => AnsiSequence::Unknown(format!(
                 "CSI {}{}{}",
-                params.iter().map(std::string::ToString::to_string).collect::<Vec<_>>().join(";"),
+                params
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(";"),
                 intermediate,
                 final_byte as char
             )),
@@ -464,7 +463,10 @@ mod tests {
     fn parse_cursor_up() {
         let mut parser = AnsiParser::new();
         let result = "\x1b[5A".bytes().filter_map(|b| parser.parse(b)).last();
-        assert_eq!(result, Some(ParseResult::Sequence(AnsiSequence::CursorUp(5))));
+        assert_eq!(
+            result,
+            Some(ParseResult::Sequence(AnsiSequence::CursorUp(5)))
+        );
     }
 
     #[test]
@@ -486,7 +488,9 @@ mod tests {
         let result = "\x1b[1;31m".bytes().filter_map(|b| parser.parse(b)).last();
         assert_eq!(
             result,
-            Some(ParseResult::Sequence(AnsiSequence::SetGraphics(vec![1, 31])))
+            Some(ParseResult::Sequence(AnsiSequence::SetGraphics(vec![
+                1, 31
+            ])))
         );
     }
 

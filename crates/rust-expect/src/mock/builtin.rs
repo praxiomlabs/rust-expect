@@ -17,7 +17,11 @@ pub fn login_scenario(username: &str, password: &str) -> Scenario {
         .initial_output("Welcome to the system\n\n")
         .step(ScenarioStep::new().respond("login: "))
         .step(ScenarioStep::new().expect(username).respond("\nPassword: "))
-        .step(ScenarioStep::new().expect(password).respond("\nLast login: Mon Jan 1 00:00:00\n$ "))
+        .step(
+            ScenarioStep::new()
+                .expect(password)
+                .respond("\nLast login: Mon Jan 1 00:00:00\n$ "),
+        )
         .exit_code(0)
         .build()
 }
@@ -36,9 +40,17 @@ pub fn ssh_scenario(host: &str) -> Scenario {
     ScenarioBuilder::new("ssh")
         .description("SSH connection with host key verification")
         .step(ScenarioStep::new().respond(&banner))
-        .step(ScenarioStep::new().expect("yes").respond("\nWarning: Permanently added '{}' to the list of known hosts.\n"))
+        .step(
+            ScenarioStep::new()
+                .expect("yes")
+                .respond("\nWarning: Permanently added '{}' to the list of known hosts.\n"),
+        )
         .step(ScenarioStep::new().respond("Password: "))
-        .step(ScenarioStep::new().delay_ms(100).respond("\nLast login: Mon Jan 1 00:00:00\n$ "))
+        .step(
+            ScenarioStep::new()
+                .delay_ms(100)
+                .respond("\nLast login: Mon Jan 1 00:00:00\n$ "),
+        )
         .exit_code(0)
         .build()
 }
@@ -62,7 +74,12 @@ pub fn shell_scenario(prompt: &str) -> Scenario {
 pub fn command_scenario(command: &str, output: &str, exit_code: i32) -> Scenario {
     ScenarioBuilder::new("command")
         .description("Command execution")
-        .step(ScenarioStep::new().expect(command).delay_ms(50).respond(output))
+        .step(
+            ScenarioStep::new()
+                .expect(command)
+                .delay_ms(50)
+                .respond(output),
+        )
         .exit_code(exit_code)
         .build()
 }
@@ -75,7 +92,11 @@ pub fn sudo_scenario(command: &str) -> Scenario {
     ScenarioBuilder::new("sudo")
         .description("Sudo password prompt")
         .step(ScenarioStep::new().respond("[sudo] password: "))
-        .step(ScenarioStep::new().delay_ms(100).respond(format!("\nExecuting: {command}\n")))
+        .step(
+            ScenarioStep::new()
+                .delay_ms(100)
+                .respond(format!("\nExecuting: {command}\n")),
+        )
         .exit_code(0)
         .build()
 }
@@ -123,17 +144,14 @@ pub fn file_transfer_scenario(filename: &str, size_kb: usize) -> Scenario {
     for i in 1..=steps {
         let progress = i * 10;
         let transferred = chunk_size * i;
-        builder = builder.step(
-            ScenarioStep::new()
-                .delay_ms(100)
-                .respond(format!("\r[{}{}] {}% ({}/{}KB)", 
-                    "=".repeat(i),
-                    " ".repeat(steps - i),
-                    progress,
-                    transferred,
-                    size_kb
-                ))
-        );
+        builder = builder.step(ScenarioStep::new().delay_ms(100).respond(format!(
+            "\r[{}{}] {}% ({}/{}KB)",
+            "=".repeat(i),
+            " ".repeat(steps - i),
+            progress,
+            transferred,
+            size_kb
+        )));
     }
 
     builder
@@ -171,18 +189,11 @@ pub fn timeout_scenario(delay: Duration) -> Scenario {
 /// Simulates a series of prompts and responses.
 #[must_use]
 pub fn interactive_prompts(prompts: &[(&str, &str)]) -> Scenario {
-    let mut builder = ScenarioBuilder::new("interactive")
-        .description("Interactive prompts");
+    let mut builder = ScenarioBuilder::new("interactive").description("Interactive prompts");
 
     for (prompt, response) in prompts {
-        builder = builder.step(
-            ScenarioStep::new()
-                .respond(*prompt)
-        );
-        builder = builder.step(
-            ScenarioStep::new()
-                .expect(*response)
-        );
+        builder = builder.step(ScenarioStep::new().respond(*prompt));
+        builder = builder.step(ScenarioStep::new().expect(*response));
     }
 
     builder.exit_code(0).build()
@@ -203,7 +214,9 @@ pub fn python_repl() -> EventTimeline {
     EventTimeline::from_events(vec![
         MockEvent::output_str("Python 3.10.0 (default, Jan 1 2024, 00:00:00)\n"),
         MockEvent::output_str("[GCC 9.3.0] on linux\n"),
-        MockEvent::output_str("Type \"help\", \"copyright\", \"credits\" or \"license\" for more information.\n"),
+        MockEvent::output_str(
+            "Type \"help\", \"copyright\", \"credits\" or \"license\" for more information.\n",
+        ),
         MockEvent::output_str(">>> "),
     ])
 }

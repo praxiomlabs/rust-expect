@@ -8,7 +8,7 @@ pub mod format;
 pub mod player;
 pub mod recorder;
 
-pub use asciicast::{read_asciicast, write_asciicast, AsciicastHeader};
+pub use asciicast::{AsciicastHeader, read_asciicast, write_asciicast};
 pub use format::{EventType, Transcript, TranscriptEvent, TranscriptMetadata};
-pub use player::{play_to_stdout, PlaybackOptions, PlaybackSpeed, Player, PlayerState};
+pub use player::{PlaybackOptions, PlaybackSpeed, Player, PlayerState, play_to_stdout};
 pub use recorder::{Recorder, RecorderBuilder};

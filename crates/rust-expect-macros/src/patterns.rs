@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{braced, Expr, Ident, LitStr, Result, Token};
+use syn::{Expr, Ident, LitStr, Result, Token, braced};
 
 /// A single pattern definition.
 #[allow(clippy::struct_field_names)]
@@ -116,7 +116,8 @@ pub fn expand(input: PatternsInput) -> TokenStream {
         .enumerate()
         .map(|(idx, pattern)| {
             let name = pattern
-                .name.map_or_else(|| quote! { None }, |n| quote! { Some(#n.to_string()) });
+                .name
+                .map_or_else(|| quote! { None }, |n| quote! { Some(#n.to_string()) });
 
             let pattern_expr = match pattern.kind {
                 PatternKind::Literal(lit) => {
@@ -136,8 +137,10 @@ pub fn expand(input: PatternsInput) -> TokenStream {
                 }
             };
 
-            let action_expr = pattern
-                .action.map_or_else(|| quote! { None::<Box<dyn Fn(&str)>> }, |a| quote! { Some(Box::new(move |_| { #a })) });
+            let action_expr = pattern.action.map_or_else(
+                || quote! { None::<Box<dyn Fn(&str)>> },
+                |a| quote! { Some(Box::new(move |_| { #a })) },
+            );
 
             quote! {
                 rust_expect::pattern::Pattern {

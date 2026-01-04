@@ -42,8 +42,8 @@ mod sync_session_tests {
 
     #[test]
     fn sync_session_spawn_echo() {
-        let mut session = SyncSession::spawn("/bin/echo", &["hello", "sync"])
-            .expect("Failed to spawn echo");
+        let mut session =
+            SyncSession::spawn("/bin/echo", &["hello", "sync"]).expect("Failed to spawn echo");
 
         let m = session.expect("sync").expect("Failed to expect sync");
         assert!(m.matched.contains("sync"));
@@ -51,8 +51,7 @@ mod sync_session_tests {
 
     #[test]
     fn sync_session_send_and_expect() {
-        let mut session = SyncSession::spawn("/bin/cat", &[])
-            .expect("Failed to spawn cat");
+        let mut session = SyncSession::spawn("/bin/cat", &[]).expect("Failed to spawn cat");
 
         session.send_line("test line").expect("Failed to send");
         let m = session.expect("test line").expect("Failed to expect");
@@ -61,16 +60,15 @@ mod sync_session_tests {
 
     #[test]
     fn sync_session_has_pid() {
-        let session = SyncSession::spawn("/bin/true", &[])
-            .expect("Failed to spawn true");
+        let session = SyncSession::spawn("/bin/true", &[]).expect("Failed to spawn true");
 
         assert!(session.pid() > 0);
     }
 
     #[test]
     fn sync_session_buffer() {
-        let mut session = SyncSession::spawn("/bin/echo", &["buffer_test"])
-            .expect("Failed to spawn echo");
+        let mut session =
+            SyncSession::spawn("/bin/echo", &["buffer_test"]).expect("Failed to spawn echo");
 
         // Wait for output
         session.expect("buffer_test").expect("Failed to expect");
@@ -85,10 +83,11 @@ mod sync_session_tests {
     fn sync_session_control_char() {
         use rust_expect::ControlChar;
 
-        let mut session = SyncSession::spawn("/bin/cat", &[])
-            .expect("Failed to spawn cat");
+        let mut session = SyncSession::spawn("/bin/cat", &[]).expect("Failed to spawn cat");
 
         // Send Ctrl-D (EOF)
-        session.send_control(ControlChar::CtrlD).expect("Failed to send ctrl-d");
+        session
+            .send_control(ControlChar::CtrlD)
+            .expect("Failed to send ctrl-d");
     }
 }

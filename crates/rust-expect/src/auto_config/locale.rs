@@ -58,12 +58,10 @@ impl LocaleInfo {
     /// Check if this is a UTF-8 locale.
     #[must_use]
     pub fn is_utf8(&self) -> bool {
-        self.codeset
-            .as_ref()
-            .is_some_and(|c| {
-                let c = c.to_lowercase().replace('-', "");
-                c == "utf8"
-            })
+        self.codeset.as_ref().is_some_and(|c| {
+            let c = c.to_lowercase().replace('-', "");
+            c == "utf8"
+        })
     }
 
     /// Format as locale string.

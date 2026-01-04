@@ -67,7 +67,8 @@ impl PiiRedactor {
     /// Set a custom placeholder for a PII type.
     #[must_use]
     pub fn custom_placeholder(mut self, pii_type: PiiType, placeholder: impl Into<String>) -> Self {
-        self.custom_placeholders.insert(pii_type, placeholder.into());
+        self.custom_placeholders
+            .insert(pii_type, placeholder.into());
         self
     }
 
@@ -75,7 +76,7 @@ impl PiiRedactor {
     #[must_use]
     pub fn redact(&self, text: &str) -> String {
         let matches = self.detector.detect(text);
-        
+
         if matches.is_empty() {
             return text.to_string();
         }
@@ -97,7 +98,8 @@ impl PiiRedactor {
     }
 
     /// Redact PII from bytes (lossy UTF-8 conversion).
-    #[must_use] pub fn redact_bytes(&self, data: &[u8]) -> Vec<u8> {
+    #[must_use]
+    pub fn redact_bytes(&self, data: &[u8]) -> Vec<u8> {
         let text = String::from_utf8_lossy(data);
         self.redact(&text).into_bytes()
     }
@@ -130,7 +132,7 @@ impl PiiRedactor {
 
         let visible = 2;
         let hidden = chars.len() - (visible * 2);
-        
+
         format!(
             "{}{}{}",
             chars[..visible].iter().collect::<String>(),
@@ -179,7 +181,7 @@ impl StreamingRedactor {
 
         // Find a safe point to redact (end of line or max buffer)
         let safe_point = self.find_safe_point();
-        
+
         if safe_point > 0 {
             let to_process = self.buffer[..safe_point].to_string();
             self.buffer = self.buffer[safe_point..].to_string();
@@ -254,8 +256,7 @@ mod tests {
 
     #[test]
     fn custom_placeholder() {
-        let redactor = PiiRedactor::new()
-            .custom_placeholder(PiiType::Email, "***EMAIL***");
+        let redactor = PiiRedactor::new().custom_placeholder(PiiType::Email, "***EMAIL***");
         let result = redactor.redact("Contact: test@test.com");
         assert!(result.contains("***EMAIL***"));
     }
@@ -275,8 +276,12 @@ mod tests {
 
     #[test]
     fn redact_custom_pattern() {
-        let detector = PiiDetector::new()
-            .add_pattern("employee_id", r"EMP-\d{6}", "[EMPLOYEE ID REDACTED]", 0.9);
+        let detector = PiiDetector::new().add_pattern(
+            "employee_id",
+            r"EMP-\d{6}",
+            "[EMPLOYEE ID REDACTED]",
+            0.9,
+        );
         let redactor = PiiRedactor::with_detector(detector);
 
         let result = redactor.redact("Contact EMP-123456 for assistance");
@@ -286,8 +291,8 @@ mod tests {
 
     #[test]
     fn redact_custom_with_builtin() {
-        let detector = PiiDetector::new()
-            .add_pattern("project", r"PROJ-[A-Z]{4}", "[PROJECT]", 0.9);
+        let detector =
+            PiiDetector::new().add_pattern("project", r"PROJ-[A-Z]{4}", "[PROJECT]", 0.9);
         let redactor = PiiRedactor::with_detector(detector);
 
         let result = redactor.redact("PROJ-ABCD owner: user@example.com");
@@ -299,10 +304,8 @@ mod tests {
 
     #[test]
     fn redact_custom_asterisks() {
-        let detector = PiiDetector::custom_only()
-            .add_pattern("code", r"CODE-\d{4}", "[CODE]", 0.9);
-        let redactor = PiiRedactor::with_detector(detector)
-            .style(RedactionStyle::Asterisks);
+        let detector = PiiDetector::custom_only().add_pattern("code", r"CODE-\d{4}", "[CODE]", 0.9);
+        let redactor = PiiRedactor::with_detector(detector).style(RedactionStyle::Asterisks);
 
         let result = redactor.redact("Use CODE-1234 to access");
         assert!(result.contains("*********")); // 9 asterisks for "CODE-1234"

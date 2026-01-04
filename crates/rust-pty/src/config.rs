@@ -95,9 +95,10 @@ impl PtyConfig {
     /// variables from `env_add`, and removes variables from `env_remove`.
     #[must_use]
     pub fn effective_env(&self) -> HashMap<OsString, OsString> {
-        let mut env = self.env.clone().unwrap_or_else(|| {
-            std::env::vars_os().collect()
-        });
+        let mut env = self
+            .env
+            .clone()
+            .unwrap_or_else(|| std::env::vars_os().collect());
 
         // Add additional variables
         env.extend(self.env_add.clone());

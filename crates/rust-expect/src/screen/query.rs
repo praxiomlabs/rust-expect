@@ -23,7 +23,12 @@ impl Region {
     /// Create a new region.
     #[must_use]
     pub const fn new(top: usize, left: usize, bottom: usize, right: usize) -> Self {
-        Self { top, left, bottom, right }
+        Self {
+            top,
+            left,
+            bottom,
+            right,
+        }
     }
 
     /// Create a region for a single cell.
@@ -106,9 +111,8 @@ impl<'a> ScreenQuery<'a> {
 
     /// Get the effective region.
     fn effective_region(&self) -> Region {
-        self.region.unwrap_or_else(|| {
-            Region::full(self.buffer.rows(), self.buffer.cols())
-        })
+        self.region
+            .unwrap_or_else(|| Region::full(self.buffer.rows(), self.buffer.cols()))
     }
 
     /// Get the text content of the query region.
@@ -327,9 +331,7 @@ mod tests {
     #[test]
     fn query_region() {
         let buf = make_buffer("ABCDE\nFGHIJ\nKLMNO");
-        let text = buf.query()
-            .region(Region::new(0, 1, 1, 3))
-            .text();
+        let text = buf.query().region(Region::new(0, 1, 1, 3)).text();
         assert_eq!(text, "BCD\nGHI");
     }
 

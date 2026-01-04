@@ -208,9 +208,7 @@ impl<'a> Player<'a> {
         let delay = match self.options.speed {
             PlaybackSpeed::Instant => Duration::ZERO,
             PlaybackSpeed::Realtime => delay,
-            PlaybackSpeed::Speed(mult) => {
-                Duration::from_secs_f64(delay.as_secs_f64() / mult)
-            }
+            PlaybackSpeed::Speed(mult) => Duration::from_secs_f64(delay.as_secs_f64() / mult),
         };
 
         // Apply max idle
@@ -272,7 +270,10 @@ mod tests {
     fn player_basic() {
         let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
         transcript.push(TranscriptEvent::output(Duration::ZERO, b"hello"));
-        transcript.push(TranscriptEvent::output(Duration::from_millis(100), b" world"));
+        transcript.push(TranscriptEvent::output(
+            Duration::from_millis(100),
+            b" world",
+        ));
 
         let mut player = Player::new(&transcript);
         assert_eq!(player.total_events(), 2);
@@ -297,9 +298,8 @@ mod tests {
         transcript.push(TranscriptEvent::output(Duration::ZERO, b"a"));
         transcript.push(TranscriptEvent::output(Duration::from_secs(10), b"b"));
 
-        let player = Player::new(&transcript).with_options(
-            PlaybackOptions::new().with_speed(PlaybackSpeed::Instant)
-        );
+        let player = Player::new(&transcript)
+            .with_options(PlaybackOptions::new().with_speed(PlaybackSpeed::Instant));
 
         assert_eq!(player.delay_to_next(), Duration::ZERO);
     }

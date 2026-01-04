@@ -181,11 +181,14 @@ pub trait PtySystem: Send + Sync {
     ///
     /// On Unix, this uses the user's shell from the SHELL environment variable
     /// or falls back to `/bin/sh`. On Windows, this uses `cmd.exe`.
-    #[must_use] fn spawn_shell(config: &PtyConfig) -> impl Future<Output = Result<(Self::Master, Self::Child)>> + Send {
+    #[must_use]
+    fn spawn_shell(
+        config: &PtyConfig,
+    ) -> impl Future<Output = Result<(Self::Master, Self::Child)>> + Send {
         async move {
             #[cfg(unix)]
-            let shell = std::env::var_os("SHELL")
-                .unwrap_or_else(|| std::ffi::OsString::from("/bin/sh"));
+            let shell =
+                std::env::var_os("SHELL").unwrap_or_else(|| std::ffi::OsString::from("/bin/sh"));
             #[cfg(windows)]
             let shell = std::ffi::OsString::from("cmd.exe");
 

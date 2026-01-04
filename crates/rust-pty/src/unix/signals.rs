@@ -5,8 +5,8 @@
 //! (child process state change).
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use signal_hook::consts::signal::{SIGCHLD, SIGWINCH};
 use signal_hook::iterator::Signals;
@@ -48,7 +48,8 @@ impl Drop for SignalHandle {
 /// # Errors
 ///
 /// Returns an error if signal registration fails.
-pub fn start_signal_handler() -> io::Result<(mpsc::UnboundedReceiver<PtySignalEvent>, SignalHandle)> {
+pub fn start_signal_handler() -> io::Result<(mpsc::UnboundedReceiver<PtySignalEvent>, SignalHandle)>
+{
     let mut signals = Signals::new([SIGWINCH, SIGCHLD])?;
     let (tx, rx) = mpsc::unbounded_channel();
     let shutdown = Arc::new(AtomicBool::new(false));

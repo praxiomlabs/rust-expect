@@ -188,10 +188,7 @@ impl Fixtures {
         ));
 
         // Multi-line output
-        fixtures.add_inline(
-            "multiline",
-            "Line 1\nLine 2\nLine 3\nLine 4\nLine 5",
-        );
+        fixtures.add_inline("multiline", "Line 1\nLine 2\nLine 3\nLine 4\nLine 5");
 
         fixtures
     }

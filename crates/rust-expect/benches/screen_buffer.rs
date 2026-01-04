@@ -1,11 +1,11 @@
 //! Screen buffer benchmarks.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 #[cfg(feature = "screen")]
 mod screen_benches {
     use super::{BenchmarkId, Criterion, black_box};
-    use rust_expect::screen::{ScreenBuffer, AnsiParser, ScreenQueryExt};
+    use rust_expect::screen::{AnsiParser, ScreenBuffer, ScreenQueryExt};
 
     /// Helper to write a string to the buffer character by character.
     fn write_str(buffer: &mut ScreenBuffer, s: &str) {

@@ -7,8 +7,8 @@
 
 use rust_expect::prelude::*;
 use rust_expect::transcript::{
-    EventType, PlaybackOptions, PlaybackSpeed, Player, PlayerState, RecorderBuilder,
-    Transcript, TranscriptEvent, TranscriptMetadata,
+    EventType, PlaybackOptions, PlaybackSpeed, Player, PlayerState, RecorderBuilder, Transcript,
+    TranscriptEvent, TranscriptMetadata,
 };
 use std::time::Duration;
 
@@ -28,12 +28,24 @@ async fn main() -> Result<()> {
 
     // Add events (note: Duration is first argument, then data)
     transcript.push(TranscriptEvent::output(Duration::from_millis(0), b"$ "));
-    transcript.push(TranscriptEvent::input(Duration::from_millis(100), b"echo hello\n"));
-    transcript.push(TranscriptEvent::output(Duration::from_millis(150), b"echo hello\n"));
-    transcript.push(TranscriptEvent::output(Duration::from_millis(200), b"hello\n"));
+    transcript.push(TranscriptEvent::input(
+        Duration::from_millis(100),
+        b"echo hello\n",
+    ));
+    transcript.push(TranscriptEvent::output(
+        Duration::from_millis(150),
+        b"echo hello\n",
+    ));
+    transcript.push(TranscriptEvent::output(
+        Duration::from_millis(200),
+        b"hello\n",
+    ));
     transcript.push(TranscriptEvent::output(Duration::from_millis(250), b"$ "));
 
-    println!("   Created transcript with {} events", transcript.events.len());
+    println!(
+        "   Created transcript with {} events",
+        transcript.events.len()
+    );
     println!("   Duration: {:?}", transcript.duration());
 
     // Example 2: Recording a session
@@ -50,8 +62,7 @@ async fn main() -> Result<()> {
     // Example 3: Playback configuration
     println!("\n3. Playback options...");
 
-    let _options = PlaybackOptions::new()
-        .with_speed(PlaybackSpeed::Speed(2.0)); // 2x speed
+    let _options = PlaybackOptions::new().with_speed(PlaybackSpeed::Speed(2.0)); // 2x speed
 
     println!("   Speed: 2.0x (double)");
     println!("   Available speeds:");
@@ -97,7 +108,9 @@ async fn main() -> Result<()> {
 
     // Spawn and record a session
     let mut session = Session::spawn("/bin/sh", &[]).await?;
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     // Record the initial output
     recorder.record_output(b"$ ");
@@ -109,7 +122,9 @@ async fn main() -> Result<()> {
     let m = session.expect("Recorded!").await?;
     recorder.record_output(m.matched.as_bytes());
 
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
     recorder.record_output(b"$ ");
 
     // Finish recording
@@ -124,12 +139,14 @@ async fn main() -> Result<()> {
     // Example 7: Transcript analysis
     println!("\n7. Analyzing transcript...");
 
-    let input_count = transcript.events
+    let input_count = transcript
+        .events
         .iter()
         .filter(|e| matches!(e.event_type, EventType::Input))
         .count();
 
-    let output_count = transcript.events
+    let output_count = transcript
+        .events
         .iter()
         .filter(|e| matches!(e.event_type, EventType::Output))
         .count();

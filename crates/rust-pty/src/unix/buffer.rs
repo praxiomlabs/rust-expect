@@ -122,7 +122,10 @@ impl PtyBuffer {
     ///
     /// Panics if `count` exceeds the available space.
     pub fn produce(&mut self, count: usize) {
-        assert!(count <= self.available(), "cannot produce more than available");
+        assert!(
+            count <= self.available(),
+            "cannot produce more than available"
+        );
         self.write_pos = (self.write_pos + count) % self.capacity();
     }
 

@@ -19,8 +19,7 @@ fn dialog_step_send() {
 
 #[test]
 fn dialog_step_expect_then_send() {
-    let step = DialogStep::expect("login:")
-        .then_send("user\n");
+    let step = DialogStep::expect("login:").then_send("user\n");
 
     assert_eq!(step.expect_pattern(), Some("login:"));
     assert_eq!(step.send_text(), Some("user\n"));
@@ -28,16 +27,14 @@ fn dialog_step_expect_then_send() {
 
 #[test]
 fn dialog_step_with_timeout() {
-    let step = DialogStep::expect("prompt")
-        .timeout(Duration::from_secs(10));
+    let step = DialogStep::expect("prompt").timeout(Duration::from_secs(10));
 
     assert_eq!(step.get_timeout(), Some(Duration::from_secs(10)));
 }
 
 #[test]
 fn dialog_step_continue_on_timeout() {
-    let step = DialogStep::expect("prompt")
-        .continue_on_timeout(true);
+    let step = DialogStep::expect("prompt").continue_on_timeout(true);
 
     assert!(step.continues_on_timeout());
 }
@@ -87,8 +84,7 @@ fn dialog_named() {
 
 #[test]
 fn dialog_with_description() {
-    let dialog = Dialog::named("login")
-        .description("Handles SSH login prompts");
+    let dialog = Dialog::named("login").description("Handles SSH login prompts");
 
     assert_eq!(dialog.description, "Handles SSH login prompts");
 }

@@ -39,8 +39,14 @@ fn main() {
     println!("\n=== Glob Patterns ===");
     let pattern = Pattern::glob("*.txt");
     println!("Pattern: '*.txt'");
-    println!("  Matches 'file.txt': {}", pattern.matches("file.txt").is_some());
-    println!("  Matches 'file.rs': {}", pattern.matches("file.rs").is_some());
+    println!(
+        "  Matches 'file.txt': {}",
+        pattern.matches("file.txt").is_some()
+    );
+    println!(
+        "  Matches 'file.rs': {}",
+        pattern.matches("file.rs").is_some()
+    );
 
     // Special patterns
     println!("\n=== Special Patterns ===");
@@ -48,7 +54,10 @@ fn main() {
     println!("EOF pattern is_eof: {}", eof_pattern.is_eof());
 
     let timeout_pattern = Pattern::timeout(std::time::Duration::from_secs(5));
-    println!("Timeout pattern is_timeout: {}", timeout_pattern.is_timeout());
+    println!(
+        "Timeout pattern is_timeout: {}",
+        timeout_pattern.is_timeout()
+    );
     if let Some(d) = timeout_pattern.timeout_duration() {
         println!("  Duration: {d:?}");
     }

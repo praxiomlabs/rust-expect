@@ -101,14 +101,15 @@ impl Matcher {
                     captures,
                 }
             }),
-            Pattern::Glob(glob) => self
-                .try_glob_match(glob, &text)
-                .map(|(start, end)| MatchResult {
-                    pattern_index: 0,
-                    start: self.adjust_position(start),
-                    end: self.adjust_position(end),
-                    captures: Vec::new(),
-                }),
+            Pattern::Glob(glob) => {
+                self.try_glob_match(glob, &text)
+                    .map(|(start, end)| MatchResult {
+                        pattern_index: 0,
+                        start: self.adjust_position(start),
+                        end: self.adjust_position(end),
+                        captures: Vec::new(),
+                    })
+            }
             Pattern::Eof | Pattern::Timeout(_) | Pattern::Bytes(_) => None,
         }
     }
@@ -146,7 +147,8 @@ impl Matcher {
         let matched = String::from_utf8_lossy(&matched_bytes).into_owned();
         let after = self.buffer_str();
 
-        Match::new(result.pattern_index, matched, before, after).with_captures(result.captures.clone())
+        Match::new(result.pattern_index, matched, before, after)
+            .with_captures(result.captures.clone())
     }
 
     /// Get the timeout for a pattern set.

@@ -6,8 +6,8 @@
 //! Run with: `cargo run --example zero_config`
 
 use rust_expect::auto_config::{
-    default_shell, detect_from_path, detect_locale, detect_shell, is_utf8_environment,
-    PromptConfig, ShellConfig, ShellType,
+    PromptConfig, ShellConfig, ShellType, default_shell, detect_from_path, detect_locale,
+    detect_shell, is_utf8_environment,
 };
 use rust_expect::prelude::*;
 use std::time::Duration;
@@ -89,7 +89,9 @@ async fn main() -> Result<()> {
 
     // Detect the prompt pattern automatically
     let prompt_pattern = Pattern::regex(r"[$#>]\s*$").unwrap();
-    session.expect_timeout(prompt_pattern.clone(), Duration::from_secs(5)).await?;
+    session
+        .expect_timeout(prompt_pattern.clone(), Duration::from_secs(5))
+        .await?;
 
     println!("   Session started with auto-detected shell");
     println!("   Shell: {}", default_shell());
@@ -106,7 +108,9 @@ async fn main() -> Result<()> {
         session.send_line("echo 'ASCII only'").await?;
     }
 
-    session.expect_timeout(prompt_pattern.clone(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(prompt_pattern.clone(), Duration::from_secs(2))
+        .await?;
 
     // Example 9: Cross-platform considerations
     println!("\n9. Cross-platform detection...");

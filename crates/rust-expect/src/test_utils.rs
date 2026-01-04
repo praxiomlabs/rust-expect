@@ -9,8 +9,8 @@ mod fake_pty;
 mod fixtures;
 mod mock_session;
 
-pub use assertions::{assert_output_contains, assert_output_matches, OutputAssertions};
+pub use assertions::{OutputAssertions, assert_output_contains, assert_output_matches};
 pub use builders::{ExpectTestBuilder, SessionTestBuilder};
 pub use fake_pty::{FakePty, FakePtyPair};
-pub use fixtures::{find_fixtures_dir, Fixtures, TestFixture};
+pub use fixtures::{Fixtures, TestFixture, find_fixtures_dir};
 pub use mock_session::{RecordedInteraction, TestSession, TestSessionBuilder};

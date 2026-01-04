@@ -143,8 +143,13 @@ impl SyncSession {
     /// # Errors
     ///
     /// Returns an error on timeout or EOF.
-    pub fn expect_timeout(&mut self, pattern: impl Into<Pattern>, timeout: Duration) -> Result<Match> {
-        self.runtime.block_on(self.inner.expect_timeout(pattern, timeout))
+    pub fn expect_timeout(
+        &mut self,
+        pattern: impl Into<Pattern>,
+        timeout: Duration,
+    ) -> Result<Match> {
+        self.runtime
+            .block_on(self.inner.expect_timeout(pattern, timeout))
     }
 
     /// Get the current buffer contents.
@@ -296,8 +301,13 @@ impl SyncSession {
     /// # Errors
     ///
     /// Returns an error on timeout or EOF.
-    pub fn expect_timeout(&mut self, pattern: impl Into<Pattern>, timeout: Duration) -> Result<Match> {
-        self.runtime.block_on(self.inner.expect_timeout(pattern, timeout))
+    pub fn expect_timeout(
+        &mut self,
+        pattern: impl Into<Pattern>,
+        timeout: Duration,
+    ) -> Result<Match> {
+        self.runtime
+            .block_on(self.inner.expect_timeout(pattern, timeout))
     }
 
     /// Get the current buffer contents.
@@ -346,8 +356,7 @@ impl SyncSession {
 
 impl std::fmt::Debug for SyncSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SyncSession")
-            .finish_non_exhaustive()
+        f.debug_struct("SyncSession").finish_non_exhaustive()
     }
 }
 
@@ -396,7 +405,9 @@ where
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|e| crate::error::ExpectError::io_context("creating tokio runtime for block_on", e))?;
+        .map_err(|e| {
+            crate::error::ExpectError::io_context("creating tokio runtime for block_on", e)
+        })?;
 
     Ok(runtime.block_on(future))
 }
@@ -424,8 +435,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn sync_session_spawn_echo() {
-        let mut session = SyncSession::spawn("/bin/echo", &["hello"])
-            .expect("Failed to spawn echo");
+        let mut session =
+            SyncSession::spawn("/bin/echo", &["hello"]).expect("Failed to spawn echo");
 
         // Verify PID is valid
         assert!(session.pid() > 0);

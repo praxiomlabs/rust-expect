@@ -151,14 +151,20 @@ fn host_key_verification_default() {
 fn host_key_verification_reject_unknown() {
     let verification = HostKeyVerification::RejectUnknown;
     let config = SshConfig::new("example.com").host_key_verification(verification);
-    assert_eq!(config.host_key_verification, HostKeyVerification::RejectUnknown);
+    assert_eq!(
+        config.host_key_verification,
+        HostKeyVerification::RejectUnknown
+    );
 }
 
 #[test]
 fn host_key_verification_known_hosts() {
     let verification = HostKeyVerification::KnownHosts;
     let config = SshConfig::new("example.com").host_key_verification(verification);
-    assert_eq!(config.host_key_verification, HostKeyVerification::KnownHosts);
+    assert_eq!(
+        config.host_key_verification,
+        HostKeyVerification::KnownHosts
+    );
 }
 
 #[test]
@@ -192,8 +198,7 @@ fn auth_method_public_key_with_passphrase() {
 
 #[test]
 fn ssh_credentials_with_key_passphrase() {
-    let creds = SshCredentials::new("testuser")
-        .with_key_passphrase("/path/to/key", "passphrase");
+    let creds = SshCredentials::new("testuser").with_key_passphrase("/path/to/key", "passphrase");
 
     assert_eq!(creds.username, "testuser");
     assert_eq!(creds.auth_methods.len(), 1);
@@ -221,5 +226,8 @@ fn ssh_full_config() {
     assert!(config.compression);
     assert_eq!(config.credentials.auth_methods.len(), 3);
     assert_eq!(config.connect_timeout, Duration::from_secs(30));
-    assert_eq!(config.host_key_verification, HostKeyVerification::KnownHosts);
+    assert_eq!(
+        config.host_key_verification,
+        HostKeyVerification::KnownHosts
+    );
 }

@@ -40,7 +40,12 @@ impl Region {
 
     /// Create a region from coordinates.
     #[must_use]
-    pub const fn from_coords(start_row: usize, start_col: usize, end_row: usize, end_col: usize) -> Self {
+    pub const fn from_coords(
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+    ) -> Self {
         Self {
             start: Position::new(start_row, start_col),
             end: Position::new(end_row, end_col),
@@ -147,9 +152,7 @@ impl ScreenBuffer {
         let rows = dimensions.rows as usize;
         let cols = dimensions.cols as usize;
 
-        let cells = (0..rows)
-            .map(|_| vec![Cell::default(); cols])
-            .collect();
+        let cells = (0..rows).map(|_| vec![Cell::default(); cols]).collect();
 
         Self {
             cells,
@@ -234,7 +237,12 @@ impl ScreenBuffer {
     #[must_use]
     pub fn line(&self, row: usize) -> Option<String> {
         self.cells.get(row).map(|cells| {
-            cells.iter().map(|c| c.char).collect::<String>().trim_end().to_string()
+            cells
+                .iter()
+                .map(|c| c.char)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
         })
     }
 
@@ -294,24 +302,32 @@ impl ScreenBuffer {
 
     /// Scroll the screen up by n lines.
     pub fn scroll_up(&mut self, n: usize) {
-        let (start, end) = self.scroll_region.unwrap_or((0, self.dimensions.rows as usize));
+        let (start, end) = self
+            .scroll_region
+            .unwrap_or((0, self.dimensions.rows as usize));
 
         for _ in 0..n {
             if start < end && end <= self.cells.len() {
                 self.cells.remove(start);
-                self.cells.insert(end - 1, vec![Cell::default(); self.dimensions.cols as usize]);
+                self.cells.insert(
+                    end - 1,
+                    vec![Cell::default(); self.dimensions.cols as usize],
+                );
             }
         }
     }
 
     /// Scroll the screen down by n lines.
     pub fn scroll_down(&mut self, n: usize) {
-        let (start, end) = self.scroll_region.unwrap_or((0, self.dimensions.rows as usize));
+        let (start, end) = self
+            .scroll_region
+            .unwrap_or((0, self.dimensions.rows as usize));
 
         for _ in 0..n {
             if start < end && end <= self.cells.len() {
                 self.cells.remove(end - 1);
-                self.cells.insert(start, vec![Cell::default(); self.dimensions.cols as usize]);
+                self.cells
+                    .insert(start, vec![Cell::default(); self.dimensions.cols as usize]);
             }
         }
     }
@@ -331,7 +347,8 @@ impl ScreenBuffer {
         let new_cols = dimensions.cols as usize;
 
         // Resize rows
-        self.cells.resize_with(new_rows, || vec![Cell::default(); new_cols]);
+        self.cells
+            .resize_with(new_rows, || vec![Cell::default(); new_cols]);
 
         // Resize columns in each row
         for row in &mut self.cells {
@@ -384,7 +401,10 @@ mod tests {
     #[test]
     fn screen_buffer_resize() {
         let mut screen = ScreenBuffer::new(Dimensions { rows: 24, cols: 80 });
-        screen.resize(Dimensions { rows: 40, cols: 120 });
+        screen.resize(Dimensions {
+            rows: 40,
+            cols: 120,
+        });
 
         assert_eq!(screen.dimensions().rows, 40);
         assert_eq!(screen.dimensions().cols, 120);

@@ -6,13 +6,14 @@
 use std::fmt;
 
 /// Convert bytes to a human-readable hexdump format.
-#[must_use] pub fn hexdump(data: &[u8]) -> String {
+#[must_use]
+pub fn hexdump(data: &[u8]) -> String {
     let mut result = String::new();
-    
+
     for (i, chunk) in data.chunks(16).enumerate() {
         // Offset
         result.push_str(&format!("{:08x}  ", i * 16));
-        
+
         // Hex bytes
         for (j, byte) in chunk.iter().enumerate() {
             result.push_str(&format!("{byte:02x} "));
@@ -20,7 +21,7 @@ use std::fmt;
                 result.push(' ');
             }
         }
-        
+
         // Padding for incomplete lines
         for j in chunk.len()..16 {
             result.push_str("   ");
@@ -28,9 +29,9 @@ use std::fmt;
                 result.push(' ');
             }
         }
-        
+
         result.push_str(" |");
-        
+
         // ASCII representation
         for byte in chunk {
             let c = if byte.is_ascii_graphic() || *byte == b' ' {
@@ -40,17 +41,18 @@ use std::fmt;
             };
             result.push(c);
         }
-        
+
         result.push_str("|\n");
     }
-    
+
     result
 }
 
 /// Escape bytes for display.
-#[must_use] pub fn escape_bytes(data: &[u8]) -> String {
+#[must_use]
+pub fn escape_bytes(data: &[u8]) -> String {
     let mut result = String::new();
-    
+
     for byte in data {
         match byte {
             b'\n' => result.push_str("\\n"),
@@ -65,15 +67,16 @@ use std::fmt;
             b => result.push_str(&format!("\\x{b:02x}")),
         }
     }
-    
+
     result
 }
 
 /// Parse an escaped string back to bytes.
-#[must_use] pub fn unescape_bytes(s: &str) -> Vec<u8> {
+#[must_use]
+pub fn unescape_bytes(s: &str) -> Vec<u8> {
     let mut result = Vec::new();
     let mut chars = s.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
         if c == '\\' {
             match chars.next() {
@@ -103,52 +106,49 @@ use std::fmt;
             result.extend(c.encode_utf8(&mut buf).as_bytes());
         }
     }
-    
+
     result
 }
 
 /// Find a pattern in a byte slice.
-#[must_use] pub fn find_pattern(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+#[must_use]
+pub fn find_pattern(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
     }
     if needle.len() > haystack.len() {
         return None;
     }
-    
+
     haystack
         .windows(needle.len())
         .position(|window| window == needle)
 }
 
 /// Find all occurrences of a pattern in a byte slice.
-#[must_use] pub fn find_all_patterns(haystack: &[u8], needle: &[u8]) -> Vec<usize> {
+#[must_use]
+pub fn find_all_patterns(haystack: &[u8], needle: &[u8]) -> Vec<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return Vec::new();
     }
-    
+
     haystack
         .windows(needle.len())
         .enumerate()
-        .filter_map(|(i, window)| {
-            if window == needle {
-                Some(i)
-            } else {
-                None
-            }
-        })
+        .filter_map(|(i, window)| if window == needle { Some(i) } else { None })
         .collect()
 }
 
 /// Replace all occurrences of a pattern in a byte slice.
-#[must_use] pub fn replace_pattern(haystack: &[u8], needle: &[u8], replacement: &[u8]) -> Vec<u8> {
+#[must_use]
+pub fn replace_pattern(haystack: &[u8], needle: &[u8], replacement: &[u8]) -> Vec<u8> {
     if needle.is_empty() {
         return haystack.to_vec();
     }
-    
+
     let mut result = Vec::with_capacity(haystack.len());
     let mut i = 0;
-    
+
     while i < haystack.len() {
         if i + needle.len() <= haystack.len() && &haystack[i..i + needle.len()] == needle {
             result.extend(replacement);
@@ -158,15 +158,16 @@ use std::fmt;
             i += 1;
         }
     }
-    
+
     result
 }
 
 /// Strip ANSI escape sequences from bytes.
-#[must_use] pub fn strip_ansi(data: &[u8]) -> Vec<u8> {
+#[must_use]
+pub fn strip_ansi(data: &[u8]) -> Vec<u8> {
     let mut result = Vec::with_capacity(data.len());
     let mut i = 0;
-    
+
     while i < data.len() {
         if data[i] == 0x1b {
             // Skip escape sequence
@@ -188,7 +189,7 @@ use std::fmt;
             i += 1;
         }
     }
-    
+
     result
 }
 
@@ -208,10 +209,11 @@ impl fmt::Debug for EscapedBytes<'_> {
 }
 
 /// Convert bytes to a lossy UTF-8 string with control characters visible.
-#[must_use] pub fn to_visible_string(data: &[u8]) -> String {
+#[must_use]
+pub fn to_visible_string(data: &[u8]) -> String {
     let s = String::from_utf8_lossy(data);
     let mut result = String::new();
-    
+
     for c in s.chars() {
         if c.is_control() && c != '\n' && c != '\t' {
             if c as u32 <= 26 {
@@ -224,7 +226,7 @@ impl fmt::Debug for EscapedBytes<'_> {
             result.push(c);
         }
     }
-    
+
     result
 }
 

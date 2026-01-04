@@ -40,7 +40,11 @@ fn run_examples() {
 
     screen.process_str("Hello, World!");
     println!("   Wrote: 'Hello, World!'");
-    println!("   Cursor position: ({}, {})", screen.cursor().row, screen.cursor().col);
+    println!(
+        "   Cursor position: ({}, {})",
+        screen.cursor().row,
+        screen.cursor().col
+    );
 
     // Example 3: ANSI escape sequences
     println!("\n3. Processing ANSI sequences...");
@@ -123,7 +127,11 @@ fn run_examples() {
     buffer.write_char('!');
 
     println!("   Wrote 3 characters directly to buffer");
-    println!("   Cursor at: ({}, {})", buffer.cursor().row, buffer.cursor().col);
+    println!(
+        "   Cursor at: ({}, {})",
+        buffer.cursor().row,
+        buffer.cursor().col
+    );
 
     // Example 9: Resize
     println!("\n9. Screen resizing...");
@@ -142,7 +150,7 @@ fn run_examples() {
 
     // Simulate a program that uses cursor positioning
     let program_output = concat!(
-        "\x1b[2J\x1b[H",           // Clear screen, home cursor
+        "\x1b[2J\x1b[H", // Clear screen, home cursor
         "┌────────────────────┐\n",
         "│  System Status     │\n",
         "├────────────────────┤\n",

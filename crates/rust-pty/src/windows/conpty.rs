@@ -7,7 +7,7 @@ use std::os::windows::io::{AsRawHandle, OwnedHandle};
 
 use windows_sys::Win32::Foundation::{HANDLE, S_OK};
 use windows_sys::Win32::System::Console::{
-    ClosePseudoConsole, CreatePseudoConsole, ResizePseudoConsole, COORD, HPCON,
+    COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole,
 };
 
 use crate::config::WindowSize;
@@ -157,12 +157,7 @@ pub fn is_conpty_available() -> bool {
     }
 
     // SAFETY: kernel32 handle is valid
-    let proc = unsafe {
-        GetProcAddress(
-            kernel32,
-            windows_sys::s!("CreatePseudoConsole"),
-        )
-    };
+    let proc = unsafe { GetProcAddress(kernel32, windows_sys::s!("CreatePseudoConsole")) };
 
     proc.is_some()
 }

@@ -38,7 +38,8 @@ pub struct PersistentPattern {
 
 impl PersistentPattern {
     /// Create a new persistent pattern.
-    #[must_use] pub fn new(pattern: Pattern, handler: PatternHandler) -> Self {
+    #[must_use]
+    pub fn new(pattern: Pattern, handler: PatternHandler) -> Self {
         Self {
             pattern,
             handler,
@@ -50,17 +51,19 @@ impl PersistentPattern {
     /// Create a pattern with a simple response.
     pub fn with_response(pattern: Pattern, response: impl Into<String>) -> Self {
         let response = response.into();
-        Self::new(pattern, Box::new(move |_| {
-            HandlerAction::Respond(response.clone())
-        }))
+        Self::new(
+            pattern,
+            Box::new(move |_| HandlerAction::Respond(response.clone())),
+        )
     }
 
     /// Create a pattern that aborts on match.
     pub fn with_abort(pattern: Pattern, message: impl Into<String>) -> Self {
         let message = message.into();
-        Self::new(pattern, Box::new(move |_| {
-            HandlerAction::Abort(message.clone())
-        }))
+        Self::new(
+            pattern,
+            Box::new(move |_| HandlerAction::Abort(message.clone())),
+        )
     }
 
     /// Set the priority for this pattern.
@@ -161,14 +164,16 @@ impl PatternManager {
     /// Check before patterns against the buffer.
     ///
     /// Returns the first matching handler action, or None if no patterns match.
-    #[must_use] pub fn check_before(&self, buffer: &str) -> Option<(String, HandlerAction)> {
+    #[must_use]
+    pub fn check_before(&self, buffer: &str) -> Option<(String, HandlerAction)> {
         self.check_patterns(&self.before_patterns, buffer)
     }
 
     /// Check after patterns against the buffer.
     ///
     /// Returns the first matching handler action, or None if no patterns match.
-    #[must_use] pub fn check_after(&self, buffer: &str) -> Option<(String, HandlerAction)> {
+    #[must_use]
+    pub fn check_after(&self, buffer: &str) -> Option<(String, HandlerAction)> {
         self.check_patterns(&self.after_patterns, buffer)
     }
 
@@ -224,10 +229,7 @@ impl PatternManager {
         buffer: &str,
     ) -> Option<(String, HandlerAction)> {
         // Collect enabled patterns sorted by priority
-        let mut sorted: Vec<_> = patterns
-            .iter()
-            .filter(|(_, p)| p.enabled)
-            .collect();
+        let mut sorted: Vec<_> = patterns.iter().filter(|(_, p)| p.enabled).collect();
         sorted.sort_by_key(|(_, p)| p.priority);
 
         for (id, persistent) in sorted {
@@ -242,18 +244,10 @@ impl PatternManager {
     }
 
     fn patterns_to_set(&self, patterns: &HashMap<String, PersistentPattern>) -> PatternSet {
-        let mut sorted: Vec<_> = patterns
-            .iter()
-            .filter(|(_, p)| p.enabled)
-            .collect();
+        let mut sorted: Vec<_> = patterns.iter().filter(|(_, p)| p.enabled).collect();
         sorted.sort_by_key(|(_, p)| p.priority);
 
-        PatternSet::from_patterns(
-            sorted
-                .into_iter()
-                .map(|(_, p)| p.pattern.clone())
-                .collect()
-        )
+        PatternSet::from_patterns(sorted.into_iter().map(|(_, p)| p.pattern.clone()).collect())
     }
 }
 
@@ -297,7 +291,8 @@ impl PatternBuilder {
     pub fn with_sudo_handler(mut self, password: impl Into<String>) -> Self {
         let password = password.into();
         let pattern = PersistentPattern::with_response(
-            Pattern::regex(r"\[sudo\] password").unwrap_or_else(|_| Pattern::literal("[sudo] password")),
+            Pattern::regex(r"\[sudo\] password")
+                .unwrap_or_else(|_| Pattern::literal("[sudo] password")),
             format!("{password}\n"),
         );
         self.manager.add_before(pattern);
@@ -338,7 +333,8 @@ impl PatternBuilder {
     #[must_use]
     pub fn with_continue_handler(mut self) -> Self {
         let pattern = PersistentPattern::with_response(
-            Pattern::regex(r"Press (?:Enter|any key) to continue").unwrap_or_else(|_| Pattern::literal("Press Enter")),
+            Pattern::regex(r"Press (?:Enter|any key) to continue")
+                .unwrap_or_else(|_| Pattern::literal("Press Enter")),
             "\n",
         );
         self.manager.add_before(pattern);
@@ -366,10 +362,7 @@ mod tests {
     fn pattern_manager_before() {
         let mut manager = PatternManager::new();
 
-        let pattern = PersistentPattern::with_response(
-            Pattern::literal("password:"),
-            "secret\n",
-        );
+        let pattern = PersistentPattern::with_response(Pattern::literal("password:"), "secret\n");
         let id = manager.add_before(pattern);
 
         let result = manager.check_before("Enter password: ");
@@ -387,12 +380,14 @@ mod tests {
         let low = PersistentPattern::new(
             Pattern::literal("test"),
             Box::new(|_| HandlerAction::Respond("low".into())),
-        ).with_priority(10);
+        )
+        .with_priority(10);
 
         let high = PersistentPattern::new(
             Pattern::literal("test"),
             Box::new(|_| HandlerAction::Respond("high".into())),
-        ).with_priority(1);
+        )
+        .with_priority(1);
 
         manager.add_before(low);
         manager.add_before(high);
@@ -411,10 +406,7 @@ mod tests {
     fn pattern_manager_disable() {
         let mut manager = PatternManager::new();
 
-        let pattern = PersistentPattern::with_response(
-            Pattern::literal("test"),
-            "response",
-        );
+        let pattern = PersistentPattern::with_response(Pattern::literal("test"), "response");
         let id = manager.add_before(pattern);
 
         // Should match when enabled

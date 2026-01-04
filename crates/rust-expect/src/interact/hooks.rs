@@ -166,13 +166,11 @@ impl HookBuilder {
     /// Add logging hook.
     #[must_use]
     pub fn with_logging(mut self) -> Self {
-        self.manager.add_event_hook(|event| {
-            match event {
-                InteractionEvent::Started => eprintln!("[interact] Session started"),
-                InteractionEvent::Ended => eprintln!("[interact] Session ended"),
-                InteractionEvent::ExitRequested => eprintln!("[interact] Exit requested"),
-                _ => {}
-            }
+        self.manager.add_event_hook(|event| match event {
+            InteractionEvent::Started => eprintln!("[interact] Session started"),
+            InteractionEvent::Ended => eprintln!("[interact] Session ended"),
+            InteractionEvent::ExitRequested => eprintln!("[interact] Exit requested"),
+            _ => {}
         });
         self
     }
@@ -191,9 +189,7 @@ mod tests {
     #[test]
     fn hook_manager_process_input() {
         let mut manager = HookManager::new();
-        manager.add_input_hook(|data| {
-            data.iter().map(u8::to_ascii_uppercase).collect()
-        });
+        manager.add_input_hook(|data| data.iter().map(u8::to_ascii_uppercase).collect());
 
         let result = manager.process_input(b"hello".to_vec());
         assert_eq!(result, b"HELLO");
@@ -219,9 +215,7 @@ mod tests {
 
     #[test]
     fn hook_builder() {
-        let manager = HookBuilder::new()
-            .with_crlf()
-            .build();
+        let manager = HookBuilder::new().with_crlf().build();
 
         let result = manager.process_input(b"a\nb".to_vec());
         assert_eq!(result, b"a\r\nb");

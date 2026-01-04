@@ -131,7 +131,8 @@ impl SessionTestBuilder {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.args.extend(args.into_iter().map(std::convert::Into::into));
+        self.args
+            .extend(args.into_iter().map(std::convert::Into::into));
         self
     }
 

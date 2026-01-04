@@ -251,8 +251,8 @@ impl SshChannelStream {
                 &self.config.term,
                 self.config.dimensions.cols.into(),
                 self.config.dimensions.rows.into(),
-                0, // pixel width
-                0, // pixel height
+                0,   // pixel width
+                0,   // pixel height
                 &[], // terminal modes
             )
             .await

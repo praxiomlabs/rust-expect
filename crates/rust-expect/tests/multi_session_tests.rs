@@ -1,7 +1,7 @@
 //! Integration tests for multi-session management.
 
-use rust_expect::{GroupBuilder, GroupManager, GroupResult, SessionGroup};
 use rust_expect::multi::{MultiSessionManager, PatternSelector, ReadyType};
+use rust_expect::{GroupBuilder, GroupManager, GroupResult, SessionGroup};
 
 #[test]
 fn session_group_new() {

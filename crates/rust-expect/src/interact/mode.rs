@@ -26,7 +26,7 @@ impl Default for InteractionMode {
             crlf: true,
             buffer_size: 4096,
             read_timeout: Duration::from_millis(100),
-            exit_char: Some(0x1d), // Ctrl+]
+            exit_char: Some(0x1d),   // Ctrl+]
             escape_char: Some(0x1e), // Ctrl+^
         }
     }

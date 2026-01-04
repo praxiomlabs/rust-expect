@@ -74,8 +74,8 @@ pub use config::{
     LoggingConfig, SessionConfig, TimeoutConfig,
 };
 pub use encoding::{
-    decode_utf8_lossy, detect_encoding_from_env, detect_line_ending, normalize_line_endings,
-    strip_ansi, DetectedEncoding, EncodedText, LineEndingStyle,
+    DetectedEncoding, EncodedText, LineEndingStyle, decode_utf8_lossy, detect_encoding_from_env,
+    detect_line_ending, normalize_line_endings, strip_ansi,
 };
 pub use error::{ExpectError, Result, SpawnError};
 pub use types::{
@@ -87,11 +87,11 @@ pub use backend::{BackendType, PtyConfig, PtySpawner};
 pub use expect::{Matcher, Pattern, PatternManager, PatternSet, RingBuffer};
 pub use send::{AnsiSend, BasicSend, HumanTyper, Sender};
 pub use session::{QuickSession, Session, SessionBuilder};
-pub use sync::{block_on, SyncSession};
+pub use sync::{SyncSession, block_on};
 pub use util::{Backpressure, Deadline, TimeoutExt};
 
 // Re-export commonly used items from Phase 6
-pub use auto_config::{detect_shell, LocaleInfo, ShellType};
+pub use auto_config::{LocaleInfo, ShellType, detect_shell};
 pub use dialog::{Dialog, DialogBuilder, DialogStep};
 pub use health::{HealthChecker, HealthStatus};
 pub use interact::{
@@ -121,7 +121,7 @@ pub mod test_utils;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub use test_utils::{
-    assert_output_contains, assert_output_matches, ExpectTestBuilder, FakePty, FakePtyPair,
-    Fixtures, OutputAssertions, RecordedInteraction, SessionTestBuilder, TestFixture,
-    TestSession, TestSessionBuilder,
+    ExpectTestBuilder, FakePty, FakePtyPair, Fixtures, OutputAssertions, RecordedInteraction,
+    SessionTestBuilder, TestFixture, TestSession, TestSessionBuilder, assert_output_contains,
+    assert_output_matches,
 };

@@ -1,10 +1,10 @@
 //! Dialog execution engine.
 
 use super::definition::{Dialog, DialogStep};
+use crate::Pattern;
 use crate::error::{ExpectError, Result};
 use crate::expect::PatternSet;
 use crate::session::Session;
-use crate::Pattern;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -140,9 +140,9 @@ impl DialogExecutor {
     /// Get the pattern for a step.
     #[must_use]
     pub fn step_pattern(&self, step: &DialogStep, dialog: &Dialog) -> Option<Pattern> {
-        step.expect.as_ref().map(|e| {
-            Pattern::literal(dialog.substitute(e))
-        })
+        step.expect
+            .as_ref()
+            .map(|e| Pattern::literal(dialog.substitute(e)))
     }
 
     /// Execute a dialog on a session.
@@ -200,7 +200,11 @@ impl DialogExecutor {
 
         // Determine starting step
         let mut current_step_idx = if let Some(ref entry) = dialog.entry {
-            dialog.steps.iter().position(|s| &s.name == entry).unwrap_or(0)
+            dialog
+                .steps
+                .iter()
+                .position(|s| &s.name == entry)
+                .unwrap_or(0)
         } else {
             0
         };

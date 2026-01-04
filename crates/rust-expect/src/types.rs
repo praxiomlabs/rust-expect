@@ -502,8 +502,8 @@ mod tests {
 
     #[test]
     fn match_creation() {
-        let m = Match::new(0, "hello", "before ", " after")
-            .with_captures(vec!["capture1".to_string()]);
+        let m =
+            Match::new(0, "hello", "before ", " after").with_captures(vec!["capture1".to_string()]);
 
         assert_eq!(m.pattern_index, 0);
         assert_eq!(m.as_str(), "hello");

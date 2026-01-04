@@ -365,7 +365,11 @@ pub type Result<T> = std::result::Result<T, ExpectError>;
 
 impl ExpectError {
     /// Create a timeout error with the given details.
-    pub fn timeout(duration: Duration, pattern: impl Into<String>, buffer: impl Into<String>) -> Self {
+    pub fn timeout(
+        duration: Duration,
+        pattern: impl Into<String>,
+        buffer: impl Into<String>,
+    ) -> Self {
         Self::Timeout {
             duration,
             pattern: pattern.into(),
@@ -404,7 +408,8 @@ impl ExpectError {
     }
 
     /// Create a buffer overflow error.
-    #[must_use] pub const fn buffer_overflow(max_size: usize) -> Self {
+    #[must_use]
+    pub const fn buffer_overflow(max_size: usize) -> Self {
         Self::BufferOverflow { max_size }
     }
 
@@ -431,10 +436,7 @@ impl ExpectError {
     }
 
     /// Wrap an I/O result with context.
-    pub fn with_io_context<T>(
-        result: std::io::Result<T>,
-        context: impl Into<String>,
-    ) -> Result<T> {
+    pub fn with_io_context<T>(result: std::io::Result<T>, context: impl Into<String>) -> Result<T> {
         result.map_err(|e| Self::io_context(context, e))
     }
 
@@ -543,7 +545,8 @@ impl SshError {
     }
 
     /// Create a timeout error.
-    #[must_use] pub const fn timeout(duration: Duration) -> Self {
+    #[must_use]
+    pub const fn timeout(duration: Duration) -> Self {
         Self::Timeout { duration }
     }
 }
@@ -570,11 +573,7 @@ mod tests {
 
     #[test]
     fn error_display_with_tips() {
-        let err = ExpectError::timeout(
-            Duration::from_secs(5),
-            "password:",
-            "output here\n",
-        );
+        let err = ExpectError::timeout(Duration::from_secs(5), "password:", "output here\n");
         let msg = err.to_string();
         // Check that tips are included
         assert!(msg.contains("Tip:"));

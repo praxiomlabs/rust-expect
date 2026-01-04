@@ -36,7 +36,8 @@ impl MockEvent {
     }
 
     /// Create an output event from a string.
-    #[must_use] pub fn output_str(s: &str) -> Self {
+    #[must_use]
+    pub fn output_str(s: &str) -> Self {
         Self::Output(s.as_bytes().to_vec())
     }
 
@@ -46,27 +47,32 @@ impl MockEvent {
     }
 
     /// Create an input event from a string.
-    #[must_use] pub fn input_str(s: &str) -> Self {
+    #[must_use]
+    pub fn input_str(s: &str) -> Self {
         Self::Input(s.as_bytes().to_vec())
     }
 
     /// Create a delay event.
-    #[must_use] pub const fn delay(duration: Duration) -> Self {
+    #[must_use]
+    pub const fn delay(duration: Duration) -> Self {
         Self::Delay(duration)
     }
 
     /// Create a delay event from milliseconds.
-    #[must_use] pub const fn delay_ms(ms: u64) -> Self {
+    #[must_use]
+    pub const fn delay_ms(ms: u64) -> Self {
         Self::Delay(Duration::from_millis(ms))
     }
 
     /// Create an exit event.
-    #[must_use] pub const fn exit(code: i32) -> Self {
+    #[must_use]
+    pub const fn exit(code: i32) -> Self {
         Self::Exit(code)
     }
 
     /// Create an EOF event.
-    #[must_use] pub const fn eof() -> Self {
+    #[must_use]
+    pub const fn eof() -> Self {
         Self::Eof
     }
 
@@ -76,7 +82,8 @@ impl MockEvent {
     }
 
     /// Create a resize event.
-    #[must_use] pub const fn resize(rows: u16, cols: u16) -> Self {
+    #[must_use]
+    pub const fn resize(rows: u16, cols: u16) -> Self {
         Self::Resize { rows, cols }
     }
 
@@ -128,7 +135,10 @@ impl EventTimeline {
     /// Create a timeline from a list of events.
     #[must_use]
     pub const fn from_events(events: Vec<MockEvent>) -> Self {
-        Self { events, position: 0 }
+        Self {
+            events,
+            position: 0,
+        }
     }
 
     /// Add an event to the timeline.
@@ -197,10 +207,8 @@ mod tests {
 
     #[test]
     fn timeline_reset() {
-        let mut timeline = EventTimeline::from_events(vec![
-            MockEvent::output_str("test"),
-            MockEvent::eof(),
-        ]);
+        let mut timeline =
+            EventTimeline::from_events(vec![MockEvent::output_str("test"), MockEvent::eof()]);
 
         assert_eq!(timeline.remaining(), 2);
         timeline.next();

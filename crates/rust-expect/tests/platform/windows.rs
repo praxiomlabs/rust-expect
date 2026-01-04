@@ -9,15 +9,15 @@
 
 #![cfg(windows)]
 
+use rust_expect::backend::{BackendType, PtyConfig};
 use rust_expect::prelude::*;
 use rust_expect::{Dialog, DialogStep};
-use rust_expect::backend::{BackendType, PtyConfig};
 use std::time::Duration;
 
 /// Test Windows line ending detection.
 #[test]
 fn windows_line_endings() {
-    use rust_expect::encoding::{detect_line_ending, LineEndingStyle};
+    use rust_expect::encoding::{LineEndingStyle, detect_line_ending};
 
     // Windows-style line endings
     let crlf_text = "line1\r\nline2\r\nline3";
@@ -31,7 +31,7 @@ fn windows_line_endings() {
 /// Test CRLF normalization for Windows.
 #[test]
 fn crlf_normalization() {
-    use rust_expect::encoding::{normalize_line_endings, LineEndingStyle};
+    use rust_expect::encoding::{LineEndingStyle, normalize_line_endings};
 
     // Normalize LF to CRLF (for sending to Windows programs)
     let unix_text = "line1\nline2\nline3";
@@ -122,11 +122,12 @@ fn regex_windows_patterns() {
 #[test]
 fn dialog_windows_prompts() {
     let dialog = Dialog::named("windows_cmd")
-        .step(DialogStep::new("prompt")
-            .with_expect(">")
-            .with_send("dir\r\n"))
-        .step(DialogStep::new("output")
-            .with_expect("Directory of"));
+        .step(
+            DialogStep::new("prompt")
+                .with_expect(">")
+                .with_send("dir\r\n"),
+        )
+        .step(DialogStep::new("output").with_expect("Directory of"));
 
     assert_eq!(dialog.len(), 2);
     assert_eq!(dialog.name, "windows_cmd");
@@ -192,7 +193,11 @@ fn windows_script_patterns() {
 fn windows_error_patterns() {
     // Common Windows error messages
     let error_pattern = Pattern::regex(r"'[^']+' is not recognized").unwrap();
-    assert!(error_pattern.matches("'foo' is not recognized as an internal or external command").is_some());
+    assert!(
+        error_pattern
+            .matches("'foo' is not recognized as an internal or external command")
+            .is_some()
+    );
 
     let access_denied = Pattern::literal("Access is denied");
     assert!(access_denied.matches("Error: Access is denied.").is_some());
@@ -215,10 +220,18 @@ fn windows_prompt_patterns() {
 #[test]
 fn windows_registry_patterns() {
     let hklm_pattern = Pattern::literal("HKEY_LOCAL_MACHINE");
-    assert!(hklm_pattern.matches("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft").is_some());
+    assert!(
+        hklm_pattern
+            .matches("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft")
+            .is_some()
+    );
 
     let reg_pattern = Pattern::regex(r"HKEY_(LOCAL_MACHINE|CURRENT_USER|CLASSES_ROOT)\\").unwrap();
-    assert!(reg_pattern.matches("HKEY_LOCAL_MACHINE\\SOFTWARE").is_some());
+    assert!(
+        reg_pattern
+            .matches("HKEY_LOCAL_MACHINE\\SOFTWARE")
+            .is_some()
+    );
     assert!(reg_pattern.matches("HKEY_CURRENT_USER\\Software").is_some());
 }
 
@@ -246,11 +259,12 @@ fn dialog_windows_control() {
     use rust_expect::ControlChar;
 
     let dialog = Dialog::named("windows_interrupt")
-        .step(DialogStep::new("running")
-            .with_expect("Running...")
-            .with_send_control(ControlChar::CtrlC))
-        .step(DialogStep::new("stopped")
-            .with_expect("Terminated"));
+        .step(
+            DialogStep::new("running")
+                .with_expect("Running...")
+                .with_send_control(ControlChar::CtrlC),
+        )
+        .step(DialogStep::new("stopped").with_expect("Terminated"));
 
     assert_eq!(dialog.len(), 2);
 }

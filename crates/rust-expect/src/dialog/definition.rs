@@ -6,8 +6,7 @@ use std::time::Duration;
 use crate::types::ControlChar;
 
 /// A dialog step definition.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct DialogStep {
     /// Name of this step (optional for simple dialogs).
     pub name: String,
@@ -26,7 +25,6 @@ pub struct DialogStep {
     /// Conditional branches.
     pub branches: HashMap<String, String>,
 }
-
 
 impl DialogStep {
     /// Create a new step with a name.
@@ -306,11 +304,9 @@ impl DialogBuilder {
         expect: impl Into<String>,
         send: impl Into<String>,
     ) -> Self {
-        self.dialog = self.dialog.step(
-            DialogStep::new(name)
-                .with_expect(expect)
-                .with_send(send),
-        );
+        self.dialog = self
+            .dialog
+            .step(DialogStep::new(name).with_expect(expect).with_send(send));
         self
     }
 
@@ -347,8 +343,16 @@ mod tests {
     #[test]
     fn dialog_named_steps() {
         let dialog = Dialog::named("login")
-            .step(DialogStep::new("username").with_expect("login:").with_send("admin\n"))
-            .step(DialogStep::new("password").with_expect("password:").with_send("secret\n"))
+            .step(
+                DialogStep::new("username")
+                    .with_expect("login:")
+                    .with_send("admin\n"),
+            )
+            .step(
+                DialogStep::new("password")
+                    .with_expect("password:")
+                    .with_send("secret\n"),
+            )
             .variable("USER", "admin");
 
         assert_eq!(dialog.name, "login");

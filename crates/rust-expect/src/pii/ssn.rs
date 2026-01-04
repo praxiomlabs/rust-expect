@@ -4,8 +4,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 static SSN_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(\d{3})-(\d{2})-(\d{4})\b")
-        .expect("SSN pattern is a valid regex")
+    Regex::new(r"\b(\d{3})-(\d{2})-(\d{4})\b").expect("SSN pattern is a valid regex")
 });
 
 /// Validate an SSN format.

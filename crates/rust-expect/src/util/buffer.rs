@@ -552,8 +552,7 @@ mod tests {
 
     #[test]
     fn spill_buffer_memory() {
-        let config = LargeBufferConfig::new(1024 * 1024)
-            .spill_threshold(0); // Never spill
+        let config = LargeBufferConfig::new(1024 * 1024).spill_threshold(0); // Never spill
 
         let mut buf = SpillBuffer::with_config(config);
         buf.write(b"hello world").unwrap();
@@ -565,8 +564,7 @@ mod tests {
 
     #[test]
     fn spill_buffer_spill() {
-        let config = LargeBufferConfig::new(1024 * 1024)
-            .spill_threshold(10); // Spill after 10 bytes
+        let config = LargeBufferConfig::new(1024 * 1024).spill_threshold(10); // Spill after 10 bytes
 
         let mut buf = SpillBuffer::with_config(config);
         buf.write(b"hello").unwrap();

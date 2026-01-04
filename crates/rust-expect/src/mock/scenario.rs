@@ -121,16 +121,8 @@ impl Scenario {
 
     /// Add an expect-respond pair.
     #[must_use]
-    pub fn expect_respond(
-        self,
-        pattern: impl Into<String>,
-        response: impl Into<String>,
-    ) -> Self {
-        self.step(
-            ScenarioStep::new()
-                .expect(pattern)
-                .respond(response)
-        )
+    pub fn expect_respond(self, pattern: impl Into<String>, response: impl Into<String>) -> Self {
+        self.step(ScenarioStep::new().expect(pattern).respond(response))
     }
 
     /// Set the exit code.
@@ -226,28 +218,19 @@ impl ScenarioBuilder {
     /// Add a login prompt step.
     #[must_use]
     pub fn login_prompt(self) -> Self {
-        self.step(
-            ScenarioStep::new()
-                .respond("login: ")
-        )
+        self.step(ScenarioStep::new().respond("login: "))
     }
 
     /// Add a password prompt step.
     #[must_use]
     pub fn password_prompt(self) -> Self {
-        self.step(
-            ScenarioStep::new()
-                .respond("Password: ")
-        )
+        self.step(ScenarioStep::new().respond("Password: "))
     }
 
     /// Add a shell prompt step.
     #[must_use]
     pub fn shell_prompt(self, prompt: impl Into<String>) -> Self {
-        self.step(
-            ScenarioStep::new()
-                .respond(prompt)
-        )
+        self.step(ScenarioStep::new().respond(prompt))
     }
 
     /// Add a custom step.
@@ -300,9 +283,7 @@ mod tests {
 
     #[test]
     fn scenario_to_timeline() {
-        let scenario = Scenario::new("test")
-            .initial_output("Hello\n")
-            .exit_code(0);
+        let scenario = Scenario::new("test").initial_output("Hello\n").exit_code(0);
 
         let timeline = scenario.to_timeline();
         assert_eq!(timeline.events().len(), 2);

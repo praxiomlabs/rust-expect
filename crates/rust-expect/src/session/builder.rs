@@ -179,9 +179,7 @@ impl QuickSession {
     /// Create a session config for a shell command.
     #[must_use]
     pub fn shell() -> SessionConfig {
-        SessionBuilder::new()
-            .command(Self::default_shell())
-            .build()
+        SessionBuilder::new().command(Self::default_shell()).build()
     }
 
     /// Create a session config for bash.
@@ -291,17 +289,13 @@ impl QuickSession {
     /// Create a session config for a REPL.
     #[must_use]
     pub fn repl(cmd: impl Into<String>) -> SessionConfig {
-        SessionBuilder::new()
-            .command(cmd)
-            .build()
+        SessionBuilder::new().command(cmd).build()
     }
 
     /// Create a session config for Node.js REPL.
     #[must_use]
     pub fn node() -> SessionConfig {
-        SessionBuilder::new()
-            .command("node")
-            .build()
+        SessionBuilder::new().command("node").build()
     }
 
     /// Create a session config for Ruby IRB.
@@ -424,37 +418,25 @@ impl QuickSession {
     /// Create a session config for GDB debugger.
     #[must_use]
     pub fn gdb(program: &str) -> SessionConfig {
-        SessionBuilder::new()
-            .command("gdb")
-            .arg(program)
-            .build()
+        SessionBuilder::new().command("gdb").arg(program).build()
     }
 
     /// Create a session config for LLDB debugger.
     #[must_use]
     pub fn lldb(program: &str) -> SessionConfig {
-        SessionBuilder::new()
-            .command("lldb")
-            .arg(program)
-            .build()
+        SessionBuilder::new().command("lldb").arg(program).build()
     }
 
     /// Create a session config for Lua REPL.
     #[must_use]
     pub fn lua() -> SessionConfig {
-        SessionBuilder::new()
-            .command("lua")
-            .arg("-i")
-            .build()
+        SessionBuilder::new().command("lua").arg("-i").build()
     }
 
     /// Create a session config for Perl debugger.
     #[must_use]
     pub fn perl() -> SessionConfig {
-        SessionBuilder::new()
-            .command("perl")
-            .arg("-de0")
-            .build()
+        SessionBuilder::new().command("perl").arg("-de0").build()
     }
 
     /// Create a session config for R REPL.
@@ -470,49 +452,37 @@ impl QuickSession {
     /// Create a session config for Julia REPL.
     #[must_use]
     pub fn julia() -> SessionConfig {
-        SessionBuilder::new()
-            .command("julia")
-            .build()
+        SessionBuilder::new().command("julia").build()
     }
 
     /// Create a session config for Scala REPL.
     #[must_use]
     pub fn scala() -> SessionConfig {
-        SessionBuilder::new()
-            .command("scala")
-            .build()
+        SessionBuilder::new().command("scala").build()
     }
 
     /// Create a session config for Elixir `IEx`.
     #[must_use]
     pub fn iex() -> SessionConfig {
-        SessionBuilder::new()
-            .command("iex")
-            .build()
+        SessionBuilder::new().command("iex").build()
     }
 
     /// Create a session config for Clojure REPL.
     #[must_use]
     pub fn clojure() -> SessionConfig {
-        SessionBuilder::new()
-            .command("clj")
-            .build()
+        SessionBuilder::new().command("clj").build()
     }
 
     /// Create a session config for Haskell `GHCi`.
     #[must_use]
     pub fn ghci() -> SessionConfig {
-        SessionBuilder::new()
-            .command("ghci")
-            .build()
+        SessionBuilder::new().command("ghci").build()
     }
 
     /// Create a session config for OCaml REPL.
     #[must_use]
     pub fn ocaml() -> SessionConfig {
-        SessionBuilder::new()
-            .command("ocaml")
-            .build()
+        SessionBuilder::new().command("ocaml").build()
     }
 
     /// Create a session config for kubectl exec into a pod.
@@ -747,75 +717,55 @@ impl QuickSession {
     /// Create a session config for Rust REPL (evcxr).
     #[must_use]
     pub fn evcxr() -> SessionConfig {
-        SessionBuilder::new()
-            .command("evcxr")
-            .build()
+        SessionBuilder::new().command("evcxr").build()
     }
 
     /// Create a session config for Go playground.
     #[must_use]
     pub fn gore() -> SessionConfig {
-        SessionBuilder::new()
-            .command("gore")
-            .build()
+        SessionBuilder::new().command("gore").build()
     }
 
     /// Create a session config for PHP interactive mode.
     #[must_use]
     pub fn php() -> SessionConfig {
-        SessionBuilder::new()
-            .command("php")
-            .arg("-a")
-            .build()
+        SessionBuilder::new().command("php").arg("-a").build()
     }
 
     /// Create a session config for Swift REPL.
     #[must_use]
     pub fn swift() -> SessionConfig {
-        SessionBuilder::new()
-            .command("swift")
-            .build()
+        SessionBuilder::new().command("swift").build()
     }
 
     /// Create a session config for Kotlin REPL.
     #[must_use]
     pub fn kotlin() -> SessionConfig {
-        SessionBuilder::new()
-            .command("kotlin")
-            .build()
+        SessionBuilder::new().command("kotlin").build()
     }
 
     /// Create a session config for Groovy console.
     #[must_use]
     pub fn groovysh() -> SessionConfig {
-        SessionBuilder::new()
-            .command("groovysh")
-            .build()
+        SessionBuilder::new().command("groovysh").build()
     }
 
     /// Create a session config for TypeScript REPL (ts-node).
     #[must_use]
     pub fn ts_node() -> SessionConfig {
-        SessionBuilder::new()
-            .command("ts-node")
-            .build()
+        SessionBuilder::new().command("ts-node").build()
     }
 
     /// Create a session config for Deno REPL.
     #[must_use]
     pub fn deno() -> SessionConfig {
-        SessionBuilder::new()
-            .command("deno")
-            .build()
+        SessionBuilder::new().command("deno").build()
     }
 
     /// Create a session config for Bun REPL.
     #[must_use]
     pub fn bun() -> SessionConfig {
-        SessionBuilder::new()
-            .command("bun")
-            .arg("repl")
-            .build()
+        SessionBuilder::new().command("bun").arg("repl").build()
     }
 
     /// Get the default shell for the current platform.

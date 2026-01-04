@@ -103,9 +103,7 @@ impl Histogram {
     /// Create with custom buckets.
     #[must_use]
     pub fn with_buckets(buckets: Vec<f64>) -> Self {
-        let counts = (0..=buckets.len())
-            .map(|_| AtomicU64::new(0))
-            .collect();
+        let counts = (0..=buckets.len()).map(|_| AtomicU64::new(0)).collect();
         Self {
             buckets,
             counts,
@@ -117,7 +115,11 @@ impl Histogram {
     /// Observe a value.
     pub fn observe(&self, value: f64) {
         // Find bucket and increment
-        let idx = self.buckets.iter().position(|&b| value <= b).unwrap_or(self.buckets.len());
+        let idx = self
+            .buckets
+            .iter()
+            .position(|&b| value <= b)
+            .unwrap_or(self.buckets.len());
         self.counts[idx].fetch_add(1, Ordering::Relaxed);
 
         // Update sum (as bits for f64 storage)
@@ -135,7 +137,10 @@ impl Histogram {
     /// Get bucket counts.
     #[must_use]
     pub fn bucket_counts(&self) -> Vec<u64> {
-        self.counts.iter().map(|c| c.load(Ordering::Relaxed)).collect()
+        self.counts
+            .iter()
+            .map(|c| c.load(Ordering::Relaxed))
+            .collect()
     }
 }
 
@@ -258,8 +263,12 @@ impl MetricsRegistry {
     }
 
     /// Get or create a counter.
-    #[must_use] pub fn counter(&self, name: &str) -> Arc<Counter> {
-        let mut counters = self.counters.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    #[must_use]
+    pub fn counter(&self, name: &str) -> Arc<Counter> {
+        let mut counters = self
+            .counters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         counters
             .entry(name.to_string())
             .or_insert_with(|| Arc::new(Counter::new()))
@@ -267,8 +276,12 @@ impl MetricsRegistry {
     }
 
     /// Get or create a gauge.
-    #[must_use] pub fn gauge(&self, name: &str) -> Arc<Gauge> {
-        let mut gauges = self.gauges.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    #[must_use]
+    pub fn gauge(&self, name: &str) -> Arc<Gauge> {
+        let mut gauges = self
+            .gauges
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         gauges
             .entry(name.to_string())
             .or_insert_with(|| Arc::new(Gauge::new()))
@@ -276,8 +289,12 @@ impl MetricsRegistry {
     }
 
     /// Get or create a histogram.
-    #[must_use] pub fn histogram(&self, name: &str) -> Arc<Histogram> {
-        let mut histograms = self.histograms.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    #[must_use]
+    pub fn histogram(&self, name: &str) -> Arc<Histogram> {
+        let mut histograms = self
+            .histograms
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         histograms
             .entry(name.to_string())
             .or_insert_with(|| Arc::new(Histogram::new()))

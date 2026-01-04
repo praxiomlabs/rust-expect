@@ -12,8 +12,8 @@ mod windows;
 
 // Cross-platform tests that verify Windows configuration without requiring Windows
 mod cross_platform {
-    use rust_expect::prelude::*;
     use rust_expect::backend::{BackendType, PtyConfig};
+    use rust_expect::prelude::*;
     use std::time::Duration;
 
     /// Verify Windows line ending configuration works on any platform.
@@ -30,7 +30,7 @@ mod cross_platform {
     /// Verify CRLF normalization works on any platform.
     #[test]
     fn crlf_normalization_cross_platform() {
-        use rust_expect::encoding::{normalize_line_endings, LineEndingStyle};
+        use rust_expect::encoding::{LineEndingStyle, normalize_line_endings};
 
         // This test verifies the encoding functions work regardless of platform
         let windows_text = "line1\r\nline2\r\n";
@@ -124,7 +124,11 @@ mod cross_platform {
     fn windows_content_patterns_cross_platform() {
         // Windows error patterns
         let not_recognized = Pattern::regex(r"is not recognized").unwrap();
-        assert!(not_recognized.matches("'foo' is not recognized as an internal or external command").is_some());
+        assert!(
+            not_recognized
+                .matches("'foo' is not recognized as an internal or external command")
+                .is_some()
+        );
 
         // Windows prompt patterns
         let cmd_prompt = Pattern::regex(r"[A-Z]:\\[^>]*>").unwrap();

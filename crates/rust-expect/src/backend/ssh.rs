@@ -18,9 +18,11 @@ pub mod session;
 
 // Re-export commonly used types
 pub use auth::{AuthMethod, HostKeyVerification, SshCredentials};
-pub use builder::{parse_ssh_target, SshSessionBuilder};
+pub use builder::{SshSessionBuilder, parse_ssh_target};
 pub use channel::{ChannelConfig, ChannelRequest, ChannelType, SshChannel};
-pub use keepalive::{KeepaliveAction, KeepaliveConfig, KeepaliveManager, KeepaliveState, KeepaliveStats};
+pub use keepalive::{
+    KeepaliveAction, KeepaliveConfig, KeepaliveManager, KeepaliveState, KeepaliveStats,
+};
 pub use pool::{ConnectionPool, PoolConfig, PoolStats, PooledConnection};
 pub use resilient::{ResilientConfig, ResilientSession, ResilientState};
 pub use retry::{RetryPolicy, RetryState, RetryStrategy};

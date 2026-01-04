@@ -7,7 +7,7 @@
 
 #![cfg(feature = "mock")]
 
-use rust_expect::mock::{simple_mock, MockBuilder, MockTransport, Scenario};
+use rust_expect::mock::{MockBuilder, MockTransport, Scenario, simple_mock};
 use rust_expect::{ControlChar, Pattern, PatternSet, Session, SessionConfig};
 use std::time::Duration;
 

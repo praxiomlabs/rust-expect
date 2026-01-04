@@ -55,7 +55,8 @@ impl SshSessionBuilder {
     /// Add password authentication.
     #[must_use]
     pub fn password(mut self, password: impl Into<String>) -> Self {
-        self.auth_methods.push(AuthMethod::Password(password.into()));
+        self.auth_methods
+            .push(AuthMethod::Password(password.into()));
         self
     }
 
@@ -135,9 +136,9 @@ impl SshSessionBuilder {
 
     /// Build the session.
     pub fn build(self) -> crate::error::Result<SshSession> {
-        let host = self.host.ok_or_else(|| {
-            crate::error::ExpectError::config("SSH host is required")
-        })?;
+        let host = self
+            .host
+            .ok_or_else(|| crate::error::ExpectError::config("SSH host is required"))?;
 
         let username = self.username.unwrap_or_else(|| {
             std::env::var("USER")
@@ -179,7 +180,8 @@ impl SshSessionBuilder {
 /// Create an SSH session from a URI-like string.
 ///
 /// Format: `[user@]host[:port]`
-#[must_use] pub fn parse_ssh_target(target: &str) -> (Option<String>, String, u16) {
+#[must_use]
+pub fn parse_ssh_target(target: &str) -> (Option<String>, String, u16) {
     let (user_part, rest) = if let Some(at_pos) = target.find('@') {
         (Some(target[..at_pos].to_string()), &target[at_pos + 1..])
     } else {

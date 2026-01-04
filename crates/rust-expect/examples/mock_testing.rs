@@ -7,7 +7,7 @@
 
 #[cfg(feature = "mock")]
 use rust_expect::mock::{
-    login_mock, shell_mock, simple_mock, MockBuilder, MockSession, MockTransport, Scenario,
+    MockBuilder, MockSession, MockTransport, Scenario, login_mock, shell_mock, simple_mock,
 };
 
 fn main() {

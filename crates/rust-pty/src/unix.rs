@@ -30,11 +30,11 @@ mod pty;
 mod signals;
 
 pub use buffer::PtyBuffer;
-pub use child::{spawn_child, UnixPtyChild};
-pub use pty::{open_slave, UnixPtyMaster};
+pub use child::{UnixPtyChild, spawn_child};
+pub use pty::{UnixPtyMaster, open_slave};
 pub use signals::{
-    is_sigchld, is_sigwinch, on_window_change, sigchld, sigwinch, start_signal_handler,
-    PtySignalEvent, SignalHandle,
+    PtySignalEvent, SignalHandle, is_sigchld, is_sigwinch, on_window_change, sigchld, sigwinch,
+    start_signal_handler,
 };
 
 use std::ffi::OsStr;

@@ -1,8 +1,8 @@
 //! Integration tests for encoding utilities.
 
 use rust_expect::{
-    decode_utf8_lossy, detect_encoding_from_env, detect_line_ending, normalize_line_endings,
-    strip_ansi, DetectedEncoding, LineEndingStyle,
+    DetectedEncoding, LineEndingStyle, decode_utf8_lossy, detect_encoding_from_env,
+    detect_line_ending, normalize_line_endings, strip_ansi,
 };
 
 #[test]

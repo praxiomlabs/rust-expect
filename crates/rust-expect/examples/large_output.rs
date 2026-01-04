@@ -18,13 +18,19 @@ async fn main() -> Result<()> {
     println!("1. Handling large output...");
 
     let mut session = Session::spawn("/bin/sh", &[]).await?;
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     // Generate a moderate amount of output
-    session.send_line("for i in $(seq 1 100); do echo \"Line $i: Some sample output data\"; done").await?;
+    session
+        .send_line("for i in $(seq 1 100); do echo \"Line $i: Some sample output data\"; done")
+        .await?;
 
     // Wait for all output and the next prompt
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(5)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(5))
+        .await?;
 
     let buffer = session.buffer();
     println!("   Buffer size: {} bytes", buffer.len());
@@ -36,7 +42,10 @@ async fn main() -> Result<()> {
     // Clear the buffer
     session.clear_buffer();
     println!("   Buffer cleared");
-    println!("   Buffer size after clear: {} bytes", session.buffer().len());
+    println!(
+        "   Buffer size after clear: {} bytes",
+        session.buffer().len()
+    );
 
     // Generate new output
     session.send_line("echo 'Fresh start'").await?;
@@ -57,8 +66,14 @@ async fn main() -> Result<()> {
 
     let session2 = Session::spawn_with_config("/bin/sh", &[], config).await?;
     println!("   Created session with 1MB buffer");
-    println!("   Buffer max size: {} bytes", session2.config().buffer.max_size);
-    println!("   Search window: {:?}", session2.config().buffer.search_window);
+    println!(
+        "   Buffer max size: {} bytes",
+        session2.config().buffer.max_size
+    );
+    println!(
+        "   Search window: {:?}",
+        session2.config().buffer.search_window
+    );
     println!("   Ring buffer: {}", session2.config().buffer.ring_buffer);
     drop(session2);
 
@@ -92,12 +107,17 @@ async fn main() -> Result<()> {
     println!("\n5. Processing output incrementally...");
 
     // Send a command that produces output over time
-    session.send_line("for i in 1 2 3 4 5; do echo \"Chunk $i\"; sleep 0.1; done").await?;
+    session
+        .send_line("for i in 1 2 3 4 5; do echo \"Chunk $i\"; sleep 0.1; done")
+        .await?;
 
     // Process chunks as they arrive
     let mut chunks_received = 0;
     for _ in 0..5 {
-        match session.expect_timeout("Chunk", Duration::from_millis(500)).await {
+        match session
+            .expect_timeout("Chunk", Duration::from_millis(500))
+            .await
+        {
             Ok(m) => {
                 chunks_received += 1;
                 println!("   Received: {}", m.matched.trim());
@@ -108,13 +128,18 @@ async fn main() -> Result<()> {
     println!("   Total chunks: {chunks_received}");
 
     // Wait for the final prompt
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     // Example 6: Ring buffer for memory efficiency
     println!("\n6. Ring buffer for memory efficiency...");
 
     let mut ring_buffer = RingBuffer::new(4096);
-    println!("   Ring buffer created with {} byte max size", ring_buffer.max_size());
+    println!(
+        "   Ring buffer created with {} byte max size",
+        ring_buffer.max_size()
+    );
 
     // Append some data
     ring_buffer.append(b"Hello, ");
@@ -127,19 +152,18 @@ async fn main() -> Result<()> {
     // Example 7: Buffer configuration options
     println!("\n7. Buffer configuration options...");
 
-    let small_buffer = BufferConfig::new(1024)
-        .search_window(512)
-        .ring_buffer(true);
+    let small_buffer = BufferConfig::new(1024).search_window(512).ring_buffer(true);
 
-    println!("   Small buffer: {} bytes, window: {:?}",
-        small_buffer.max_size,
-        small_buffer.search_window
+    println!(
+        "   Small buffer: {} bytes, window: {:?}",
+        small_buffer.max_size, small_buffer.search_window
     );
 
-    let large_buffer = BufferConfig::new(10 * 1024 * 1024)  // 10 MB
-        .ring_buffer(false);  // Keep all data
+    let large_buffer = BufferConfig::new(10 * 1024 * 1024) // 10 MB
+        .ring_buffer(false); // Keep all data
 
-    println!("   Large buffer: {} MB, ring: {}",
+    println!(
+        "   Large buffer: {} MB, ring: {}",
         large_buffer.max_size / 1024 / 1024,
         large_buffer.ring_buffer
     );

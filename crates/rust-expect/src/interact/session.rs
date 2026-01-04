@@ -234,7 +234,8 @@ where
     }
 
     /// Set the interaction mode.
-    #[must_use] pub const fn with_mode(mut self, mode: InteractionMode) -> Self {
+    #[must_use]
+    pub const fn with_mode(mut self, mode: InteractionMode) -> Self {
         self.mode = mode;
         self
     }
@@ -248,19 +249,22 @@ where
     }
 
     /// Disable the escape sequence (interact runs until pattern stops it).
-    #[must_use] pub fn no_escape(mut self) -> Self {
+    #[must_use]
+    pub fn no_escape(mut self) -> Self {
         self.escape_sequence = None;
         self
     }
 
     /// Set a timeout for the interaction.
-    #[must_use] pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+    #[must_use]
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
     /// Set the output buffer size.
-    #[must_use] pub const fn with_buffer_size(mut self, size: usize) -> Self {
+    #[must_use]
+    pub const fn with_buffer_size(mut self, size: usize) -> Self {
         self.buffer_size = size;
         self
     }
@@ -411,7 +415,7 @@ where
     /// Run the interaction loop with Unix signal handling (SIGWINCH).
     #[cfg(unix)]
     async fn run_with_signals(&mut self) -> Result<InteractResult> {
-        use tokio::io::{stdin, stdout, BufReader};
+        use tokio::io::{BufReader, stdin, stdout};
 
         self.hook_manager.notify(InteractionEvent::Started);
 
@@ -423,10 +427,9 @@ where
         let deadline = self.timeout.map(|t| std::time::Instant::now() + t);
 
         // Set up SIGWINCH signal handler
-        let mut sigwinch = tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::window_change(),
-        )
-        .map_err(ExpectError::Io)?;
+        let mut sigwinch =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())
+                .map_err(ExpectError::Io)?;
 
         loop {
             // Check timeout
@@ -548,7 +551,7 @@ where
     /// Run the interaction loop without signal handling (non-Unix platforms).
     #[cfg(not(unix))]
     async fn run_without_signals(&mut self) -> Result<InteractResult> {
-        use tokio::io::{stdin, stdout, BufReader};
+        use tokio::io::{BufReader, stdin, stdout};
 
         self.hook_manager.notify(InteractionEvent::Started);
 
@@ -697,7 +700,9 @@ where
                     InteractAction::Stop => {
                         self.hook_manager.notify(InteractionEvent::Ended);
                         return Ok(Some(InteractResult {
-                            reason: InteractEndReason::PatternStop { pattern_index: index },
+                            reason: InteractEndReason::PatternStop {
+                                pattern_index: index,
+                            },
                             buffer: self.buffer.clone(),
                         }));
                     }
@@ -740,7 +745,9 @@ where
                     }
                     InteractAction::Stop => {
                         return Ok(Some(InteractResult {
-                            reason: InteractEndReason::PatternStop { pattern_index: index },
+                            reason: InteractEndReason::PatternStop {
+                                pattern_index: index,
+                            },
                             buffer: self.buffer.clone(),
                         }));
                     }

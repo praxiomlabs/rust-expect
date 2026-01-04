@@ -6,13 +6,13 @@
 use std::io;
 use std::os::unix::io::{AsRawFd, OwnedFd, RawFd};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
-use rustix::fs::{fcntl_setfl, OFlags};
-use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
-use rustix::termios::{tcsetwinsize, Winsize};
+use rustix::fs::{OFlags, fcntl_setfl};
+use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+use rustix::termios::{Winsize, tcsetwinsize};
 use tokio::io::unix::AsyncFd;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
@@ -79,8 +79,7 @@ impl UnixPtyMaster {
             .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;
 
         // Wrap for async I/O
-        let async_fd = AsyncFd::new(master_fd)
-            .map_err(PtyError::Create)?;
+        let async_fd = AsyncFd::new(master_fd).map_err(PtyError::Create)?;
 
         Ok((
             Self {
@@ -206,10 +205,7 @@ impl AsyncWrite for UnixPtyMaster {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         if !self.open.load(Ordering::SeqCst) {
-            return Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::BrokenPipe,
-                "PTY closed",
-            )));
+            return Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "PTY closed")));
         }
 
         loop {
@@ -270,7 +266,7 @@ impl PtyMaster for UnixPtyMaster {
 ///
 /// The caller must ensure the path is a valid PTY slave path.
 pub fn open_slave(path: &str) -> Result<OwnedFd> {
-    use rustix::fs::{open, Mode, OFlags};
+    use rustix::fs::{Mode, OFlags, open};
     use std::path::Path;
 
     let fd = open(

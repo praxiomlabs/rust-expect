@@ -9,10 +9,10 @@ use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
 use std::pin::Pin;
 use std::process::ExitStatus as StdExitStatus;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use rustix::process::{kill_process, Pid, Signal, WaitStatus};
+use rustix::process::{Pid, Signal, WaitStatus, kill_process};
 use tokio::process::Child as TokioChild;
 use tokio::sync::Mutex;
 
@@ -46,7 +46,8 @@ impl std::fmt::Debug for UnixPtyChild {
 
 impl UnixPtyChild {
     /// Create a new child process handle.
-    #[must_use] pub fn new(child: TokioChild) -> Self {
+    #[must_use]
+    pub fn new(child: TokioChild) -> Self {
         let pid = child.id().expect("child should have pid");
         Self {
             child: Arc::new(Mutex::new(Some(child))),
@@ -57,7 +58,8 @@ impl UnixPtyChild {
     }
 
     /// Create a child handle from just a PID (for fork-based spawning).
-    #[must_use] pub fn from_pid(pid: u32) -> Self {
+    #[must_use]
+    pub fn from_pid(pid: u32) -> Self {
         Self {
             child: Arc::new(Mutex::new(None)),
             pid,
@@ -107,17 +109,16 @@ impl UnixPtyChild {
 
     /// Wait using waitpid system call.
     async fn wait_pid(&mut self) -> Result<ExitStatus> {
-        use rustix::process::{waitpid, WaitOptions};
+        use rustix::process::{WaitOptions, waitpid};
 
-        let pid = Pid::from_raw(self.pid as i32)
-            .ok_or_else(|| PtyError::Wait(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid")))?;
+        let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| {
+            PtyError::Wait(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"))
+        })?;
 
         // Use blocking waitpid in a spawn_blocking context
-        let result = tokio::task::spawn_blocking(move || {
-            waitpid(Some(pid), WaitOptions::empty())
-        })
-        .await
-        .map_err(|e| PtyError::Wait(io::Error::new(io::ErrorKind::Other, e)))?;
+        let result = tokio::task::spawn_blocking(move || waitpid(Some(pid), WaitOptions::empty()))
+            .await
+            .map_err(|e| PtyError::Wait(io::Error::new(io::ErrorKind::Other, e)))?;
 
         match result {
             Ok(Some((_pid, wait_status))) => {
@@ -135,13 +136,15 @@ impl UnixPtyChild {
                     "process still running",
                 )))
             }
-            Err(e) => Err(PtyError::Wait(io::Error::from_raw_os_error(e.raw_os_error()))),
+            Err(e) => Err(PtyError::Wait(io::Error::from_raw_os_error(
+                e.raw_os_error(),
+            ))),
         }
     }
 
     /// Try to get the exit status without blocking.
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
-        use rustix::process::{waitpid, WaitOptions};
+        use rustix::process::{WaitOptions, waitpid};
 
         // Check cached status first
         if let Ok(guard) = self.exit_status.try_lock() {
@@ -150,8 +153,9 @@ impl UnixPtyChild {
             }
         }
 
-        let pid = Pid::from_raw(self.pid as i32)
-            .ok_or_else(|| PtyError::Wait(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid")))?;
+        let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| {
+            PtyError::Wait(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"))
+        })?;
 
         match waitpid(Some(pid), WaitOptions::NOHANG) {
             Ok(Some((_pid, wait_status))) => {
@@ -165,7 +169,9 @@ impl UnixPtyChild {
                 Ok(Some(exit_status))
             }
             Ok(None) => Ok(None), // Still running
-            Err(e) => Err(PtyError::Wait(io::Error::from_raw_os_error(e.raw_os_error()))),
+            Err(e) => Err(PtyError::Wait(io::Error::from_raw_os_error(
+                e.raw_os_error(),
+            ))),
         }
     }
 
@@ -175,15 +181,23 @@ impl UnixPtyChild {
             return Err(PtyError::ProcessExited(0));
         }
 
-        let sig_num = signal
-            .as_unix_signal()
-            .ok_or_else(|| PtyError::Signal(io::Error::new(io::ErrorKind::Unsupported, "unsupported signal")))?;
+        let sig_num = signal.as_unix_signal().ok_or_else(|| {
+            PtyError::Signal(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "unsupported signal",
+            ))
+        })?;
 
-        let pid = Pid::from_raw(self.pid as i32)
-            .ok_or_else(|| PtyError::Signal(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid")))?;
+        let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| {
+            PtyError::Signal(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"))
+        })?;
 
-        let signal = Signal::from_named_raw(sig_num)
-            .ok_or_else(|| PtyError::Signal(io::Error::new(io::ErrorKind::InvalidInput, "invalid signal")))?;
+        let signal = Signal::from_named_raw(sig_num).ok_or_else(|| {
+            PtyError::Signal(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid signal",
+            ))
+        })?;
 
         kill_process(pid, signal)
             .map_err(|e| PtyError::Signal(io::Error::from_raw_os_error(e.raw_os_error())))

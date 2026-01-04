@@ -5,7 +5,7 @@
 //!
 //! Run with: `cargo bench --bench comparative`
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 // ============================================================================
 // Pattern Matching Benchmarks
@@ -157,7 +157,8 @@ fn bench_multi_pattern(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("expectrl_iter", count), &count, |b, &n| {
             use expectrl::Needle;
             let patterns: Vec<String> = (0..n).map(|i| format!("nomatch{i}")).collect();
-            let patterns_ref: Vec<&str> = patterns.iter().map(std::string::String::as_str).collect();
+            let patterns_ref: Vec<&str> =
+                patterns.iter().map(std::string::String::as_str).collect();
             b.iter(|| {
                 for p in &patterns_ref {
                     if let Ok(matches) = p.check(black_box(haystack.as_bytes()), false) {

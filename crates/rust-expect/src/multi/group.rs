@@ -253,7 +253,10 @@ impl GroupManager {
     /// Get all group names.
     #[must_use]
     pub fn names(&self) -> Vec<&str> {
-        self.groups.keys().map(std::string::String::as_str).collect()
+        self.groups
+            .keys()
+            .map(std::string::String::as_str)
+            .collect()
     }
 
     /// Get total session count across all groups.

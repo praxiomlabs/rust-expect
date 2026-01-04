@@ -6,8 +6,8 @@
 //! Run with: `cargo run --example interactive`
 
 use rust_expect::interact::{
-    HookBuilder, HookManager, InputFilter, InteractionMode, OutputFilter, TerminalMode,
-    TerminalState, Terminal, TerminalSize,
+    HookBuilder, HookManager, InputFilter, InteractionMode, OutputFilter, Terminal, TerminalMode,
+    TerminalSize, TerminalState,
 };
 use rust_expect::prelude::*;
 use std::time::Duration;
@@ -85,7 +85,10 @@ async fn main() -> Result<()> {
     // Add custom output hook
     hook_manager.add_output_hook(|data| {
         // Example: filter control characters
-        data.iter().copied().filter(|&b| b >= 0x20 || b == b'\n').collect()
+        data.iter()
+            .copied()
+            .filter(|&b| b >= 0x20 || b == b'\n')
+            .collect()
     });
 
     println!("   Input hook added (uppercase conversion)");
@@ -99,9 +102,9 @@ async fn main() -> Result<()> {
     println!("\n7. Hook builder pattern...");
 
     let _manager = HookBuilder::new()
-        .with_crlf()     // Add CRLF translation
-        .with_echo()     // Add local echo
-        .with_logging()  // Add event logging
+        .with_crlf() // Add CRLF translation
+        .with_echo() // Add local echo
+        .with_logging() // Add event logging
         .build();
 
     println!("   Built hook manager with CRLF, echo, and logging");
@@ -111,11 +114,14 @@ async fn main() -> Result<()> {
 
     // Input filter - filter out certain characters
     let input_filter = InputFilter::new()
-        .filter(b"xyz")  // Filter out x, y, z
-        .with_control(false);  // Block control characters
+        .filter(b"xyz") // Filter out x, y, z
+        .with_control(false); // Block control characters
 
     let filtered = input_filter.apply(b"abcxyz123");
-    println!("   Input filter applied: 'abcxyz123' -> '{}'", String::from_utf8_lossy(&filtered));
+    println!(
+        "   Input filter applied: 'abcxyz123' -> '{}'",
+        String::from_utf8_lossy(&filtered)
+    );
 
     // Output filter - normalize and strip
     let output_filter = OutputFilter::new()
@@ -123,13 +129,18 @@ async fn main() -> Result<()> {
         .with_normalize_newlines(true);
 
     let normalized = output_filter.apply(b"line1\r\nline2\r\n");
-    println!("   Output filter (normalize CRLF): {:?}", String::from_utf8_lossy(&normalized));
+    println!(
+        "   Output filter (normalize CRLF): {:?}",
+        String::from_utf8_lossy(&normalized)
+    );
 
     // Example 9: Real interactive-style session
     println!("\n9. Semi-interactive automation...");
 
     let mut session = Session::spawn("/bin/sh", &[]).await?;
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     // Simulate an interactive workflow
     let commands = [
@@ -142,7 +153,9 @@ async fn main() -> Result<()> {
         println!("   {cmd} -> {description}");
         session.send_line(cmd).await?;
         // Wait for prompt to return
-        session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+        session
+            .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+            .await?;
     }
 
     // Clean up

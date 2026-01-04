@@ -81,7 +81,11 @@ fn quick_session_ssh_user_config() {
     let config = QuickSession::ssh_user("admin", "server.example.com");
 
     assert_eq!(config.command, "ssh");
-    assert!(config.args.contains(&"admin@server.example.com".to_string()));
+    assert!(
+        config
+            .args
+            .contains(&"admin@server.example.com".to_string())
+    );
 }
 
 /// Test `QuickSession::python` creates correct config.
@@ -181,7 +185,10 @@ async fn spawn_shell_send_command() {
 
     // Wait for shell prompt ($ or something similar)
     // Send a command
-    session.send_line("echo test123").await.expect("Failed to send");
+    session
+        .send_line("echo test123")
+        .await
+        .expect("Failed to send");
 
     // Expect the output
     let m = session.expect("test123").await.expect("Expected 'test123'");
@@ -196,9 +203,15 @@ async fn spawn_cat_interactive() {
         .expect("Failed to spawn cat");
 
     // Cat echoes what we send
-    session.send_line("hello cat").await.expect("Failed to send");
+    session
+        .send_line("hello cat")
+        .await
+        .expect("Failed to send");
 
-    let m = session.expect("hello cat").await.expect("Expected 'hello cat'");
+    let m = session
+        .expect("hello cat")
+        .await
+        .expect("Expected 'hello cat'");
     assert!(m.matched.contains("hello cat"));
 
     // Send EOF to terminate cat (Ctrl+D)

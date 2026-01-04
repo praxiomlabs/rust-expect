@@ -15,9 +15,9 @@
 //!    using semaphore-based permits. Use [`try_acquire_permit`](Backpressure::try_acquire_permit)
 //!    and [`acquire_permit`](Backpressure::acquire_permit) for this.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, TryAcquireError};
-use std::sync::Arc;
 
 /// A backpressure controller for limiting data flow and concurrent operations.
 ///
@@ -233,7 +233,7 @@ impl RateLimiter {
     /// Returns true if the operation is allowed, false if rate limited.
     pub fn try_acquire(&self) -> bool {
         self.maybe_reset();
-        
+
         let current = self.current.fetch_add(1, Ordering::AcqRel);
         if current < self.max_ops {
             true
@@ -253,7 +253,10 @@ impl RateLimiter {
 
     /// Reset the counter if the interval has elapsed.
     fn maybe_reset(&self) {
-        let mut last_reset = self.last_reset.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut last_reset = self
+            .last_reset
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let elapsed = last_reset.elapsed();
 
         if elapsed.as_millis() as u64 >= self.interval_ms {
@@ -264,7 +267,10 @@ impl RateLimiter {
 
     /// Get the time until the next reset.
     fn time_until_reset(&self) -> std::time::Duration {
-        let last_reset = self.last_reset.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let last_reset = self
+            .last_reset
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let elapsed = last_reset.elapsed();
         let interval = std::time::Duration::from_millis(self.interval_ms);
 
@@ -304,19 +310,23 @@ impl TokenBucket {
     /// Try to consume tokens.
     pub fn try_consume(&self, count: usize) -> bool {
         self.refill();
-        
+
         loop {
             let current = self.tokens.load(Ordering::Acquire);
             if current < count {
                 return false;
             }
-            
-            if self.tokens.compare_exchange(
-                current,
-                current - count,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ).is_ok() {
+
+            if self
+                .tokens
+                .compare_exchange(
+                    current,
+                    current - count,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
                 return true;
             }
         }
@@ -332,7 +342,10 @@ impl TokenBucket {
 
     /// Refill tokens based on elapsed time.
     fn refill(&self) {
-        let mut last_refill = self.last_refill.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut last_refill = self
+            .last_refill
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let elapsed = last_refill.elapsed().as_secs_f64();
         let new_tokens = (elapsed * self.refill_rate) as usize;
 
@@ -350,7 +363,7 @@ impl TokenBucket {
         if current >= count {
             return std::time::Duration::ZERO;
         }
-        
+
         let needed = count - current;
         let seconds = needed as f64 / self.refill_rate;
         std::time::Duration::from_secs_f64(seconds)

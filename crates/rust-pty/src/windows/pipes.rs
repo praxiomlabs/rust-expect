@@ -69,8 +69,9 @@ pub fn set_inheritable(handle: &OwnedHandle, inheritable: bool) -> io::Result<()
     let flags = if inheritable { HANDLE_FLAG_INHERIT } else { 0 };
 
     // SAFETY: handle is valid
-    let result =
-        unsafe { SetHandleInformation(handle.as_raw_handle() as HANDLE, HANDLE_FLAG_INHERIT, flags) };
+    let result = unsafe {
+        SetHandleInformation(handle.as_raw_handle() as HANDLE, HANDLE_FLAG_INHERIT, flags)
+    };
 
     if result == 0 {
         Err(io::Error::last_os_error())

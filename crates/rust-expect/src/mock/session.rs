@@ -99,7 +99,10 @@ impl MockTransport {
 
     /// Queue output to be read.
     pub fn queue_output(&self, data: &[u8]) {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.output.extend(data);
     }
 
@@ -109,52 +112,75 @@ impl MockTransport {
     }
 
     /// Get data that was written by the client.
-    #[must_use] pub fn take_input(&self) -> Vec<u8> {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    #[must_use]
+    pub fn take_input(&self) -> Vec<u8> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.input.drain(..).collect()
     }
 
     /// Get input as a string.
-    #[must_use] pub fn take_input_str(&self) -> String {
+    #[must_use]
+    pub fn take_input_str(&self) -> String {
         String::from_utf8_lossy(&self.take_input()).into_owned()
     }
 
     /// Signal EOF.
     pub fn signal_eof(&self) {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.eof = true;
     }
 
     /// Signal exit with code.
     pub fn signal_exit(&self, code: i32) {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.exit_code = Some(code);
         state.eof = true;
     }
 
     /// Set an error to return on next read.
     pub fn set_error(&self, msg: impl Into<String>) {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.error = Some(msg.into());
     }
 
     /// Check if EOF has been signaled.
     #[must_use]
     pub fn is_eof(&self) -> bool {
-        let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.eof
     }
 
     /// Get the exit code if exited.
     #[must_use]
     pub fn exit_code(&self) -> Option<i32> {
-        let state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.exit_code
     }
 
     /// Process the next event from the timeline.
     pub fn advance(&self) {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.process_event();
     }
 }
@@ -171,7 +197,10 @@ impl AsyncRead for MockTransport {
         _cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Check for error
         if let Some(error) = state.error.take() {
@@ -218,7 +247,10 @@ impl AsyncWrite for MockTransport {
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.input.extend(buf);
         Poll::Ready(Ok(buf.len()))
     }
@@ -276,12 +308,14 @@ impl MockSession {
     }
 
     /// Get data that was written.
-    #[must_use] pub fn take_input(&self) -> Vec<u8> {
+    #[must_use]
+    pub fn take_input(&self) -> Vec<u8> {
         self.transport.take_input()
     }
 
     /// Get input as a string.
-    #[must_use] pub fn take_input_str(&self) -> String {
+    #[must_use]
+    pub fn take_input_str(&self) -> String {
         self.transport.take_input_str()
     }
 }

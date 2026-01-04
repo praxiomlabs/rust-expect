@@ -10,21 +10,20 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::pin::Pin;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::Console::HPCON;
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, InitializeProcThreadAttributeList,
-    UpdateProcThreadAttribute, WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT,
-    INFINITE, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-    STARTUPINFOEXW,
+    CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
+    InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
+    STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 /// Windows BOOL type (i32 in windows-sys 0.61+)
@@ -150,7 +149,7 @@ impl WindowsPtyChild {
     /// On Windows, most signals are emulated or not supported.
     pub fn signal(&self, signal: PtySignal) -> Result<()> {
         use windows_sys::Win32::System::Console::{
-            GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT, CTRL_C_EVENT,
+            CTRL_BREAK_EVENT, CTRL_C_EVENT, GenerateConsoleCtrlEvent,
         };
 
         match signal {
@@ -259,14 +258,11 @@ where
     let env_block = build_environment_block(&config.effective_env());
 
     // Working directory
-    let working_dir = config
-        .working_directory
-        .as_ref()
-        .map(|p| {
-            let mut w = to_wide_string(p.as_os_str());
-            w.push(0);
-            w
-        });
+    let working_dir = config.working_directory.as_ref().map(|p| {
+        let mut w = to_wide_string(p.as_os_str());
+        w.push(0);
+        w
+    });
 
     // Create job object for process management
     let job = create_job_object()?;
@@ -290,9 +286,7 @@ where
             } else {
                 env_block.as_ptr() as *const _
             },
-            working_dir
-                .as_ref()
-                .map_or(ptr::null(), |w| w.as_ptr()),
+            working_dir.as_ref().map_or(ptr::null(), |w| w.as_ptr()),
             &startup_info.StartupInfo,
             &mut process_info,
         )
@@ -321,11 +315,7 @@ where
         }
     }
 
-    Ok(WindowsPtyChild::new(
-        process,
-        process_info.dwProcessId,
-        job,
-    ))
+    Ok(WindowsPtyChild::new(process, process_info.dwProcessId, job))
 }
 
 /// Convert an OsStr to a wide string (UTF-16).
@@ -521,7 +511,16 @@ mod tests {
     fn wide_string_conversion() {
         let s = OsStr::new("hello");
         let wide = to_wide_string(s);
-        assert_eq!(wide, vec![b'h' as u16, b'e' as u16, b'l' as u16, b'l' as u16, b'o' as u16]);
+        assert_eq!(
+            wide,
+            vec![
+                b'h' as u16,
+                b'e' as u16,
+                b'l' as u16,
+                b'l' as u16,
+                b'o' as u16
+            ]
+        );
     }
 
     /// Helper to convert escaped Vec<u16> back to String for testing.
@@ -616,7 +615,10 @@ mod tests {
         // Complex Windows path with spaces
         let arg = OsStr::new("C:\\Program Files\\My App\\bin");
         let escaped = escape_argument(arg);
-        assert_eq!(wide_to_string(&escaped), "\"C:\\Program Files\\My App\\bin\"");
+        assert_eq!(
+            wide_to_string(&escaped),
+            "\"C:\\Program Files\\My App\\bin\""
+        );
     }
 
     #[test]

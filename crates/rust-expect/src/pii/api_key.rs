@@ -101,11 +101,7 @@ pub fn mask(key: &str) -> String {
         return "*".repeat(key.len());
     }
 
-    format!(
-        "{}...{}",
-        &key[..4],
-        &key[key.len() - 4..]
-    )
+    format!("{}...{}", &key[..4], &key[key.len() - 4..])
 }
 
 #[cfg(test)]

@@ -20,7 +20,9 @@ pub mod buffer;
 pub mod parser;
 pub mod query;
 
-pub use buffer::{Attributes, Cell, CellChange, ChangeType, Color, Cursor, ScreenBuffer, ScreenDiff};
+pub use buffer::{
+    Attributes, Cell, CellChange, ChangeType, Color, Cursor, ScreenBuffer, ScreenDiff,
+};
 pub use parser::{AnsiParser, AnsiSequence, EraseMode, ParseResult};
 pub use query::{Region, ScreenQuery, ScreenQueryExt};
 
@@ -431,7 +433,7 @@ mod tests {
     fn screen_cursor_prev_line() {
         let mut screen = Screen::new(10, 20);
         screen.process_str("\x1b[5;10H"); // Row 5, Col 10
-        screen.process_str("\x1b[2F");     // Move 2 lines up to beginning
+        screen.process_str("\x1b[2F"); // Move 2 lines up to beginning
         screen.process_str("X");
 
         assert_eq!(screen.cursor().row, 2);
@@ -463,7 +465,7 @@ mod tests {
         let mut screen = Screen::new(1, 20);
         screen.process_str("Hello World");
         screen.process_str("\x1b[1;1H"); // Home
-        screen.process_str("\x1b[5X");   // Erase 5 characters
+        screen.process_str("\x1b[5X"); // Erase 5 characters
 
         // First 5 chars should be spaces
         let text = screen.text();

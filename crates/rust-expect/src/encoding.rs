@@ -32,7 +32,11 @@ impl EncodedText {
 
     /// Create an encoding result with errors.
     #[must_use]
-    pub fn with_errors(text: impl Into<String>, bytes_consumed: usize, replacements: usize) -> Self {
+    pub fn with_errors(
+        text: impl Into<String>,
+        bytes_consumed: usize,
+        replacements: usize,
+    ) -> Self {
         Self {
             text: text.into(),
             bytes_consumed,
@@ -89,7 +93,9 @@ pub fn decode_utf8_escape(bytes: &[u8]) -> EncodedText {
                 let valid_up_to = e.valid_up_to();
                 if valid_up_to > 0 {
                     // Safe: from_utf8 confirmed these bytes are valid
-                    result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[i..i + valid_up_to]) });
+                    result.push_str(unsafe {
+                        std::str::from_utf8_unchecked(&bytes[i..i + valid_up_to])
+                    });
                 }
                 i += valid_up_to;
 
@@ -125,7 +131,9 @@ pub fn decode_utf8_skip(bytes: &[u8]) -> EncodedText {
             Err(e) => {
                 let valid_up_to = e.valid_up_to();
                 if valid_up_to > 0 {
-                    result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[i..i + valid_up_to]) });
+                    result.push_str(unsafe {
+                        std::str::from_utf8_unchecked(&bytes[i..i + valid_up_to])
+                    });
                 }
                 i += valid_up_to;
 
@@ -154,7 +162,9 @@ pub fn normalize_line_endings(text: &str, ending: LineEndingStyle) -> Cow<'_, st
     // If already normalized, return as-is
     match ending {
         LineEndingStyle::Lf if !needs_crlf && !needs_cr => return Cow::Borrowed(text),
-        LineEndingStyle::CrLf if needs_crlf && !needs_cr && !needs_lf => return Cow::Borrowed(text),
+        LineEndingStyle::CrLf if needs_crlf && !needs_cr && !needs_lf => {
+            return Cow::Borrowed(text);
+        }
         LineEndingStyle::Cr if needs_cr && !needs_crlf && !needs_lf => return Cow::Borrowed(text),
         _ => {}
     }
@@ -218,11 +228,7 @@ impl LineEndingStyle {
     /// Detect the line ending style from environment.
     #[must_use]
     pub const fn from_env() -> Self {
-        if cfg!(windows) {
-            Self::CrLf
-        } else {
-            Self::Lf
-        }
+        if cfg!(windows) { Self::CrLf } else { Self::Lf }
     }
 }
 
@@ -411,12 +417,18 @@ mod tests {
 
     #[test]
     fn detect_line_ending_lf() {
-        assert_eq!(detect_line_ending("line1\nline2\n"), Some(LineEndingStyle::Lf));
+        assert_eq!(
+            detect_line_ending("line1\nline2\n"),
+            Some(LineEndingStyle::Lf)
+        );
     }
 
     #[test]
     fn detect_line_ending_crlf() {
-        assert_eq!(detect_line_ending("line1\r\nline2\r\n"), Some(LineEndingStyle::CrLf));
+        assert_eq!(
+            detect_line_ending("line1\r\nline2\r\n"),
+            Some(LineEndingStyle::CrLf)
+        );
     }
 
     #[test]

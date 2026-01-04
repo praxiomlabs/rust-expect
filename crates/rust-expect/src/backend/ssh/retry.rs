@@ -59,7 +59,10 @@ impl RetryStrategy {
     /// Create fixed delay strategy.
     #[must_use]
     pub const fn fixed(delay: Duration, max_attempts: u32) -> Self {
-        Self::Fixed { delay, max_attempts }
+        Self::Fixed {
+            delay,
+            max_attempts,
+        }
     }
 
     /// Create exponential backoff strategy.
@@ -78,7 +81,10 @@ impl RetryStrategy {
     pub fn delay_for_attempt(&self, attempt: u32) -> Option<Duration> {
         match self {
             Self::None => None,
-            Self::Fixed { delay, max_attempts } => {
+            Self::Fixed {
+                delay,
+                max_attempts,
+            } => {
                 if attempt < *max_attempts {
                     Some(*delay)
                 } else {
@@ -188,7 +194,10 @@ impl RetryPolicy {
     #[must_use]
     pub fn is_retryable(&self, error: &str) -> bool {
         let error_lower = error.to_lowercase();
-        !self.non_retryable_errors.iter().any(|e| error_lower.contains(e))
+        !self
+            .non_retryable_errors
+            .iter()
+            .any(|e| error_lower.contains(e))
     }
 }
 

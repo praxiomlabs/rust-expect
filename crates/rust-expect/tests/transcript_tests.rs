@@ -91,7 +91,10 @@ fn transcript_duration() {
 fn transcript_output_text() {
     let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
     transcript.push(TranscriptEvent::output(Duration::ZERO, b"hello "));
-    transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"world"));
+    transcript.push(TranscriptEvent::output(
+        Duration::from_millis(100),
+        b"world",
+    ));
 
     assert_eq!(transcript.output_text(), "hello world");
 }
@@ -100,7 +103,10 @@ fn transcript_output_text() {
 fn transcript_input_text() {
     let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
     transcript.push(TranscriptEvent::input(Duration::ZERO, b"command1\n"));
-    transcript.push(TranscriptEvent::input(Duration::from_millis(100), b"command2\n"));
+    transcript.push(TranscriptEvent::input(
+        Duration::from_millis(100),
+        b"command2\n",
+    ));
 
     assert_eq!(transcript.input_text(), "command1\ncommand2\n");
 }
@@ -109,8 +115,14 @@ fn transcript_input_text() {
 fn transcript_filter() {
     let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
     transcript.push(TranscriptEvent::output(Duration::ZERO, b"prompt> "));
-    transcript.push(TranscriptEvent::input(Duration::from_millis(100), b"command\n"));
-    transcript.push(TranscriptEvent::output(Duration::from_millis(200), b"output\n"));
+    transcript.push(TranscriptEvent::input(
+        Duration::from_millis(100),
+        b"command\n",
+    ));
+    transcript.push(TranscriptEvent::output(
+        Duration::from_millis(200),
+        b"output\n",
+    ));
 
     let outputs = transcript.filter(EventType::Output);
     assert_eq!(outputs.len(), 2);
@@ -182,7 +194,10 @@ fn recorder_into_transcript() {
 fn player_new() {
     let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
     transcript.push(TranscriptEvent::output(Duration::ZERO, b"Hello"));
-    transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"World"));
+    transcript.push(TranscriptEvent::output(
+        Duration::from_millis(100),
+        b"World",
+    ));
 
     let player = Player::new(&transcript);
 
@@ -195,7 +210,10 @@ fn player_new() {
 fn player_play_and_next() {
     let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
     transcript.push(TranscriptEvent::output(Duration::ZERO, b"event1"));
-    transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"event2"));
+    transcript.push(TranscriptEvent::output(
+        Duration::from_millis(100),
+        b"event2",
+    ));
 
     let mut player = Player::new(&transcript);
     player.play();

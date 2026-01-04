@@ -26,7 +26,8 @@ async fn main() -> Result<()> {
 
     println!("   Dialog built with {} steps", dialog.len());
     for (i, step) in dialog.steps().iter().enumerate() {
-        println!("   Step {}: expect '{:?}' -> send '{:?}'",
+        println!(
+            "   Step {}: expect '{:?}' -> send '{:?}'",
             i + 1,
             step.expect_pattern(),
             step.send_text()
@@ -47,7 +48,10 @@ async fn main() -> Result<()> {
         .build();
 
     println!("   Variables defined: user={username}, pass=****");
-    println!("   Variable substitution test: '{}'", dialog.substitute("Hello ${user}"));
+    println!(
+        "   Variable substitution test: '{}'",
+        dialog.substitute("Hello ${user}")
+    );
 
     // Example 3: Named dialog with multiple steps
     println!("\n3. Named dialog with chained steps...");
@@ -56,18 +60,15 @@ async fn main() -> Result<()> {
         .step(
             DialogStep::new("username")
                 .with_expect("login:")
-                .with_send("myuser\n")
+                .with_send("myuser\n"),
         )
         .step(
             DialogStep::new("password")
                 .with_expect("password:")
                 .with_send("mypass\n")
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_secs(30)),
         )
-        .step(
-            DialogStep::new("prompt")
-                .with_expect(r"[$#>]")
-        )
+        .step(DialogStep::new("prompt").with_expect(r"[$#>]"))
         .build();
 
     println!("   Dialog '{}' with {} steps", dialog.name, dialog.len());
@@ -76,9 +77,9 @@ async fn main() -> Result<()> {
     println!("\n4. Dialog with control characters...");
 
     // Using actual ControlChar variants
-    let ctrl_c = ControlChar::CtrlC;  // Interrupt
-    let ctrl_m = ControlChar::CtrlM;  // Carriage return (Enter)
-    let ctrl_d = ControlChar::CtrlD;  // EOF
+    let ctrl_c = ControlChar::CtrlC; // Interrupt
+    let ctrl_m = ControlChar::CtrlM; // Carriage return (Enter)
+    let ctrl_d = ControlChar::CtrlD; // EOF
 
     println!("   Control characters:");
     println!("   - Ctrl+C (interrupt): 0x{:02x}", ctrl_c.as_byte());
@@ -109,10 +110,14 @@ async fn main() -> Result<()> {
 
     // Create a simple interactive script
     let mut session = Session::spawn("/bin/sh", &[]).await?;
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     // Create a shell script that prompts
-    session.send_line("read -p 'Enter name: ' name && echo \"Hello, $name!\"").await?;
+    session
+        .send_line("read -p 'Enter name: ' name && echo \"Hello, $name!\"")
+        .await?;
 
     // Wait for the prompt
     session.expect("Enter name:").await?;
@@ -136,7 +141,10 @@ async fn main() -> Result<()> {
         .continue_on_timeout(true);
 
     println!("   Step timeout: {:?}", step_with_timeout.get_timeout());
-    println!("   Continue on timeout: {}", step_with_timeout.continues_on_timeout());
+    println!(
+        "   Continue on timeout: {}",
+        step_with_timeout.continues_on_timeout()
+    );
 
     // Clean up
     session.send_line("exit").await?;

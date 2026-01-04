@@ -5,7 +5,9 @@
 //!
 //! Run with: `cargo run --example multi_session`
 
-use rust_expect::multi::{GroupBuilder, GroupManager, MultiSessionManager, PatternSelector, SessionGroup};
+use rust_expect::multi::{
+    GroupBuilder, GroupManager, MultiSessionManager, PatternSelector, SessionGroup,
+};
 use rust_expect::prelude::*;
 use std::time::Duration;
 
@@ -22,7 +24,11 @@ async fn main() -> Result<()> {
     let web2 = group.add("web-server-2");
     let db1 = group.add("database-1");
 
-    println!("   Created group '{}' with {} sessions", group.name(), group.len());
+    println!(
+        "   Created group '{}' with {} sessions",
+        group.name(),
+        group.len()
+    );
     println!("   Sessions: web1={web1}, web2={web2}, db1={db1}");
 
     // Mark a session as inactive
@@ -69,9 +75,18 @@ async fn main() -> Result<()> {
         .session(1, "prompt>")
         .default_pattern("$");
 
-    println!("   Patterns for session 0: {} patterns", selector.patterns_for(0).len());
-    println!("   Patterns for session 1: {} patterns", selector.patterns_for(1).len());
-    println!("   Patterns for unknown session: {} patterns", selector.patterns_for(99).len());
+    println!(
+        "   Patterns for session 0: {} patterns",
+        selector.patterns_for(0).len()
+    );
+    println!(
+        "   Patterns for session 1: {} patterns",
+        selector.patterns_for(1).len()
+    );
+    println!(
+        "   Patterns for unknown session: {} patterns",
+        selector.patterns_for(99).len()
+    );
 
     // Example 5: Iterating over group sessions
     println!("\n5. Iterating over sessions...");
@@ -93,8 +108,12 @@ async fn main() -> Result<()> {
     let mut session2 = Session::spawn("/bin/sh", &[]).await?;
 
     // Wait for both prompts
-    session1.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
-    session2.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session1
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
+    session2
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     println!("   Session 1 PID: {}", session1.pid());
     println!("   Session 2 PID: {}", session2.pid());
@@ -136,7 +155,9 @@ async fn main() -> Result<()> {
     println!("   Labels: {label1:?}, {label2:?}");
 
     // Wait for prompts on all sessions
-    let results = multi_manager.expect_all(Pattern::regex(r"[$#>]").unwrap()).await?;
+    let results = multi_manager
+        .expect_all(Pattern::regex(r"[$#>]").unwrap())
+        .await?;
     println!("   Got {} prompt responses", results.len());
 
     // Send to all sessions at once

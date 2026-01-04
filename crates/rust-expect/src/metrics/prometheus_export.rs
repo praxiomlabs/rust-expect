@@ -86,9 +86,7 @@ impl ExpectMetrics {
     ///
     /// Panics if metrics registration fails (should only happen on first call).
     pub fn global() -> &'static Self {
-        METRICS.get_or_init(|| {
-            Self::new(registry()).expect("Failed to register metrics")
-        })
+        METRICS.get_or_init(|| Self::new(registry()).expect("Failed to register metrics"))
     }
 
     /// Create new metrics registered with the given registry.
@@ -110,10 +108,13 @@ impl ExpectMetrics {
         ))?;
         registry.register(Box::new(sessions_total.clone()))?;
 
-        let session_duration = Histogram::with_opts(HistogramOpts::new(
-            "expect_session_duration_seconds",
-            "Duration of expect sessions in seconds",
-        ).buckets(vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0]))?;
+        let session_duration = Histogram::with_opts(
+            HistogramOpts::new(
+                "expect_session_duration_seconds",
+                "Duration of expect sessions in seconds",
+            )
+            .buckets(vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0, 600.0]),
+        )?;
         registry.register(Box::new(session_duration.clone()))?;
 
         // I/O metrics
@@ -140,7 +141,8 @@ impl ExpectMetrics {
             HistogramOpts::new(
                 "expect_operation_duration_seconds",
                 "Duration of expect operations in seconds",
-            ).buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0]),
+            )
+            .buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0]),
             &["pattern_type"],
         )?;
         registry.register(Box::new(expect_duration.clone()))?;
@@ -158,10 +160,13 @@ impl ExpectMetrics {
         ))?;
         registry.register(Box::new(commands_total.clone()))?;
 
-        let command_duration = Histogram::with_opts(HistogramOpts::new(
-            "expect_command_duration_seconds",
-            "Duration of command execution in seconds",
-        ).buckets(vec![0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0]))?;
+        let command_duration = Histogram::with_opts(
+            HistogramOpts::new(
+                "expect_command_duration_seconds",
+                "Duration of command execution in seconds",
+            )
+            .buckets(vec![0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0, 30.0]),
+        )?;
         registry.register(Box::new(command_duration.clone()))?;
 
         // Error metrics
@@ -172,22 +177,23 @@ impl ExpectMetrics {
         registry.register(Box::new(errors_total.clone()))?;
 
         // Dialog metrics
-        let dialogs_total = Counter::with_opts(Opts::new(
-            "expect_dialogs_total",
-            "Total dialog executions",
-        ))?;
+        let dialogs_total =
+            Counter::with_opts(Opts::new("expect_dialogs_total", "Total dialog executions"))?;
         registry.register(Box::new(dialogs_total.clone()))?;
 
-        let dialog_duration = Histogram::with_opts(HistogramOpts::new(
-            "expect_dialog_duration_seconds",
-            "Duration of dialog execution in seconds",
-        ).buckets(vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]))?;
+        let dialog_duration = Histogram::with_opts(
+            HistogramOpts::new(
+                "expect_dialog_duration_seconds",
+                "Duration of dialog execution in seconds",
+            )
+            .buckets(vec![0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0]),
+        )?;
         registry.register(Box::new(dialog_duration.clone()))?;
 
-        let dialog_steps = Histogram::with_opts(HistogramOpts::new(
-            "expect_dialog_steps",
-            "Number of steps in executed dialogs",
-        ).buckets(vec![1.0, 2.0, 5.0, 10.0, 20.0, 50.0]))?;
+        let dialog_steps = Histogram::with_opts(
+            HistogramOpts::new("expect_dialog_steps", "Number of steps in executed dialogs")
+                .buckets(vec![1.0, 2.0, 5.0, 10.0, 20.0, 50.0]),
+        )?;
         registry.register(Box::new(dialog_steps.clone()))?;
 
         Ok(Self {

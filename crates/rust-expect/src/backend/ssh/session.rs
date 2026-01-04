@@ -279,8 +279,11 @@ mod russh_impl {
         // The key_type should match what's in the decoded data
         // Common types: ssh-rsa, ssh-ed25519, ecdsa-sha2-nistp256, etc.
         match key_type {
-            "ssh-ed25519" | "ssh-rsa" | "ecdsa-sha2-nistp256" |
-            "ecdsa-sha2-nistp384" | "ecdsa-sha2-nistp521" => {
+            "ssh-ed25519"
+            | "ssh-rsa"
+            | "ecdsa-sha2-nistp256"
+            | "ecdsa-sha2-nistp384"
+            | "ecdsa-sha2-nistp521" => {
                 // Try to parse using russh-keys (takes base64 directly)
                 russh::keys::parse_public_key_base64(key_data).ok()
             }
@@ -320,7 +323,8 @@ mod russh_impl {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+                    let _ =
+                        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
                 }
             }
         }
@@ -363,7 +367,7 @@ mod russh_impl {
                         use std::os::unix::fs::PermissionsExt;
                         let _ = std::fs::set_permissions(
                             &known_hosts_path,
-                            std::fs::Permissions::from_mode(0o644)
+                            std::fs::Permissions::from_mode(0o644),
                         );
                     }
                 }
@@ -402,7 +406,9 @@ mod russh_impl {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".to_string());
-        std::path::PathBuf::from(home).join(".ssh").join("known_hosts")
+        std::path::PathBuf::from(home)
+            .join(".ssh")
+            .join("known_hosts")
     }
 
     /// Load a private key from a file.
@@ -576,12 +582,15 @@ mod russh_impl {
                                             .flatten()
                                             .flatten();
 
-                                        match handle.authenticate_publickey_with(
-                                            username,
-                                            key.clone(),
-                                            rsa_hash,
-                                            &mut agent,
-                                        ).await {
+                                        match handle
+                                            .authenticate_publickey_with(
+                                                username,
+                                                key.clone(),
+                                                rsa_hash,
+                                                &mut agent,
+                                            )
+                                            .await
+                                        {
                                             Ok(auth_result) if auth_result.success() => {
                                                 tracing::info!(
                                                     user = %username,
@@ -635,63 +644,64 @@ mod russh_impl {
                         // Try Pageant first (PuTTY SSH agent)
                         tracing::debug!(user = %username, "Trying Pageant SSH agent");
                         match russh::keys::agent::client::AgentClient::connect_pageant().await {
-                            Ok(mut agent) => {
-                                match agent.request_identities().await {
-                                    Ok(keys) => {
-                                        tracing::debug!(
-                                            user = %username,
-                                            key_count = keys.len(),
-                                            "Found keys in Pageant"
-                                        );
+                            Ok(mut agent) => match agent.request_identities().await {
+                                Ok(keys) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        key_count = keys.len(),
+                                        "Found keys in Pageant"
+                                    );
 
-                                        for key in keys {
-                                            let rsa_hash = handle
-                                                .best_supported_rsa_hash()
-                                                .await
-                                                .ok()
-                                                .flatten()
-                                                .flatten();
+                                    for key in keys {
+                                        let rsa_hash = handle
+                                            .best_supported_rsa_hash()
+                                            .await
+                                            .ok()
+                                            .flatten()
+                                            .flatten();
 
-                                            match handle.authenticate_publickey_with(
+                                        match handle
+                                            .authenticate_publickey_with(
                                                 username,
                                                 key.clone(),
                                                 rsa_hash,
                                                 &mut agent,
-                                            ).await {
-                                                Ok(auth_result) if auth_result.success() => {
-                                                    tracing::info!(
-                                                        user = %username,
-                                                        key_type = %key.algorithm().as_str(),
-                                                        "Pageant authentication successful"
-                                                    );
-                                                    return Ok(true);
-                                                }
-                                                Ok(_) => {
-                                                    tracing::debug!(
-                                                        user = %username,
-                                                        key_type = %key.algorithm().as_str(),
-                                                        "Pageant key rejected, trying next"
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    tracing::debug!(
-                                                        user = %username,
-                                                        error = %e,
-                                                        "Pageant authentication error"
-                                                    );
-                                                }
+                                            )
+                                            .await
+                                        {
+                                            Ok(auth_result) if auth_result.success() => {
+                                                tracing::info!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "Pageant authentication successful"
+                                                );
+                                                return Ok(true);
+                                            }
+                                            Ok(_) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "Pageant key rejected, trying next"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    error = %e,
+                                                    "Pageant authentication error"
+                                                );
                                             }
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::debug!(
-                                            user = %username,
-                                            error = %e,
-                                            "Failed to get identities from Pageant"
-                                        );
-                                    }
                                 }
-                            }
+                                Err(e) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        error = %e,
+                                        "Failed to get identities from Pageant"
+                                    );
+                                }
+                            },
                             Err(e) => {
                                 tracing::debug!(
                                     user = %username,
@@ -710,69 +720,72 @@ mod russh_impl {
                         );
 
                         match russh::keys::agent::client::AgentClient::connect_named_pipe(
-                            OPENSSH_AGENT_PIPE
-                        ).await {
-                            Ok(mut agent) => {
-                                match agent.request_identities().await {
-                                    Ok(keys) => {
-                                        tracing::debug!(
-                                            user = %username,
-                                            key_count = keys.len(),
-                                            "Found keys in OpenSSH agent"
-                                        );
+                            OPENSSH_AGENT_PIPE,
+                        )
+                        .await
+                        {
+                            Ok(mut agent) => match agent.request_identities().await {
+                                Ok(keys) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        key_count = keys.len(),
+                                        "Found keys in OpenSSH agent"
+                                    );
 
-                                        for key in keys {
-                                            let rsa_hash = handle
-                                                .best_supported_rsa_hash()
-                                                .await
-                                                .ok()
-                                                .flatten()
-                                                .flatten();
+                                    for key in keys {
+                                        let rsa_hash = handle
+                                            .best_supported_rsa_hash()
+                                            .await
+                                            .ok()
+                                            .flatten()
+                                            .flatten();
 
-                                            match handle.authenticate_publickey_with(
+                                        match handle
+                                            .authenticate_publickey_with(
                                                 username,
                                                 key.clone(),
                                                 rsa_hash,
                                                 &mut agent,
-                                            ).await {
-                                                Ok(auth_result) if auth_result.success() => {
-                                                    tracing::info!(
-                                                        user = %username,
-                                                        key_type = %key.algorithm().as_str(),
-                                                        "OpenSSH agent authentication successful"
-                                                    );
-                                                    return Ok(true);
-                                                }
-                                                Ok(_) => {
-                                                    tracing::debug!(
-                                                        user = %username,
-                                                        key_type = %key.algorithm().as_str(),
-                                                        "OpenSSH agent key rejected, trying next"
-                                                    );
-                                                }
-                                                Err(e) => {
-                                                    tracing::debug!(
-                                                        user = %username,
-                                                        error = %e,
-                                                        "OpenSSH agent authentication error"
-                                                    );
-                                                }
+                                            )
+                                            .await
+                                        {
+                                            Ok(auth_result) if auth_result.success() => {
+                                                tracing::info!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "OpenSSH agent authentication successful"
+                                                );
+                                                return Ok(true);
+                                            }
+                                            Ok(_) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "OpenSSH agent key rejected, trying next"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    error = %e,
+                                                    "OpenSSH agent authentication error"
+                                                );
                                             }
                                         }
-                                        tracing::debug!(
-                                            user = %username,
-                                            "All OpenSSH agent keys exhausted"
-                                        );
                                     }
-                                    Err(e) => {
-                                        tracing::debug!(
-                                            user = %username,
-                                            error = %e,
-                                            "Failed to get identities from OpenSSH agent"
-                                        );
-                                    }
+                                    tracing::debug!(
+                                        user = %username,
+                                        "All OpenSSH agent keys exhausted"
+                                    );
                                 }
-                            }
+                                Err(e) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        error = %e,
+                                        "Failed to get identities from OpenSSH agent"
+                                    );
+                                }
+                            },
                             Err(e) => {
                                 tracing::debug!(
                                     user = %username,
@@ -845,7 +858,8 @@ mod russh_impl {
                                         );
 
                                         // Build responses for the prompts
-                                        let mut prompt_responses = Vec::with_capacity(prompts.len());
+                                        let mut prompt_responses =
+                                            Vec::with_capacity(prompts.len());
                                         for prompt in &prompts {
                                             let response = if response_index < responses.len() {
                                                 responses[response_index].clone()
@@ -863,7 +877,9 @@ mod russh_impl {
 
                                         // Send responses
                                         match handle
-                                            .authenticate_keyboard_interactive_respond(prompt_responses)
+                                            .authenticate_keyboard_interactive_respond(
+                                                prompt_responses,
+                                            )
                                             .await
                                         {
                                             Ok(next_response) => {
@@ -1117,7 +1133,9 @@ impl SshSession {
     /// # Errors
     ///
     /// Returns an error if the session is not connected or channel opening fails.
-    pub async fn open_channel(&mut self) -> crate::error::Result<russh::Channel<russh::client::Msg>> {
+    pub async fn open_channel(
+        &mut self,
+    ) -> crate::error::Result<russh::Channel<russh::client::Msg>> {
         let handle = self.handle.as_mut().ok_or_else(|| {
             crate::error::ExpectError::Ssh(SshError::Session {
                 reason: "Not connected".to_string(),
@@ -1160,7 +1178,8 @@ impl SshSession {
     /// Returns an error if the session is not connected, channel opening fails,
     /// PTY request fails, or shell request fails.
     pub async fn shell(&mut self) -> crate::error::Result<super::channel::SshChannelStream> {
-        self.shell_with_config(super::channel::ChannelConfig::default()).await
+        self.shell_with_config(super::channel::ChannelConfig::default())
+            .await
     }
 
     /// Open an interactive shell session with custom configuration.
@@ -1204,8 +1223,12 @@ impl SshSession {
     /// # Errors
     ///
     /// Returns an error if the session is not connected or command execution fails.
-    pub async fn exec(&mut self, command: &str) -> crate::error::Result<super::channel::SshChannelStream> {
-        self.exec_with_config(command, super::channel::ChannelConfig::default().no_pty()).await
+    pub async fn exec(
+        &mut self,
+        command: &str,
+    ) -> crate::error::Result<super::channel::SshChannelStream> {
+        self.exec_with_config(command, super::channel::ChannelConfig::default().no_pty())
+            .await
     }
 
     /// Execute a command with custom configuration.
@@ -1337,6 +1360,9 @@ mod tests {
         assert_eq!(config.port, 22);
         assert_eq!(config.connect_timeout, Duration::from_secs(30));
         assert!(!config.compression);
-        assert_eq!(config.host_key_verification, HostKeyVerification::KnownHosts);
+        assert_eq!(
+            config.host_key_verification,
+            HostKeyVerification::KnownHosts
+        );
     }
 }

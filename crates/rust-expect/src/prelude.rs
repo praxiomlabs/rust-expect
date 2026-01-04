@@ -34,8 +34,8 @@ pub use crate::types::{
 
 // Encoding utilities
 pub use crate::encoding::{
-    decode_utf8_lossy, detect_encoding_from_env, detect_line_ending, normalize_line_endings,
-    strip_ansi, DetectedEncoding, EncodedText, LineEndingStyle,
+    DetectedEncoding, EncodedText, LineEndingStyle, decode_utf8_lossy, detect_encoding_from_env,
+    detect_line_ending, normalize_line_endings, strip_ansi,
 };
 
 // Macros (re-exported from rust-expect-macros)
@@ -54,4 +54,4 @@ pub use crate::send::{AnsiSend, BasicSend, HumanTyper, Sender};
 pub use crate::backend::{BackendType, PtyConfig, PtySpawner};
 
 // Sync wrapper
-pub use crate::sync::{block_on, SyncSession};
+pub use crate::sync::{SyncSession, block_on};

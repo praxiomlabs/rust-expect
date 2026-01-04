@@ -8,30 +8,53 @@ use std::sync::LazyLock;
 static PROMPT_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     vec![
         // Most specific patterns first
-        ("python", Regex::new(r">>>\s*$")
-            .expect("Python prompt pattern is a valid regex")),
-        ("irb", Regex::new(r"irb\([^)]*\):\d+:\d+[>*]\s*$")
-            .expect("IRB prompt pattern is a valid regex")),
-        ("powershell", Regex::new(r"PS[^>]*>\s*$")
-            .expect("PowerShell prompt pattern is a valid regex")),
-        ("mysql", Regex::new(r"mysql>\s*$")
-            .expect("MySQL prompt pattern is a valid regex")),
-        ("postgres", Regex::new(r"[a-z_]+[=#]\s*$")
-            .expect("PostgreSQL prompt pattern is a valid regex")),
+        (
+            "python",
+            Regex::new(r">>>\s*$").expect("Python prompt pattern is a valid regex"),
+        ),
+        (
+            "irb",
+            Regex::new(r"irb\([^)]*\):\d+:\d+[>*]\s*$")
+                .expect("IRB prompt pattern is a valid regex"),
+        ),
+        (
+            "powershell",
+            Regex::new(r"PS[^>]*>\s*$").expect("PowerShell prompt pattern is a valid regex"),
+        ),
+        (
+            "mysql",
+            Regex::new(r"mysql>\s*$").expect("MySQL prompt pattern is a valid regex"),
+        ),
+        (
+            "postgres",
+            Regex::new(r"[a-z_]+[=#]\s*$").expect("PostgreSQL prompt pattern is a valid regex"),
+        ),
         // Root before bash/zsh (# is in both [$#] and [%#$>])
-        ("root", Regex::new(r"^root@[^#]*#\s*$")
-            .expect("Root prompt pattern is a valid regex")),
+        (
+            "root",
+            Regex::new(r"^root@[^#]*#\s*$").expect("Root prompt pattern is a valid regex"),
+        ),
         // General shell patterns
-        ("bash", Regex::new(r"[$#]\s*$")
-            .expect("Bash prompt pattern is a valid regex")),
-        ("zsh", Regex::new(r"%\s*$")
-            .expect("Zsh prompt pattern is a valid regex")),
-        ("fish", Regex::new(r"[^>]>\s*$")
-            .expect("Fish prompt pattern is a valid regex")),
-        ("cmd", Regex::new(r"[^>]>\s*$")
-            .expect("CMD prompt pattern is a valid regex")),
-        ("node", Regex::new(r"[^>]>\s*$")
-            .expect("Node prompt pattern is a valid regex")),
+        (
+            "bash",
+            Regex::new(r"[$#]\s*$").expect("Bash prompt pattern is a valid regex"),
+        ),
+        (
+            "zsh",
+            Regex::new(r"%\s*$").expect("Zsh prompt pattern is a valid regex"),
+        ),
+        (
+            "fish",
+            Regex::new(r"[^>]>\s*$").expect("Fish prompt pattern is a valid regex"),
+        ),
+        (
+            "cmd",
+            Regex::new(r"[^>]>\s*$").expect("CMD prompt pattern is a valid regex"),
+        ),
+        (
+            "node",
+            Regex::new(r"[^>]>\s*$").expect("Node prompt pattern is a valid regex"),
+        ),
     ]
 });
 

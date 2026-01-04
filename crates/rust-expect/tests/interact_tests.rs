@@ -1,6 +1,8 @@
 //! Integration tests for interactive mode.
 
-use rust_expect::{InteractAction, InteractEndReason, InteractResult, InteractionMode, TerminalMode, TerminalState};
+use rust_expect::{
+    InteractAction, InteractEndReason, InteractResult, InteractionMode, TerminalMode, TerminalState,
+};
 use std::time::Duration;
 
 #[test]
@@ -34,8 +36,7 @@ fn interaction_mode_builder() {
 
 #[test]
 fn interaction_mode_exit_char() {
-    let mode = InteractionMode::new()
-        .with_exit_char(Some(0x1d)); // Ctrl+]
+    let mode = InteractionMode::new().with_exit_char(Some(0x1d)); // Ctrl+]
 
     assert!(mode.is_exit_char(0x1d));
     assert!(!mode.is_exit_char(0x03));
@@ -43,8 +44,7 @@ fn interaction_mode_exit_char() {
 
 #[test]
 fn interaction_mode_escape_char() {
-    let mode = InteractionMode::new()
-        .with_escape_char(Some(0x1e)); // Ctrl+^
+    let mode = InteractionMode::new().with_escape_char(Some(0x1e)); // Ctrl+^
 
     assert!(mode.is_escape_char(0x1e));
     assert!(!mode.is_escape_char(0x03));

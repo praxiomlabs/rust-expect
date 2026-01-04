@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
-use syn::{braced, Expr, Ident, LitStr, Result, Token};
+use syn::{Expr, Ident, LitStr, Result, Token, braced};
 
 /// A single step in a dialog.
 pub enum DialogStep {
@@ -164,7 +164,8 @@ pub fn expand(input: DialogInput) -> TokenStream {
             DialogStep::Expect(expect) => {
                 let pattern = &expect.pattern;
                 let timeout = expect
-                    .timeout.map_or_else(|| quote! { None }, |t| quote! { Some(#t) });
+                    .timeout
+                    .map_or_else(|| quote! { None }, |t| quote! { Some(#t) });
 
                 if expect.is_regex {
                     quote! {

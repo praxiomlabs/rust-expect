@@ -181,7 +181,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
         loop {
             // Check before patterns first
-            if let Some((_, action)) = self.pattern_manager.check_before(&self.matcher.buffer_str()) {
+            if let Some((_, action)) = self
+                .pattern_manager
+                .check_before(&self.matcher.buffer_str())
+            {
                 match action {
                     crate::expect::HandlerAction::Continue => {}
                     crate::expect::HandlerAction::Return(s) => {
@@ -220,7 +223,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             // Check for EOF
             if self.eof {
                 if state.expects_eof() {
-                    return Ok(Match::new(0, String::new(), self.matcher.buffer_str(), String::new()));
+                    return Ok(Match::new(
+                        0,
+                        String::new(),
+                        self.matcher.buffer_str(),
+                        String::new(),
+                    ));
                 }
                 return Err(ExpectError::Eof {
                     buffer: self.matcher.buffer_str(),
@@ -237,7 +245,11 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// # Errors
     ///
     /// Returns an error on timeout, EOF, or I/O error.
-    pub async fn expect_timeout(&mut self, pattern: impl Into<Pattern>, timeout: Duration) -> Result<Match> {
+    pub async fn expect_timeout(
+        &mut self,
+        pattern: impl Into<Pattern>,
+        timeout: Duration,
+    ) -> Result<Match> {
         let pattern = pattern.into();
         let mut patterns = PatternSet::new();
         patterns.add(pattern).add(Pattern::timeout(timeout));
@@ -325,7 +337,8 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///     Ok(())
     /// }
     /// ```
-    #[must_use] pub fn interact(&self) -> InteractBuilder<'_, T>
+    #[must_use]
+    pub fn interact(&self) -> InteractBuilder<'_, T>
     where
         T: 'static,
     {
@@ -670,5 +683,8 @@ pub trait SessionExt {
     ) -> impl std::future::Future<Output = Result<Match>> + Send;
 
     /// Resize the terminal.
-    fn resize(&mut self, dimensions: Dimensions) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn resize(
+        &mut self,
+        dimensions: Dimensions,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 }

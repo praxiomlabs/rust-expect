@@ -13,8 +13,8 @@ mod pattern;
 pub use before_after::{
     HandlerAction, PatternBuilder, PatternHandler, PatternManager, PersistentPattern,
 };
-pub use buffer::{RingBuffer, DEFAULT_CAPACITY};
-pub use cache::{get_regex, RegexCache, DEFAULT_CACHE_SIZE, GLOBAL_CACHE};
+pub use buffer::{DEFAULT_CAPACITY, RingBuffer};
+pub use cache::{DEFAULT_CACHE_SIZE, GLOBAL_CACHE, RegexCache, get_regex};
 pub use large_buffer::{AdaptiveBuffer, LargeBuffer, MMAP_THRESHOLD};
 pub use matcher::{ExpectState, MatchResult, Matcher};
 pub use pattern::{CompiledRegex, NamedPattern, Pattern, PatternMatch, PatternSet};

@@ -13,7 +13,7 @@ use std::time::Duration;
 /// Test Unix line ending detection.
 #[test]
 fn unix_line_endings() {
-    use rust_expect::encoding::{detect_line_ending, LineEndingStyle};
+    use rust_expect::encoding::{LineEndingStyle, detect_line_ending};
 
     // Unix-style line endings
     let lf_text = "line1\nline2\nline3";
@@ -27,7 +27,7 @@ fn unix_line_endings() {
 /// Test LF normalization for Unix.
 #[test]
 fn lf_normalization() {
-    use rust_expect::encoding::{normalize_line_endings, LineEndingStyle};
+    use rust_expect::encoding::{LineEndingStyle, normalize_line_endings};
 
     // Normalize CRLF to LF (for processing Windows output)
     let windows_text = "line1\r\nline2\r\nline3";
@@ -123,11 +123,12 @@ fn regex_unix_patterns() {
 #[test]
 fn dialog_unix_prompts() {
     let dialog = Dialog::named("unix_shell")
-        .step(DialogStep::new("prompt")
-            .with_expect("$ ")
-            .with_send("ls -la\n"))
-        .step(DialogStep::new("output")
-            .with_expect("total"));
+        .step(
+            DialogStep::new("prompt")
+                .with_expect("$ ")
+                .with_send("ls -la\n"),
+        )
+        .step(DialogStep::new("output").with_expect("total"));
 
     assert_eq!(dialog.len(), 2);
     assert_eq!(dialog.name, "unix_shell");
@@ -166,7 +167,12 @@ fn quick_session_unix() {
 fn default_shell_unix() {
     let shell = QuickSession::default_shell();
     // Should either be from SHELL env var or /bin/sh
-    assert!(shell.contains("sh") || shell.contains("zsh") || shell.contains("bash") || shell.contains("fish"));
+    assert!(
+        shell.contains("sh")
+            || shell.contains("zsh")
+            || shell.contains("bash")
+            || shell.contains("fish")
+    );
 }
 
 /// Test shell type name method.

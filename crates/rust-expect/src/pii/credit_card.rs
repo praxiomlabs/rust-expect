@@ -20,25 +20,21 @@ impl CardType {
     #[must_use]
     pub fn detect(number: &str) -> Self {
         let digits: String = number.chars().filter(char::is_ascii_digit).collect();
-        
+
         if digits.is_empty() {
             return Self::Unknown;
         }
 
         match digits.chars().next() {
             Some('4') => Self::Visa,
-            Some('5') if digits.len() >= 2 => {
-                match digits.chars().nth(1) {
-                    Some('1'..='5') => Self::MasterCard,
-                    _ => Self::Unknown,
-                }
-            }
-            Some('3') if digits.len() >= 2 => {
-                match digits.chars().nth(1) {
-                    Some('4' | '7') => Self::Amex,
-                    _ => Self::Unknown,
-                }
-            }
+            Some('5') if digits.len() >= 2 => match digits.chars().nth(1) {
+                Some('1'..='5') => Self::MasterCard,
+                _ => Self::Unknown,
+            },
+            Some('3') if digits.len() >= 2 => match digits.chars().nth(1) {
+                Some('4' | '7') => Self::Amex,
+                _ => Self::Unknown,
+            },
             Some('6') if digits.starts_with("6011") => Self::Discover,
             _ => Self::Unknown,
         }
@@ -79,7 +75,7 @@ pub fn luhn_check(number: &str) -> bool {
 #[must_use]
 pub fn mask(number: &str) -> String {
     let digits: String = number.chars().filter(char::is_ascii_digit).collect();
-    
+
     if digits.len() >= 4 {
         let last4 = &digits[digits.len() - 4..];
         format!("****-****-****-{last4}")
@@ -92,7 +88,7 @@ pub fn mask(number: &str) -> String {
 #[must_use]
 pub fn format(number: &str) -> String {
     let digits: String = number.chars().filter(char::is_ascii_digit).collect();
-    
+
     digits
         .chars()
         .collect::<Vec<_>>()

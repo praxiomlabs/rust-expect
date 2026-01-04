@@ -30,7 +30,9 @@ async fn main() -> Result<()> {
 
     // Wait for shell prompt ($ or similar)
     // Use a regex to match common prompts
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(5)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(5))
+        .await?;
     println!("   Shell started, prompt detected");
 
     // Send a command

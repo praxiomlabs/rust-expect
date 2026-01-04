@@ -614,8 +614,7 @@ mod tests {
 
     #[test]
     fn keepalive_manager_tick() {
-        let config = KeepaliveConfig::new()
-            .interval(Duration::from_millis(10));
+        let config = KeepaliveConfig::new().interval(Duration::from_millis(10));
         let mut manager = KeepaliveManager::new(config);
 
         // First tick should want to send
@@ -667,7 +666,10 @@ mod tests {
     #[test]
     fn keepalive_action_variants() {
         assert_eq!(KeepaliveAction::None, KeepaliveAction::None);
-        assert_eq!(KeepaliveAction::SendKeepalive, KeepaliveAction::SendKeepalive);
+        assert_eq!(
+            KeepaliveAction::SendKeepalive,
+            KeepaliveAction::SendKeepalive
+        );
         assert_eq!(KeepaliveAction::Timeout, KeepaliveAction::Timeout);
         assert_eq!(KeepaliveAction::Disconnect, KeepaliveAction::Disconnect);
     }

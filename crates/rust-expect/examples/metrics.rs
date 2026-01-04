@@ -73,7 +73,10 @@ async fn main() -> Result<()> {
     let timer = Timer::start();
     tokio::time::sleep(Duration::from_millis(10)).await;
     timer.record_to(&histogram);
-    println!("   Recorded {} observations to histogram", histogram.count());
+    println!(
+        "   Recorded {} observations to histogram",
+        histogram.count()
+    );
 
     // Example 5: Session metrics
     println!("\n5. Session metrics...");
@@ -122,7 +125,9 @@ async fn main() -> Result<()> {
     metrics.active_sessions.inc();
 
     let mut session = Session::spawn("/bin/sh", &[]).await?;
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     // Track command execution
     let timer = Timer::start();

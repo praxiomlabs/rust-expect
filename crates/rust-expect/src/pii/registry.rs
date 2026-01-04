@@ -191,93 +191,71 @@ impl PatternRegistry {
     /// Add healthcare patterns (HIPAA-relevant).
     #[must_use]
     pub fn with_healthcare(self) -> Self {
-        self
-            .add(
-                PatternEntry::new(
-                    "mrn",
-                    r"\bMRN[-:]?\s*\d{6,10}\b",
-                    "[MRN REDACTED]",
-                    0.85,
-                )
+        self.add(
+            PatternEntry::new("mrn", r"\bMRN[-:]?\s*\d{6,10}\b", "[MRN REDACTED]", 0.85)
                 .with_description("Medical Record Number")
                 .with_set(PatternSet::Healthcare),
-            )
-            .add(
-                PatternEntry::new(
-                    "npi",
-                    r"\b(?:NPI[-:]?\s*)?\d{10}\b",
-                    "[NPI REDACTED]",
-                    0.75,
-                )
+        )
+        .add(
+            PatternEntry::new("npi", r"\b(?:NPI[-:]?\s*)?\d{10}\b", "[NPI REDACTED]", 0.75)
                 .with_description("National Provider Identifier")
                 .with_set(PatternSet::Healthcare),
-            )
-            .add(
-                PatternEntry::new(
-                    "dea",
-                    r"\b[A-Z]{2}\d{7}\b",
-                    "[DEA REDACTED]",
-                    0.7,
-                )
+        )
+        .add(
+            PatternEntry::new("dea", r"\b[A-Z]{2}\d{7}\b", "[DEA REDACTED]", 0.7)
                 .with_description("DEA Number")
                 .with_set(PatternSet::Healthcare),
+        )
+        .add(
+            PatternEntry::new(
+                "health_plan_id",
+                r"\b(?:member[-_]?id|policy[-_]?(?:no|num|number)?)\s*[:=]?\s*[A-Z0-9]{8,15}\b",
+                "[HEALTH PLAN ID]",
+                0.8,
             )
-            .add(
-                PatternEntry::new(
-                    "health_plan_id",
-                    r"\b(?:member[-_]?id|policy[-_]?(?:no|num|number)?)\s*[:=]?\s*[A-Z0-9]{8,15}\b",
-                    "[HEALTH PLAN ID]",
-                    0.8,
-                )
-                .with_description("Health Plan Beneficiary Number")
-                .with_set(PatternSet::Healthcare),
-            )
+            .with_description("Health Plan Beneficiary Number")
+            .with_set(PatternSet::Healthcare),
+        )
     }
 
     /// Add financial patterns.
     #[must_use]
     pub fn with_financial(self) -> Self {
-        self
-            .add(
-                PatternEntry::new(
-                    "iban",
-                    r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b",
-                    "[IBAN REDACTED]",
-                    0.8,
-                )
-                .with_description("International Bank Account Number")
-                .with_set(PatternSet::Financial),
+        self.add(
+            PatternEntry::new(
+                "iban",
+                r"\b[A-Z]{2}\d{2}[A-Z0-9]{4,30}\b",
+                "[IBAN REDACTED]",
+                0.8,
             )
-            .add(
-                PatternEntry::new(
-                    "swift_bic",
-                    r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b",
-                    "[SWIFT REDACTED]",
-                    0.75,
-                )
-                .with_description("SWIFT/BIC Code")
-                .with_set(PatternSet::Financial),
+            .with_description("International Bank Account Number")
+            .with_set(PatternSet::Financial),
+        )
+        .add(
+            PatternEntry::new(
+                "swift_bic",
+                r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b",
+                "[SWIFT REDACTED]",
+                0.75,
             )
-            .add(
-                PatternEntry::new(
-                    "routing_number",
-                    r"\b\d{9}\b",
-                    "[ROUTING REDACTED]",
-                    0.5,
-                )
+            .with_description("SWIFT/BIC Code")
+            .with_set(PatternSet::Financial),
+        )
+        .add(
+            PatternEntry::new("routing_number", r"\b\d{9}\b", "[ROUTING REDACTED]", 0.5)
                 .with_description("US Bank Routing Number")
                 .with_set(PatternSet::Financial),
+        )
+        .add(
+            PatternEntry::new(
+                "account_number",
+                r"(?i)\baccount\s*(?:no|num|number|#)?\s*[:=]?\s*(\d{8,17})\b",
+                "[ACCOUNT REDACTED]",
+                0.85,
             )
-            .add(
-                PatternEntry::new(
-                    "account_number",
-                    r"(?i)\baccount\s*(?:no|num|number|#)?\s*[:=]?\s*(\d{8,17})\b",
-                    "[ACCOUNT REDACTED]",
-                    0.85,
-                )
-                .with_description("Bank Account Number")
-                .with_set(PatternSet::Financial),
-            )
+            .with_description("Bank Account Number")
+            .with_set(PatternSet::Financial),
+        )
     }
 
     /// Add government ID patterns.
@@ -319,83 +297,81 @@ impl PatternRegistry {
     /// Add network patterns.
     #[must_use]
     pub fn with_network(self) -> Self {
-        self
-            .add(
-                PatternEntry::new(
-                    "mac_address",
-                    r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b",
-                    "[MAC REDACTED]",
-                    0.9,
-                )
-                .with_description("MAC Address")
-                .with_set(PatternSet::Network),
+        self.add(
+            PatternEntry::new(
+                "mac_address",
+                r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b",
+                "[MAC REDACTED]",
+                0.9,
             )
-            .add(
-                PatternEntry::new(
-                    "uuid",
-                    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
-                    "[UUID REDACTED]",
-                    0.9,
-                )
-                .with_description("UUID")
-                .with_set(PatternSet::Network),
+            .with_description("MAC Address")
+            .with_set(PatternSet::Network),
+        )
+        .add(
+            PatternEntry::new(
+                "uuid",
+                r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+                "[UUID REDACTED]",
+                0.9,
             )
-            .add(
-                PatternEntry::new(
-                    "ipv6",
-                    r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b",
-                    "[IPv6 REDACTED]",
-                    0.85,
-                )
-                .with_description("IPv6 Address")
-                .with_set(PatternSet::Network),
+            .with_description("UUID")
+            .with_set(PatternSet::Network),
+        )
+        .add(
+            PatternEntry::new(
+                "ipv6",
+                r"\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b",
+                "[IPv6 REDACTED]",
+                0.85,
             )
+            .with_description("IPv6 Address")
+            .with_set(PatternSet::Network),
+        )
     }
 
     /// Add authentication token patterns.
     #[must_use]
     pub fn with_authentication(self) -> Self {
-        self
-            .add(
-                PatternEntry::new(
-                    "jwt",
-                    r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
-                    "[JWT REDACTED]",
-                    0.95,
-                )
-                .with_description("JSON Web Token")
-                .with_set(PatternSet::Authentication),
+        self.add(
+            PatternEntry::new(
+                "jwt",
+                r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
+                "[JWT REDACTED]",
+                0.95,
             )
-            .add(
-                PatternEntry::new(
-                    "bearer_token",
-                    r"(?i)Bearer\s+([A-Za-z0-9_-]{20,})",
-                    "[BEARER TOKEN REDACTED]",
-                    0.9,
-                )
-                .with_description("Bearer Token")
-                .with_set(PatternSet::Authentication),
+            .with_description("JSON Web Token")
+            .with_set(PatternSet::Authentication),
+        )
+        .add(
+            PatternEntry::new(
+                "bearer_token",
+                r"(?i)Bearer\s+([A-Za-z0-9_-]{20,})",
+                "[BEARER TOKEN REDACTED]",
+                0.9,
             )
-            .add(
-                PatternEntry::new(
-                    "basic_auth",
-                    r"(?i)Basic\s+([A-Za-z0-9+/=]{20,})",
-                    "[BASIC AUTH REDACTED]",
-                    0.9,
-                )
-                .with_description("Basic Authentication Header")
-                .with_set(PatternSet::Authentication),
+            .with_description("Bearer Token")
+            .with_set(PatternSet::Authentication),
+        )
+        .add(
+            PatternEntry::new(
+                "basic_auth",
+                r"(?i)Basic\s+([A-Za-z0-9+/=]{20,})",
+                "[BASIC AUTH REDACTED]",
+                0.9,
             )
-            .add(
-                PatternEntry::new(
-                    "oauth_token",
-                    r#"(?i)(?:access_token|refresh_token)\s*[:=]\s*['"]?([A-Za-z0-9_-]{20,})['"]?"#,
-                    "[OAUTH TOKEN REDACTED]",
-                    0.9,
-                )
-                .with_description("OAuth Token")
-                .with_set(PatternSet::Authentication),
+            .with_description("Basic Authentication Header")
+            .with_set(PatternSet::Authentication),
+        )
+        .add(
+            PatternEntry::new(
+                "oauth_token",
+                r#"(?i)(?:access_token|refresh_token)\s*[:=]\s*['"]?([A-Za-z0-9_-]{20,})['"]?"#,
+                "[OAUTH TOKEN REDACTED]",
+                0.9,
             )
+            .with_description("OAuth Token")
+            .with_set(PatternSet::Authentication),
+        )
     }
 
     /// Add cloud provider patterns.
@@ -447,63 +423,61 @@ impl PatternRegistry {
     /// Add cryptocurrency patterns.
     #[must_use]
     pub fn with_cryptocurrency(self) -> Self {
-        self
-            .add(
-                PatternEntry::new(
-                    "bitcoin_address",
-                    r"\b(?:bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}\b",
-                    "[BTC ADDR REDACTED]",
-                    0.9,
-                )
-                .with_description("Bitcoin Address")
-                .with_set(PatternSet::Cryptocurrency),
+        self.add(
+            PatternEntry::new(
+                "bitcoin_address",
+                r"\b(?:bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}\b",
+                "[BTC ADDR REDACTED]",
+                0.9,
             )
-            .add(
-                PatternEntry::new(
-                    "ethereum_address",
-                    r"\b0x[a-fA-F0-9]{40}\b",
-                    "[ETH ADDR REDACTED]",
-                    0.9,
-                )
-                .with_description("Ethereum Address")
-                .with_set(PatternSet::Cryptocurrency),
+            .with_description("Bitcoin Address")
+            .with_set(PatternSet::Cryptocurrency),
+        )
+        .add(
+            PatternEntry::new(
+                "ethereum_address",
+                r"\b0x[a-fA-F0-9]{40}\b",
+                "[ETH ADDR REDACTED]",
+                0.9,
             )
+            .with_description("Ethereum Address")
+            .with_set(PatternSet::Cryptocurrency),
+        )
     }
 
     /// Add typical corporate patterns.
     #[must_use]
     pub fn with_corporate(self) -> Self {
-        self
-            .add(
-                PatternEntry::new(
-                    "employee_id",
-                    r"\b(?:EMP|E)[-#]?\d{5,8}\b",
-                    "[EMPLOYEE ID REDACTED]",
-                    0.85,
-                )
-                .with_description("Employee ID")
-                .with_set(PatternSet::Corporate),
+        self.add(
+            PatternEntry::new(
+                "employee_id",
+                r"\b(?:EMP|E)[-#]?\d{5,8}\b",
+                "[EMPLOYEE ID REDACTED]",
+                0.85,
             )
-            .add(
-                PatternEntry::new(
-                    "badge_number",
-                    r"(?i)\bbadge\s*(?:no|num|number|#)?\s*[:=]?\s*(\d{4,10})\b",
-                    "[BADGE REDACTED]",
-                    0.8,
-                )
-                .with_description("Badge Number")
-                .with_set(PatternSet::Corporate),
+            .with_description("Employee ID")
+            .with_set(PatternSet::Corporate),
+        )
+        .add(
+            PatternEntry::new(
+                "badge_number",
+                r"(?i)\bbadge\s*(?:no|num|number|#)?\s*[:=]?\s*(\d{4,10})\b",
+                "[BADGE REDACTED]",
+                0.8,
             )
-            .add(
-                PatternEntry::new(
-                    "internal_project",
-                    r"\b(?:PROJ|PRJ|PROJECT)[-#]\d{3,6}\b",
-                    "[PROJECT ID REDACTED]",
-                    0.75,
-                )
-                .with_description("Internal Project Code")
-                .with_set(PatternSet::Corporate),
+            .with_description("Badge Number")
+            .with_set(PatternSet::Corporate),
+        )
+        .add(
+            PatternEntry::new(
+                "internal_project",
+                r"\b(?:PROJ|PRJ|PROJECT)[-#]\d{3,6}\b",
+                "[PROJECT ID REDACTED]",
+                0.75,
             )
+            .with_description("Internal Project Code")
+            .with_set(PatternSet::Corporate),
+        )
     }
 
     /// Add all pre-built patterns.
@@ -534,9 +508,7 @@ impl PatternRegistry {
     /// Create a comprehensive security-focused registry.
     #[must_use]
     pub fn security() -> Self {
-        Self::new()
-            .with_authentication()
-            .with_cloud()
+        Self::new().with_authentication().with_cloud()
     }
 }
 
@@ -552,8 +524,7 @@ mod tests {
 
     #[test]
     fn registry_add_pattern() {
-        let registry = PatternRegistry::new()
-            .add_pattern("test", r"\btest\b", "[TEST]", 0.9);
+        let registry = PatternRegistry::new().add_pattern("test", r"\btest\b", "[TEST]", 0.9);
 
         assert_eq!(registry.len(), 1);
         assert_eq!(registry.patterns()[0].name, "test");
@@ -571,8 +542,7 @@ mod tests {
 
     #[test]
     fn registry_apply_to_detector() {
-        let registry = PatternRegistry::new()
-            .add_pattern("emp_id", r"EMP-\d{6}", "[EMP]", 0.9);
+        let registry = PatternRegistry::new().add_pattern("emp_id", r"EMP-\d{6}", "[EMP]", 0.9);
 
         let detector = registry.apply(PiiDetector::new());
         let matches = detector.detect("Contact EMP-123456");
@@ -584,8 +554,7 @@ mod tests {
 
     #[test]
     fn registry_to_detector() {
-        let registry = PatternRegistry::new()
-            .add_pattern("test", r"\btest\b", "[TEST]", 0.9);
+        let registry = PatternRegistry::new().add_pattern("test", r"\btest\b", "[TEST]", 0.9);
 
         let detector = registry.to_detector();
         let matches = detector.detect("this is a test");
@@ -605,7 +574,11 @@ mod tests {
 
         let financial = registry.get_by_set(PatternSet::Financial);
         assert!(!financial.is_empty());
-        assert!(financial.iter().all(|p| p.set == Some(PatternSet::Financial)));
+        assert!(
+            financial
+                .iter()
+                .all(|p| p.set == Some(PatternSet::Financial))
+        );
 
         let healthcare = registry.get_by_set(PatternSet::Healthcare);
         assert!(!healthcare.is_empty());

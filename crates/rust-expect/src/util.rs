@@ -13,11 +13,11 @@ pub mod zerocopy;
 // Re-export commonly used types
 pub use backpressure::{Backpressure, RateLimiter, TokenBucket};
 pub use buffer::{
-    allocate_page_aligned, page_size, AtomicBufferSize, LargeBufferConfig, RingBuffer, SpillBuffer,
+    AtomicBufferSize, LargeBufferConfig, RingBuffer, SpillBuffer, allocate_page_aligned, page_size,
 };
 pub use bytes::{
-    escape_bytes, find_all_patterns, find_pattern, hexdump, replace_pattern, strip_ansi,
-    to_visible_string, unescape_bytes, EscapedBytes,
+    EscapedBytes, escape_bytes, find_all_patterns, find_pattern, hexdump, replace_pattern,
+    strip_ansi, to_visible_string, unescape_bytes,
 };
 pub use timeout::{Deadline, TimeoutConfig, TimeoutExt};
 pub use zerocopy::{BorrowedView, BytesBuffer, ReadPool, VecWriter, ZeroCopySource};

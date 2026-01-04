@@ -27,9 +27,9 @@ mod conpty;
 mod pipes;
 
 pub use async_adapter::WindowsPtyMaster;
-pub use child::{spawn_child, WindowsPtyChild};
-pub use conpty::{is_conpty_available, ConPty};
-pub use pipes::{create_input_pipe, create_output_pipe, set_inheritable, PipePair};
+pub use child::{WindowsPtyChild, spawn_child};
+pub use conpty::{ConPty, is_conpty_available};
+pub use pipes::{PipePair, create_input_pipe, create_output_pipe, set_inheritable};
 
 use std::ffi::OsStr;
 use std::future::Future;
@@ -86,10 +86,7 @@ impl PtySystem for WindowsPtySystem {
             let child = spawn_child(conpty.handle(), program, args, config)?;
 
             // Duplicate handles for the master (Windows requires explicit handle duplication)
-            let input_handle = conpty
-                .input()
-                .try_clone()
-                .map_err(|e| PtyError::Spawn(e))?;
+            let input_handle = conpty.input().try_clone().map_err(|e| PtyError::Spawn(e))?;
             let output_handle = conpty
                 .output()
                 .try_clone()

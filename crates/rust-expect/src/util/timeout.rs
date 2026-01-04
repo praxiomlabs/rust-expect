@@ -4,7 +4,7 @@
 
 use std::future::Future;
 use std::time::Duration;
-use tokio::time::{timeout, Timeout};
+use tokio::time::{Timeout, timeout};
 
 /// Extension trait for adding timeouts to futures.
 pub trait TimeoutExt: Sized {
@@ -192,9 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn timeout_ext() {
-        let result = async { 42 }
-            .with_timeout(Duration::from_secs(1))
-            .await;
+        let result = async { 42 }.with_timeout(Duration::from_secs(1)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
     }

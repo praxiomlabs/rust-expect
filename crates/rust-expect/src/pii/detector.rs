@@ -116,7 +116,13 @@ pub struct PiiMatch {
 impl PiiMatch {
     /// Create a new PII match for a built-in type.
     #[must_use]
-    pub const fn new(pii_type: PiiType, start: usize, end: usize, text: String, confidence: f32) -> Self {
+    pub const fn new(
+        pii_type: PiiType,
+        start: usize,
+        end: usize,
+        text: String,
+        confidence: f32,
+    ) -> Self {
         Self {
             pii_type,
             start,
@@ -172,7 +178,9 @@ impl PiiMatch {
     /// Returns the custom name for custom patterns, or the built-in type name.
     #[must_use]
     pub fn name(&self) -> &str {
-        self.custom_name.as_deref().unwrap_or_else(|| self.pii_type.name())
+        self.custom_name
+            .as_deref()
+            .unwrap_or_else(|| self.pii_type.name())
     }
 
     /// Get the effective placeholder for this match.
@@ -194,14 +202,11 @@ impl PiiMatch {
 
 /// Compiled patterns for PII detection.
 /// These are compile-time constant patterns that are validated during development.
-static SSN_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b\d{3}-\d{2}-\d{4}\b")
-        .expect("SSN pattern is a valid regex")
-});
+static SSN_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("SSN pattern is a valid regex"));
 
 static CREDIT_CARD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:\d{4}[- ]?){3}\d{4}\b")
-        .expect("Credit card pattern is a valid regex")
+    Regex::new(r"\b(?:\d{4}[- ]?){3}\d{4}\b").expect("Credit card pattern is a valid regex")
 });
 
 static EMAIL_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -220,8 +225,7 @@ static API_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static AWS_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")
-        .expect("AWS key pattern is a valid regex")
+    Regex::new(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b").expect("AWS key pattern is a valid regex")
 });
 
 static IP_ADDRESS_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -434,7 +438,10 @@ impl PiiDetector {
     /// Get the names of all registered custom patterns.
     #[must_use]
     pub fn custom_pattern_names(&self) -> Vec<&str> {
-        self.custom_patterns.iter().map(CustomPattern::name).collect()
+        self.custom_patterns
+            .iter()
+            .map(CustomPattern::name)
+            .collect()
     }
 
     /// Detect PII in the given text.
@@ -528,19 +535,11 @@ impl PiiDetector {
         match pii_type {
             PiiType::Ssn => {
                 // Validate SSN format
-                if text.len() == 11 {
-                    0.9
-                } else {
-                    0.5
-                }
+                if text.len() == 11 { 0.9 } else { 0.5 }
             }
             PiiType::CreditCard => {
                 // Luhn check would increase confidence
-                if luhn_check(text) {
-                    0.95
-                } else {
-                    0.4
-                }
+                if luhn_check(text) { 0.95 } else { 0.4 }
             }
             PiiType::Email => {
                 // Most email patterns are high confidence
@@ -588,11 +587,7 @@ fn luhn_check(number: &str) -> bool {
         .map(|(i, &d)| {
             if i % 2 == 1 {
                 let doubled = d * 2;
-                if doubled > 9 {
-                    doubled - 9
-                } else {
-                    doubled
-                }
+                if doubled > 9 { doubled - 9 } else { doubled }
             } else {
                 d
             }
@@ -642,8 +637,8 @@ mod tests {
 
     #[test]
     fn custom_pattern_basic() {
-        let detector = PiiDetector::new()
-            .add_pattern("employee_id", r"EMP-\d{6}", "[EMPLOYEE ID]", 0.9);
+        let detector =
+            PiiDetector::new().add_pattern("employee_id", r"EMP-\d{6}", "[EMPLOYEE ID]", 0.9);
 
         let matches = detector.detect("Contact EMP-123456 for help");
         assert_eq!(matches.len(), 1);
@@ -667,8 +662,8 @@ mod tests {
 
     #[test]
     fn custom_pattern_with_builtin() {
-        let detector = PiiDetector::new()
-            .add_pattern("employee_id", r"EMP-\d{6}", "[EMPLOYEE ID]", 0.9);
+        let detector =
+            PiiDetector::new().add_pattern("employee_id", r"EMP-\d{6}", "[EMPLOYEE ID]", 0.9);
 
         let matches = detector.detect("EMP-123456 can be reached at user@example.com");
         assert_eq!(matches.len(), 2);
@@ -684,12 +679,10 @@ mod tests {
 
     #[test]
     fn custom_pattern_try_add() {
-        let result = PiiDetector::new()
-            .try_add_pattern("test", r"[a-z]+", "[TEST]", 0.8);
+        let result = PiiDetector::new().try_add_pattern("test", r"[a-z]+", "[TEST]", 0.8);
         assert!(result.is_ok());
 
-        let result = PiiDetector::new()
-            .try_add_pattern("invalid", r"[invalid", "[INVALID]", 0.8);
+        let result = PiiDetector::new().try_add_pattern("invalid", r"[invalid", "[INVALID]", 0.8);
         assert!(result.is_err());
     }
 

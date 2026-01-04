@@ -140,9 +140,7 @@ impl Transcript {
     /// Get total duration.
     #[must_use]
     pub fn duration(&self) -> Duration {
-        self.events
-            .last()
-            .map_or(Duration::ZERO, |e| e.timestamp)
+        self.events.last().map_or(Duration::ZERO, |e| e.timestamp)
     }
 
     /// Get all output as a string.
@@ -186,7 +184,10 @@ mod tests {
     #[test]
     fn transcript_events() {
         let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
-        transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"hello"));
+        transcript.push(TranscriptEvent::output(
+            Duration::from_millis(100),
+            b"hello",
+        ));
         transcript.push(TranscriptEvent::input(Duration::from_millis(200), b"world"));
 
         assert_eq!(transcript.events.len(), 2);
@@ -197,7 +198,10 @@ mod tests {
     fn transcript_output_text() {
         let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
         transcript.push(TranscriptEvent::output(Duration::ZERO, b"hello "));
-        transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"world"));
+        transcript.push(TranscriptEvent::output(
+            Duration::from_millis(100),
+            b"world",
+        ));
 
         assert_eq!(transcript.output_text(), "hello world");
     }

@@ -1,8 +1,8 @@
 //! Integration tests for auto-configuration.
 
 use rust_expect::auto_config::locale::{detect_locale, is_utf8_environment, locale_env};
-use rust_expect::auto_config::shell::{detect_from_path, default_shell, ShellConfig};
-use rust_expect::{detect_shell, LocaleInfo, ShellType};
+use rust_expect::auto_config::shell::{ShellConfig, default_shell, detect_from_path};
+use rust_expect::{LocaleInfo, ShellType, detect_shell};
 
 #[test]
 fn detect_shell_returns_known_type() {
@@ -119,9 +119,7 @@ fn shell_config_with_path() {
 
 #[test]
 fn shell_config_with_args() {
-    let config = ShellConfig::new()
-        .arg("-l")
-        .arg("-i");
+    let config = ShellConfig::new().arg("-l").arg("-i");
 
     assert_eq!(config.args, vec!["-l", "-i"]);
 }
@@ -138,9 +136,7 @@ fn shell_config_with_env() {
 
 #[test]
 fn shell_config_command() {
-    let config = ShellConfig::new()
-        .with_path("/bin/bash")
-        .arg("-l");
+    let config = ShellConfig::new().with_path("/bin/bash").arg("-l");
 
     let (path, args) = config.command();
     assert_eq!(path, "/bin/bash");

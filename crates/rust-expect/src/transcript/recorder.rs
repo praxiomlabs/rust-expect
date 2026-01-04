@@ -25,9 +25,9 @@ impl Recorder {
     pub fn new(width: u16, height: u16) -> Self {
         Self {
             start: Instant::now(),
-            transcript: Arc::new(Mutex::new(Transcript::new(
-                TranscriptMetadata::new(width, height),
-            ))),
+            transcript: Arc::new(Mutex::new(Transcript::new(TranscriptMetadata::new(
+                width, height,
+            )))),
             recording: true,
             max_duration: None,
             max_events: None,
@@ -148,10 +148,7 @@ impl Recorder {
     /// Get event count.
     #[must_use]
     pub fn event_count(&self) -> usize {
-        self.transcript
-            .lock()
-            .map(|t| t.events.len())
-            .unwrap_or(0)
+        self.transcript.lock().map(|t| t.events.len()).unwrap_or(0)
     }
 }
 

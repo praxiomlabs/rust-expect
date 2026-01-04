@@ -364,11 +364,7 @@ impl LineEnding {
     /// Detect the appropriate line ending for the current platform.
     #[must_use]
     pub const fn platform_default() -> Self {
-        if cfg!(windows) {
-            Self::CrLf
-        } else {
-            Self::Lf
-        }
+        if cfg!(windows) { Self::CrLf } else { Self::Lf }
     }
 }
 

@@ -220,9 +220,7 @@ fn cell_new() {
 
 #[test]
 fn cell_with_colors() {
-    let cell = Cell::new('A')
-        .with_fg(Color::Red)
-        .with_bg(Color::Blue);
+    let cell = Cell::new('A').with_fg(Color::Red).with_bg(Color::Blue);
 
     assert_eq!(cell.char, 'A');
     assert_eq!(cell.fg, Color::Red);

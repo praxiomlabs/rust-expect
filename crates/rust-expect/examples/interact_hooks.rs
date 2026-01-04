@@ -10,8 +10,8 @@
 
 use rust_expect::interact::{InteractAction, ResizeContext, TerminalSize};
 use rust_expect::prelude::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[tokio::main]
@@ -41,10 +41,9 @@ async fn demonstrate_pattern_matching() -> Result<()> {
     let mut session = Session::spawn("/bin/sh", &[]).await?;
 
     // Wait for initial prompt
-    session.expect_timeout(
-        Pattern::regex(r"[$#>]").unwrap(),
-        Duration::from_secs(2),
-    ).await?;
+    session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await?;
 
     // Create counters to track pattern matches
     let output_match_count = Arc::new(AtomicUsize::new(0));
@@ -67,32 +66,36 @@ async fn demonstrate_pattern_matching() -> Result<()> {
     //     .await?;
 
     // For this demo, we manually check for the pattern
-    let result = session.expect_timeout(
-        Pattern::literal("password:"),
-        Duration::from_secs(2),
-    ).await;
+    let result = session
+        .expect_timeout(Pattern::literal("password:"), Duration::from_secs(2))
+        .await;
 
     match result {
         Ok(m) => {
             counter_clone.fetch_add(1, Ordering::SeqCst);
             println!("   Matched pattern 'password:' in output");
-            println!("   Text before match: {:?}", m.before.chars().take(30).collect::<String>());
+            println!(
+                "   Text before match: {:?}",
+                m.before.chars().take(30).collect::<String>()
+            );
             println!("   Would respond with: 'my_secret_password\\n'");
         }
         Err(_) => println!("   Pattern not found (expected in some shells)"),
     }
 
     // Wait for prompt
-    let _ = session.expect_timeout(
-        Pattern::regex(r"[$#>]").unwrap(),
-        Duration::from_secs(2),
-    ).await;
+    let _ = session
+        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .await;
 
     // Clean up
     session.send_line("exit").await?;
     let _ = session.wait().await; // Ignore wait errors
 
-    println!("   Pattern matches recorded: {}", output_match_count.load(Ordering::SeqCst));
+    println!(
+        "   Pattern matches recorded: {}",
+        output_match_count.load(Ordering::SeqCst)
+    );
     println!();
 
     Ok(())
@@ -120,7 +123,9 @@ fn demonstrate_resize_context() {
     // Demonstrate what a resize handler might do
     let action = example_resize_handler(&ctx);
     match action {
-        InteractAction::Continue => println!("   Handler action: Continue (resize handled silently)"),
+        InteractAction::Continue => {
+            println!("   Handler action: Continue (resize handled silently)")
+        }
         InteractAction::Send(ref data) => println!("   Handler action: Send {} bytes", data.len()),
         InteractAction::Stop => println!("   Handler action: Stop interaction"),
         InteractAction::Error(ref msg) => println!("   Handler action: Error - {msg}"),
@@ -131,14 +136,20 @@ fn demonstrate_resize_context() {
         size: TerminalSize::new(80, 24),
         previous: None,
     };
-    println!("   Initial size (no previous): {}x{}", initial_ctx.size.cols, initial_ctx.size.rows);
+    println!(
+        "   Initial size (no previous): {}x{}",
+        initial_ctx.size.cols, initial_ctx.size.rows
+    );
     println!();
 }
 
 /// Example resize handler that could be used with `on_resize`
 fn example_resize_handler(ctx: &ResizeContext) -> InteractAction {
     // Log the resize (in a real application, might update UI)
-    eprintln!("[resize] Terminal resized to {}x{}", ctx.size.cols, ctx.size.rows);
+    eprintln!(
+        "[resize] Terminal resized to {}x{}",
+        ctx.size.cols, ctx.size.rows
+    );
 
     // If the terminal got very small, might want to stop
     if ctx.size.cols < 40 || ctx.size.rows < 10 {
@@ -164,7 +175,11 @@ fn demonstrate_action_types() {
     let send_action = InteractAction::send("hello\n");
     match &send_action {
         InteractAction::Send(data) => {
-            println!("   Send: {} bytes - {:?}", data.len(), String::from_utf8_lossy(data));
+            println!(
+                "   Send: {} bytes - {:?}",
+                data.len(),
+                String::from_utf8_lossy(data)
+            );
         }
         _ => unreachable!(),
     }

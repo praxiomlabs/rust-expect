@@ -7,8 +7,8 @@
 
 #[cfg(feature = "pii-redaction")]
 use rust_expect::pii::{
-    contains_pii, redact, redact_asterisks, PiiDetector, PiiRedactor, PiiType, RedactionStyle,
-    StreamingRedactor,
+    PiiDetector, PiiRedactor, PiiType, RedactionStyle, StreamingRedactor, contains_pii, redact,
+    redact_asterisks,
 };
 
 fn main() {
@@ -159,9 +159,9 @@ fn demonstrate_streaming_redaction() {
     // Simulate receiving data in chunks (like from a terminal)
     let chunks = [
         "Connecting to database...\n",
-        "User authenticated: admin@",   // Email split across chunks!
+        "User authenticated: admin@", // Email split across chunks!
         "company.com\n",
-        "Loading profile for SSN: 123",  // SSN split across chunks!
+        "Loading profile for SSN: 123", // SSN split across chunks!
         "-45-6789\n",
         "Session complete.\n",
     ];

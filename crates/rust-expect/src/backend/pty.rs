@@ -303,11 +303,14 @@ impl PtySpawner {
         };
 
         // Spawn using rust-pty's Windows implementation
-        let (master, child) = WindowsPtySystem::spawn(command, args.iter().map(|s| s.as_str()), &pty_config)
-            .await
-            .map_err(|e| ExpectError::Spawn(SpawnError::PtyAllocation {
-                reason: format!("Windows ConPTY spawn failed: {e}"),
-            }))?;
+        let (master, child) =
+            WindowsPtySystem::spawn(command, args.iter().map(|s| s.as_str()), &pty_config)
+                .await
+                .map_err(|e| {
+                    ExpectError::Spawn(SpawnError::PtyAllocation {
+                        reason: format!("Windows ConPTY spawn failed: {e}"),
+                    })
+                })?;
 
         Ok(WindowsPtyHandle {
             master,
@@ -447,10 +450,12 @@ impl WindowsPtyHandle {
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         use rust_pty::{PtyMaster, WindowSize};
         let size = WindowSize::new(cols, rows);
-        self.master.resize(size).map_err(|e| ExpectError::Io(io::Error::new(
-            io::ErrorKind::Other,
-            format!("resize failed: {e}"),
-        )))?;
+        self.master.resize(size).map_err(|e| {
+            ExpectError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!("resize failed: {e}"),
+            ))
+        })?;
         self.dimensions = (cols, rows);
         Ok(())
     }
@@ -463,10 +468,12 @@ impl WindowsPtyHandle {
 
     /// Kill the process.
     pub fn kill(&mut self) -> Result<()> {
-        self.child.kill().map_err(|e| ExpectError::Io(io::Error::new(
-            io::ErrorKind::Other,
-            format!("kill failed: {e}"),
-        )))
+        self.child.kill().map_err(|e| {
+            ExpectError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!("kill failed: {e}"),
+            ))
+        })
     }
 }
 
@@ -590,7 +597,11 @@ impl AsyncRead for AsyncPty {
 
             // SAFETY: fd is a valid file descriptor, unfilled is a valid buffer.
             let result = unsafe {
-                libc::read(fd, unfilled.as_mut_ptr().cast::<libc::c_void>(), unfilled.len())
+                libc::read(
+                    fd,
+                    unfilled.as_mut_ptr().cast::<libc::c_void>(),
+                    unfilled.len(),
+                )
             };
 
             if result >= 0 {
@@ -625,8 +636,7 @@ impl AsyncWrite for AsyncPty {
             let fd = *self.inner.get_ref();
 
             // SAFETY: fd is a valid file descriptor, buf is a valid buffer.
-            let result =
-                unsafe { libc::write(fd, buf.as_ptr().cast::<libc::c_void>(), buf.len()) };
+            let result = unsafe { libc::write(fd, buf.as_ptr().cast::<libc::c_void>(), buf.len()) };
 
             if result >= 0 {
                 return Poll::Ready(Ok(result as usize));
@@ -721,10 +731,12 @@ impl WindowsAsyncPty {
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         use rust_pty::{PtyMaster, WindowSize};
         let size = WindowSize::new(cols, rows);
-        self.master.resize(size).map_err(|e| ExpectError::Io(io::Error::new(
-            io::ErrorKind::Other,
-            format!("resize failed: {e}"),
-        )))?;
+        self.master.resize(size).map_err(|e| {
+            ExpectError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!("resize failed: {e}"),
+            ))
+        })?;
         self.dimensions = (cols, rows);
         Ok(())
     }
@@ -737,10 +749,12 @@ impl WindowsAsyncPty {
 
     /// Kill the child process.
     pub fn kill(&mut self) -> Result<()> {
-        self.child.kill().map_err(|e| ExpectError::Io(io::Error::new(
-            io::ErrorKind::Other,
-            format!("kill failed: {e}"),
-        )))
+        self.child.kill().map_err(|e| {
+            ExpectError::Io(io::Error::new(
+                io::ErrorKind::Other,
+                format!("kill failed: {e}"),
+            ))
+        })
     }
 }
 

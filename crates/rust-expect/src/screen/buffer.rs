@@ -846,16 +846,14 @@ impl ScreenDiff {
         if self.dimensions_changed {
             output.push_str(&format!(
                 "Dimensions changed: {}x{} -> {}x{}\n",
-                self.old_dims.1, self.old_dims.0,
-                self.new_dims.1, self.new_dims.0
+                self.old_dims.1, self.old_dims.0, self.new_dims.1, self.new_dims.0
             ));
         }
 
         if self.cursor_changed {
             output.push_str(&format!(
                 "Cursor moved: ({}, {}) -> ({}, {})\n",
-                self.old_cursor.row, self.old_cursor.col,
-                self.new_cursor.row, self.new_cursor.col
+                self.old_cursor.row, self.old_cursor.col, self.new_cursor.row, self.new_cursor.col
             ));
         }
 
@@ -864,9 +862,7 @@ impl ScreenDiff {
             output.push_str(&format!("{} cell(s) changed:\n", significant.len()));
 
             for row in self.changed_rows() {
-                let row_changes: Vec<_> = significant.iter()
-                    .filter(|c| c.row == row)
-                    .collect();
+                let row_changes: Vec<_> = significant.iter().filter(|c| c.row == row).collect();
 
                 if !row_changes.is_empty() {
                     output.push_str(&format!("  Row {row}:\n"));
@@ -913,8 +909,16 @@ impl ScreenDiff {
         let max_rows = old.rows.max(new.rows);
 
         for row in 0..max_rows {
-            let old_text = if row < old.rows { old.row_text(row) } else { String::new() };
-            let new_text = if row < new.rows { new.row_text(row) } else { String::new() };
+            let old_text = if row < old.rows {
+                old.row_text(row)
+            } else {
+                String::new()
+            };
+            let new_text = if row < new.rows {
+                new.row_text(row)
+            } else {
+                String::new()
+            };
 
             if old_text != new_text {
                 if !old_text.is_empty() || row < old.rows {

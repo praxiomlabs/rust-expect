@@ -119,8 +119,14 @@ pub fn write_asciicast<W: Write>(writer: &mut W, transcript: &Transcript) -> Res
             EventType::Marker => "m",
         };
         let data = String::from_utf8_lossy(&event.data);
-        writeln!(writer, "[{:.6}, \"{}\", \"{}\"]", time, event_type, escape_json(&data))
-            .map_err(|e| ExpectError::io_context("writing asciicast event", e))?;
+        writeln!(
+            writer,
+            "[{:.6}, \"{}\", \"{}\"]",
+            time,
+            event_type,
+            escape_json(&data)
+        )
+        .map_err(|e| ExpectError::io_context("writing asciicast event", e))?;
     }
 
     Ok(())
@@ -220,7 +226,9 @@ fn parse_json_float(json: &str, field: &str) -> Option<f64> {
 
     // Find the end of the number (including decimal point and exponent)
     let end = rest
-        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-' && c != 'e' && c != 'E' && c != '+')
+        .find(|c: char| {
+            !c.is_ascii_digit() && c != '.' && c != '-' && c != 'e' && c != 'E' && c != '+'
+        })
         .unwrap_or(rest.len());
 
     rest[..end].trim().parse().ok()
@@ -330,9 +338,10 @@ fn parse_event(line: &str) -> Result<Option<TranscriptEvent>> {
         return Ok(None);
     }
 
-    let time: f64 = parts[0].trim().parse().map_err(|_| {
-        ExpectError::config("Invalid timestamp")
-    })?;
+    let time: f64 = parts[0]
+        .trim()
+        .parse()
+        .map_err(|_| ExpectError::config("Invalid timestamp"))?;
 
     let event_type = parts[1].trim().trim_matches('"');
     let data = parts[2].trim().trim_matches('"');
@@ -442,7 +451,10 @@ mod tests {
     #[test]
     fn roundtrip() {
         let mut transcript = Transcript::new(TranscriptMetadata::new(80, 24));
-        transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"hello"));
+        transcript.push(TranscriptEvent::output(
+            Duration::from_millis(100),
+            b"hello",
+        ));
 
         let mut buf = Vec::new();
         write_asciicast(&mut buf, &transcript).unwrap();
@@ -483,16 +495,28 @@ mod tests {
     #[test]
     fn parse_json_string_basic() {
         let json = r#"{"command": "/bin/bash", "title": "My Recording"}"#;
-        assert_eq!(parse_json_string(json, "command"), Some("/bin/bash".to_string()));
-        assert_eq!(parse_json_string(json, "title"), Some("My Recording".to_string()));
+        assert_eq!(
+            parse_json_string(json, "command"),
+            Some("/bin/bash".to_string())
+        );
+        assert_eq!(
+            parse_json_string(json, "title"),
+            Some("My Recording".to_string())
+        );
         assert_eq!(parse_json_string(json, "nonexistent"), None);
     }
 
     #[test]
     fn parse_json_string_escaped() {
         let json = r#"{"path": "C:\\Users\\test", "msg": "say \"hello\""}"#;
-        assert_eq!(parse_json_string(json, "path"), Some("C:\\Users\\test".to_string()));
-        assert_eq!(parse_json_string(json, "msg"), Some("say \"hello\"".to_string()));
+        assert_eq!(
+            parse_json_string(json, "path"),
+            Some("C:\\Users\\test".to_string())
+        );
+        assert_eq!(
+            parse_json_string(json, "msg"),
+            Some("say \"hello\"".to_string())
+        );
     }
 
     #[test]
@@ -619,13 +643,18 @@ mod tests {
         metadata.title = Some("Test Recording".to_string());
         metadata.timestamp = Some(1704067200);
         metadata.duration = Some(Duration::from_secs_f64(30.5));
-        metadata.env.insert("SHELL".to_string(), "/bin/bash".to_string());
+        metadata
+            .env
+            .insert("SHELL".to_string(), "/bin/bash".to_string());
         metadata.env.insert("TERM".to_string(), "xterm".to_string());
 
         let mut transcript = Transcript::new(metadata);
         transcript.push(TranscriptEvent::output(Duration::from_millis(100), b"$ "));
         transcript.push(TranscriptEvent::input(Duration::from_millis(200), b"ls\n"));
-        transcript.push(TranscriptEvent::output(Duration::from_millis(300), b"file1.txt\nfile2.txt\n"));
+        transcript.push(TranscriptEvent::output(
+            Duration::from_millis(300),
+            b"file1.txt\nfile2.txt\n",
+        ));
 
         let mut buf = Vec::new();
         write_asciicast(&mut buf, &transcript).unwrap();

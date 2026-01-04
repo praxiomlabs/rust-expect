@@ -194,7 +194,10 @@ impl SshCredentials {
         private_key: impl Into<PathBuf>,
         passphrase: impl Into<String>,
     ) -> Self {
-        self.with_auth(AuthMethod::public_key_with_passphrase(private_key, passphrase))
+        self.with_auth(AuthMethod::public_key_with_passphrase(
+            private_key,
+            passphrase,
+        ))
     }
 
     /// Add agent authentication.
@@ -308,10 +311,8 @@ mod tests {
     #[test]
     fn auth_method_keyboard_interactive_multi_response() {
         // Multiple responses (MFA)
-        let auth = AuthMethod::keyboard_interactive(vec![
-            "password".to_string(),
-            "123456".to_string(),
-        ]);
+        let auth =
+            AuthMethod::keyboard_interactive(vec!["password".to_string(), "123456".to_string()]);
         assert!(auth.is_keyboard_interactive());
 
         if let AuthMethod::KeyboardInteractive { responses } = auth {
@@ -335,8 +336,7 @@ mod tests {
 
     #[test]
     fn credentials_keyboard_interactive() {
-        let creds = SshCredentials::new("user")
-            .with_keyboard_interactive("password");
+        let creds = SshCredentials::new("user").with_keyboard_interactive("password");
 
         assert_eq!(creds.username, "user");
         assert_eq!(creds.auth_methods.len(), 1);
@@ -345,11 +345,10 @@ mod tests {
 
     #[test]
     fn credentials_keyboard_interactive_multi_response() {
-        let creds = SshCredentials::new("user")
-            .with_keyboard_interactive_responses(vec![
-                "password".to_string(),
-                "otp_code".to_string(),
-            ]);
+        let creds = SshCredentials::new("user").with_keyboard_interactive_responses(vec![
+            "password".to_string(),
+            "otp_code".to_string(),
+        ]);
 
         assert_eq!(creds.username, "user");
         assert_eq!(creds.auth_methods.len(), 1);

@@ -100,14 +100,16 @@ impl TestSession {
     /// Simulate sending data (records and discards).
     pub fn send(&mut self, data: &[u8]) {
         let elapsed = self.start_time.elapsed();
-        self.interactions.push(RecordedInteraction::input(data.to_vec(), elapsed));
+        self.interactions
+            .push(RecordedInteraction::input(data.to_vec(), elapsed));
     }
 
     /// Simulate receiving data.
     pub fn receive(&mut self) -> Option<Vec<u8>> {
         let data = self.responses.pop_front()?;
         let elapsed = self.start_time.elapsed();
-        self.interactions.push(RecordedInteraction::output(data.clone(), elapsed));
+        self.interactions
+            .push(RecordedInteraction::output(data.clone(), elapsed));
         Some(data)
     }
 
@@ -155,22 +157,14 @@ impl TestSession {
     /// Get all input as a combined string.
     #[must_use]
     pub fn all_input_str(&self) -> String {
-        let bytes: Vec<u8> = self
-            .inputs()
-            .iter()
-            .flat_map(|i| i.data.clone())
-            .collect();
+        let bytes: Vec<u8> = self.inputs().iter().flat_map(|i| i.data.clone()).collect();
         String::from_utf8_lossy(&bytes).into_owned()
     }
 
     /// Get all output as a combined string.
     #[must_use]
     pub fn all_output_str(&self) -> String {
-        let bytes: Vec<u8> = self
-            .outputs()
-            .iter()
-            .flat_map(|i| i.data.clone())
-            .collect();
+        let bytes: Vec<u8> = self.outputs().iter().flat_map(|i| i.data.clone()).collect();
         String::from_utf8_lossy(&bytes).into_owned()
     }
 

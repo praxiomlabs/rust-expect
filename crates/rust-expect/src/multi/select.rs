@@ -165,7 +165,11 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static> MultiSessionManag
     /// Add an existing session to the manager.
     ///
     /// Returns the assigned session ID.
-    pub fn add(&mut self, session: crate::session::Session<T>, label: impl Into<String>) -> SessionId {
+    pub fn add(
+        &mut self,
+        session: crate::session::Session<T>,
+        label: impl Into<String>,
+    ) -> SessionId {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -380,10 +384,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static> MultiSessionManag
                 Box::pin(async move {
                     let mut guard = arc.lock().await;
                     if !guard.active {
-                        return (
-                            id,
-                            Err(ExpectError::SessionClosed),
-                        );
+                        return (id, Err(ExpectError::SessionClosed));
                     }
 
                     match guard.session.expect_any(&patterns).await {
@@ -569,10 +570,7 @@ impl PatternSelector {
     /// Add a pattern for a specific session.
     #[must_use]
     pub fn session(mut self, id: SessionId, pattern: impl Into<Pattern>) -> Self {
-        self.patterns
-            .entry(id)
-            .or_default()
-            .push(pattern.into());
+        self.patterns.entry(id).or_default().push(pattern.into());
         self
     }
 
@@ -610,10 +608,7 @@ impl PatternSelector {
     /// # Errors
     ///
     /// Returns an error if no sessions match or all timeout.
-    pub async fn select<T>(
-        &self,
-        manager: &MultiSessionManager<T>,
-    ) -> Result<SelectResult>
+    pub async fn select<T>(&self, manager: &MultiSessionManager<T>) -> Result<SelectResult>
     where
         T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
     {

@@ -95,10 +95,8 @@ impl ResilientSession {
     #[must_use]
     pub fn new(config: ResilientConfig) -> Self {
         let keepalive = KeepaliveManager::new(config.keepalive.clone());
-        let reconnect_strategy = RetryStrategy::exponential(
-            config.reconnect_delay,
-            config.max_reconnect_attempts,
-        );
+        let reconnect_strategy =
+            RetryStrategy::exponential(config.reconnect_delay, config.max_reconnect_attempts);
 
         Self {
             config,
@@ -121,7 +119,10 @@ impl ResilientSession {
     #[must_use]
     pub fn is_connected(&self) -> bool {
         self.state == ResilientState::Connected
-            && self.session.as_ref().is_some_and(super::session::SshSession::is_connected)
+            && self
+                .session
+                .as_ref()
+                .is_some_and(super::session::SshSession::is_connected)
     }
 
     /// Get reconnect count.

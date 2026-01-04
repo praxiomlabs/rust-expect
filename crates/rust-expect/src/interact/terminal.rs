@@ -1,8 +1,8 @@
 //! Terminal interaction modes.
 
 use std::io::{self, Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Terminal mode for interactive sessions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

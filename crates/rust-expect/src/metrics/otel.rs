@@ -41,12 +41,12 @@
 //! let _guard = send_span("ls -la");
 //! ```
 
-use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
+use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
-    trace::{RandomIdGenerator, Sampler, SdkTracerProvider},
     Resource,
+    trace::{RandomIdGenerator, Sampler, SdkTracerProvider},
 };
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -347,10 +347,7 @@ pub fn record_match(pattern: &str, matched_text: &str, duration_ms: u64) {
 
 /// Record bytes transferred on the current span.
 pub fn record_bytes(sent: u64, received: u64) {
-    tracing::info!(
-        bytes.sent = sent,
-        bytes.received = received,
-    );
+    tracing::info!(bytes.sent = sent, bytes.received = received,);
 }
 
 /// Span attribute constants for consistency.
@@ -401,7 +398,10 @@ mod tests {
 
         assert_eq!(config.endpoint, "http://custom:4317");
         assert!((config.sampling_ratio - 0.5).abs() < 0.001);
-        assert_eq!(config.resource_attributes.get("env"), Some(&"test".to_string()));
+        assert_eq!(
+            config.resource_attributes.get("env"),
+            Some(&"test".to_string())
+        );
         assert!(config.console_output);
     }
 

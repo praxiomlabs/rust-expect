@@ -48,7 +48,7 @@ opentelemetry-otlp = { version = "0.28", features = ["tonic", "grpc-tonic"] }
 tracing-opentelemetry = "0.29"
 
 # Prometheus metrics export
-prometheus = "0.13"
+prometheus = "0.14"
 
 # Error handling
 thiserror = "2.0"
@@ -96,9 +96,9 @@ tokio-stream = "0.1"
 bytes = "1.10"
 
 # Workspace crates (internal)
-rust-pty = { path = "crates/rust-pty" }
-rust-expect = { path = "crates/rust-expect" }
-rust-expect-macros = { path = "crates/rust-expect-macros" }
+rust-pty = { version = "0.1.0", path = "crates/rust-pty" }
+rust-expect = { version = "0.1.0", path = "crates/rust-expect" }
+rust-expect-macros = { version = "0.1.0", path = "crates/rust-expect-macros" }
 
 # Windows-specific dependencies
 [workspace.dependencies.windows-sys]

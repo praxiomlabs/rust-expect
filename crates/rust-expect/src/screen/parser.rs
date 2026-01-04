@@ -16,6 +16,14 @@ pub enum AnsiSequence {
     CursorForward(u16),
     /// Cursor backward (CUB).
     CursorBackward(u16),
+    /// Cursor next line (CNL) - move to beginning of line n lines down.
+    CursorNextLine(u16),
+    /// Cursor previous line (CPL) - move to beginning of line n lines up.
+    CursorPrevLine(u16),
+    /// Cursor horizontal absolute (CHA) - move cursor to column n.
+    CursorColumn(u16),
+    /// Vertical position absolute (VPA) - move cursor to row n.
+    CursorRow(u16),
     /// Cursor position (CUP).
     CursorPosition {
         /// Row position (1-based).
@@ -27,12 +35,20 @@ pub enum AnsiSequence {
     EraseDisplay(EraseMode),
     /// Erase in line (EL).
     EraseLine(EraseMode),
+    /// Erase characters (ECH) - erase n characters from cursor.
+    EraseChars(u16),
     /// Select graphic rendition (SGR).
     SetGraphics(Vec<u16>),
     /// Scroll up (SU).
     ScrollUp(u16),
     /// Scroll down (SD).
     ScrollDown(u16),
+    /// Reverse index (RI) - move cursor up, scroll down if at top.
+    ReverseIndex,
+    /// Index (IND) - move cursor down, scroll up if at bottom.
+    Index,
+    /// Next line (NEL) - move to start of next line, scroll if at bottom.
+    NextLine,
     /// Save cursor position (DECSC).
     SaveCursor,
     /// Restore cursor position (DECRC).
@@ -56,6 +72,8 @@ pub enum AnsiSequence {
     InsertChars(u16),
     /// Delete characters (DCH).
     DeleteChars(u16),
+    /// Repeat previous character (REP).
+    RepeatChar(u16),
     /// Reset terminal.
     Reset,
     /// Unknown or unsupported sequence.
@@ -180,12 +198,19 @@ impl AnsiParser {
                 Some(ParseResult::Sequence(AnsiSequence::Reset))
             }
             b'D' => {
+                // IND - Index: move cursor down, scroll up if at bottom
                 self.reset();
-                Some(ParseResult::Sequence(AnsiSequence::ScrollUp(1)))
+                Some(ParseResult::Sequence(AnsiSequence::Index))
+            }
+            b'E' => {
+                // NEL - Next Line: move to start of next line
+                self.reset();
+                Some(ParseResult::Sequence(AnsiSequence::NextLine))
             }
             b'M' => {
+                // RI - Reverse Index: move cursor up, scroll down if at top
                 self.reset();
-                Some(ParseResult::Sequence(AnsiSequence::ScrollDown(1)))
+                Some(ParseResult::Sequence(AnsiSequence::ReverseIndex))
             }
             _ => {
                 self.reset();
@@ -298,37 +323,51 @@ impl AnsiParser {
         self.reset();
 
         let seq = match (final_byte, intermediate.as_str()) {
+            // Cursor movement
             (b'A', "") => AnsiSequence::CursorUp(params.first().copied().unwrap_or(1)),
             (b'B', "") => AnsiSequence::CursorDown(params.first().copied().unwrap_or(1)),
             (b'C', "") => AnsiSequence::CursorForward(params.first().copied().unwrap_or(1)),
             (b'D', "") => AnsiSequence::CursorBackward(params.first().copied().unwrap_or(1)),
+            (b'E', "") => AnsiSequence::CursorNextLine(params.first().copied().unwrap_or(1)),
+            (b'F', "") => AnsiSequence::CursorPrevLine(params.first().copied().unwrap_or(1)),
+            (b'G', "") => AnsiSequence::CursorColumn(params.first().copied().unwrap_or(1)),
+            (b'd', "") => AnsiSequence::CursorRow(params.first().copied().unwrap_or(1)),
             (b'H' | b'f', "") => AnsiSequence::CursorPosition {
                 row: params.first().copied().unwrap_or(1),
                 col: params.get(1).copied().unwrap_or(1),
             },
+            // Erase operations
             (b'J', "") => AnsiSequence::EraseDisplay(
                 params.first().copied().unwrap_or(0).into()
             ),
             (b'K', "") => AnsiSequence::EraseLine(
                 params.first().copied().unwrap_or(0).into()
             ),
+            (b'X', "") => AnsiSequence::EraseChars(params.first().copied().unwrap_or(1)),
+            // Graphics
             (b'm', "") => AnsiSequence::SetGraphics(if params.is_empty() {
                 vec![0]
             } else {
                 params
             }),
+            // Scrolling
             (b'S', "") => AnsiSequence::ScrollUp(params.first().copied().unwrap_or(1)),
             (b'T', "") => AnsiSequence::ScrollDown(params.first().copied().unwrap_or(1)),
             (b'r', "") => AnsiSequence::SetScrollRegion {
                 top: params.first().copied().unwrap_or(1),
                 bottom: params.get(1).copied().unwrap_or(0),
             },
+            // Cursor save/restore
             (b's', "") => AnsiSequence::SaveCursor,
             (b'u', "") => AnsiSequence::RestoreCursor,
+            // Line operations
             (b'L', "") => AnsiSequence::InsertLines(params.first().copied().unwrap_or(1)),
             (b'M', "") => AnsiSequence::DeleteLines(params.first().copied().unwrap_or(1)),
+            // Character operations
             (b'@', "") => AnsiSequence::InsertChars(params.first().copied().unwrap_or(1)),
             (b'P', "") => AnsiSequence::DeleteChars(params.first().copied().unwrap_or(1)),
+            (b'b', "") => AnsiSequence::RepeatChar(params.first().copied().unwrap_or(1)),
+            // DEC private modes
             (b'h', "?") if params.first() == Some(&25) => AnsiSequence::ShowCursor,
             (b'l', "?") if params.first() == Some(&25) => AnsiSequence::HideCursor,
             _ => AnsiSequence::Unknown(format!(

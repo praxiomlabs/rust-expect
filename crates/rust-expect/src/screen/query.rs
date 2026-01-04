@@ -152,13 +152,12 @@ impl<'a> ScreenQuery<'a> {
         if let Some(pos) = text.find(needle) {
             // Convert byte position to row/col
             let mut row = region.top;
-            let mut col = region.left;
             let mut byte_pos = 0;
 
             for line in text.lines() {
                 let line_bytes = line.len() + 1; // +1 for newline
                 if byte_pos + line_bytes > pos {
-                    col = region.left + (pos - byte_pos);
+                    let col = region.left + (pos - byte_pos);
                     return Some((row, col));
                 }
                 byte_pos += line_bytes;
@@ -197,13 +196,12 @@ impl<'a> ScreenQuery<'a> {
         if let Some(m) = pattern.find(&text) {
             let pos = m.start();
             let mut row = region.top;
-            let mut col = region.left;
             let mut byte_pos = 0;
 
             for line in text.lines() {
                 let line_bytes = line.len() + 1;
                 if byte_pos + line_bytes > pos {
-                    col = region.left + (pos - byte_pos);
+                    let col = region.left + (pos - byte_pos);
                     return Some((row, col, m.as_str().to_string()));
                 }
                 byte_pos += line_bytes;

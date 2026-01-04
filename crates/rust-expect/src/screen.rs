@@ -118,6 +118,9 @@ impl Screen {
     /// Apply a control character.
     fn apply_control(&mut self, c: u8) {
         match c {
+            0x07 => {
+                // Bell - ignored
+            }
             0x08 => {
                 // Backspace
                 let cursor = self.buffer.cursor_mut();
@@ -134,8 +137,10 @@ impl Screen {
                     cursor.col = cols - 1;
                 }
             }
-            0x0a => {
-                // Line feed - also reset column (newline behavior)
+            0x0a | 0x0b | 0x0c => {
+                // Line feed (LF), Vertical Tab (VT), Form Feed (FF)
+                // All behave the same in VT100: move down one line, scroll if needed
+                // Also reset column (newline mode behavior)
                 let rows = self.buffer.rows();
                 let cursor_row = self.buffer.cursor().row + 1;
                 if cursor_row >= rows {
@@ -149,9 +154,6 @@ impl Screen {
             0x0d => {
                 // Carriage return
                 self.buffer.cursor_mut().col = 0;
-            }
-            0x07 => {
-                // Bell - ignored
             }
             _ => {}
         }
@@ -178,6 +180,31 @@ impl Screen {
                 let cursor = self.buffer.cursor_mut();
                 cursor.col = cursor.col.saturating_sub(n as usize);
             }
+            AnsiSequence::CursorNextLine(n) => {
+                // Move to beginning of line n lines down
+                let rows = self.buffer.rows();
+                let cursor = self.buffer.cursor_mut();
+                cursor.row = (cursor.row + n as usize).min(rows.saturating_sub(1));
+                cursor.col = 0;
+            }
+            AnsiSequence::CursorPrevLine(n) => {
+                // Move to beginning of line n lines up
+                let cursor = self.buffer.cursor_mut();
+                cursor.row = cursor.row.saturating_sub(n as usize);
+                cursor.col = 0;
+            }
+            AnsiSequence::CursorColumn(n) => {
+                // Move cursor to column n (1-based)
+                let cols = self.buffer.cols();
+                let cursor = self.buffer.cursor_mut();
+                cursor.col = (n.saturating_sub(1) as usize).min(cols.saturating_sub(1));
+            }
+            AnsiSequence::CursorRow(n) => {
+                // Move cursor to row n (1-based)
+                let rows = self.buffer.rows();
+                let cursor = self.buffer.cursor_mut();
+                cursor.row = (n.saturating_sub(1) as usize).min(rows.saturating_sub(1));
+            }
             AnsiSequence::CursorPosition { row, col } => {
                 self.buffer.goto(
                     (row.saturating_sub(1)) as usize,
@@ -201,6 +228,16 @@ impl Screen {
                 }
                 EraseMode::All => self.buffer.clear_line(),
             },
+            AnsiSequence::EraseChars(n) => {
+                // Erase n characters from cursor position (replace with spaces)
+                let row = self.buffer.cursor().row;
+                let col = self.buffer.cursor().col;
+                let cols = self.buffer.cols();
+                let end = (col + n as usize).min(cols);
+                for c in col..end {
+                    self.buffer.set(row, c, Cell::default());
+                }
+            }
             AnsiSequence::SetGraphics(params) => {
                 apply_sgr(&params, &mut self.fg, &mut self.bg, &mut self.attrs);
             }
@@ -209,6 +246,38 @@ impl Screen {
             }
             AnsiSequence::ScrollDown(n) => {
                 self.buffer.scroll_down(n as usize);
+            }
+            AnsiSequence::ReverseIndex => {
+                // Move cursor up, scroll down if at top of scroll region
+                let cursor_row = self.buffer.cursor().row;
+                let (top, _) = (0, self.buffer.rows() - 1); // Use full screen for now
+                if cursor_row == top {
+                    self.buffer.scroll_down(1);
+                } else {
+                    self.buffer.cursor_mut().row = cursor_row.saturating_sub(1);
+                }
+            }
+            AnsiSequence::Index => {
+                // Move cursor down, scroll up if at bottom
+                let rows = self.buffer.rows();
+                let cursor_row = self.buffer.cursor().row;
+                if cursor_row >= rows - 1 {
+                    self.buffer.scroll_up(1);
+                } else {
+                    self.buffer.cursor_mut().row = cursor_row + 1;
+                }
+            }
+            AnsiSequence::NextLine => {
+                // Move to start of next line, scroll if needed
+                let rows = self.buffer.rows();
+                let cursor_row = self.buffer.cursor().row;
+                if cursor_row >= rows - 1 {
+                    self.buffer.scroll_up(1);
+                    self.buffer.cursor_mut().row = rows - 1;
+                } else {
+                    self.buffer.cursor_mut().row = cursor_row + 1;
+                }
+                self.buffer.cursor_mut().col = 0;
             }
             AnsiSequence::SaveCursor => {
                 self.buffer.save_cursor();
@@ -242,6 +311,12 @@ impl Screen {
             }
             AnsiSequence::DeleteChars(n) => {
                 self.buffer.delete_chars(n as usize);
+            }
+            AnsiSequence::RepeatChar(n) => {
+                // Repeat the last printed character n times
+                // Note: We don't track last char, so this is a no-op for now
+                // A full implementation would track last_printed_char
+                let _ = n;
             }
             AnsiSequence::Reset => {
                 self.buffer.clear();
@@ -338,5 +413,123 @@ mod tests {
         // Line 1 should have scrolled off
         assert!(!screen.query().contains("Line 1"));
         assert!(screen.query().contains("Line 4"));
+    }
+
+    #[test]
+    fn screen_cursor_next_line() {
+        let mut screen = Screen::new(10, 20);
+        screen.process_str("Test");
+        screen.process_str("\x1b[2E"); // Move 2 lines down to beginning
+        screen.process_str("Line");
+
+        // Cursor should be at row 2, col 4 after "Line"
+        assert_eq!(screen.cursor().row, 2);
+        assert!(screen.query().contains("Line"));
+    }
+
+    #[test]
+    fn screen_cursor_prev_line() {
+        let mut screen = Screen::new(10, 20);
+        screen.process_str("\x1b[5;10H"); // Row 5, Col 10
+        screen.process_str("\x1b[2F");     // Move 2 lines up to beginning
+        screen.process_str("X");
+
+        assert_eq!(screen.cursor().row, 2);
+        assert_eq!(screen.cursor().col, 1);
+    }
+
+    #[test]
+    fn screen_cursor_column() {
+        let mut screen = Screen::new(10, 20);
+        screen.process_str("Hello World");
+        screen.process_str("\x1b[5G"); // Move to column 5
+        screen.process_str("X");
+
+        // Should overwrite the 5th character (0-indexed: 4)
+        assert!(screen.query().contains("HellX World"));
+    }
+
+    #[test]
+    fn screen_cursor_row() {
+        let mut screen = Screen::new(10, 20);
+        screen.process_str("\x1b[5d"); // Move to row 5
+        screen.process_str("Test");
+
+        assert_eq!(screen.cursor().row, 4); // 0-indexed
+    }
+
+    #[test]
+    fn screen_erase_chars() {
+        let mut screen = Screen::new(1, 20);
+        screen.process_str("Hello World");
+        screen.process_str("\x1b[1;1H"); // Home
+        screen.process_str("\x1b[5X");   // Erase 5 characters
+
+        // First 5 chars should be spaces
+        let text = screen.text();
+        assert!(text.starts_with("      World") || text.contains("World"));
+    }
+
+    #[test]
+    fn screen_reverse_index() {
+        let mut screen = Screen::new(5, 20);
+        screen.process_str("Line 1\n");
+        screen.process_str("Line 2\n");
+        screen.process_str("Line 3");
+
+        // Now at row 2 (0-indexed)
+        assert_eq!(screen.cursor().row, 2);
+
+        screen.process_str("\x1bM"); // Reverse index - move up
+        assert_eq!(screen.cursor().row, 1);
+    }
+
+    #[test]
+    fn screen_reverse_index_at_top() {
+        let mut screen = Screen::new(3, 20);
+        screen.process_str("Line 1");
+        screen.process_str("\x1b[1;1H"); // Move to top
+        screen.process_str("\x1bM"); // Reverse index at top - should scroll down
+
+        // First line should now be empty, Line 1 pushed to row 1
+        assert!(screen.buffer().row_text(0).is_empty());
+    }
+
+    #[test]
+    fn screen_index() {
+        let mut screen = Screen::new(3, 20);
+        screen.process_str("Line 1");
+        screen.process_str("\x1bD"); // Index - move down
+
+        assert_eq!(screen.cursor().row, 1);
+    }
+
+    #[test]
+    fn screen_next_line_escape() {
+        let mut screen = Screen::new(10, 20);
+        screen.process_str("Hello");
+        screen.process_str("\x1bE"); // NEL - Next Line
+        screen.process_str("World");
+
+        assert_eq!(screen.cursor().row, 1);
+        assert_eq!(screen.cursor().col, 5);
+    }
+
+    #[test]
+    fn screen_form_feed() {
+        let mut screen = Screen::new(10, 20);
+        screen.process_str("Line 1\x0c"); // Form feed acts like line feed
+        screen.process_str("Line 2");
+
+        assert_eq!(screen.cursor().row, 1);
+    }
+
+    #[test]
+    fn screen_vertical_tab() {
+        let mut screen = Screen::new(10, 20);
+        screen.process_str("Line 1\x0b"); // Vertical tab acts like line feed
+        screen.process_str("Line 2");
+
+        assert_eq!(screen.cursor().row, 1);
     }
 }

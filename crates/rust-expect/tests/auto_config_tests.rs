@@ -186,7 +186,7 @@ fn locale_info_parse_posix() {
 fn locale_info_default() {
     let locale = LocaleInfo::default();
     // Default locale has all fields as None
-    assert!(!format!("{:?}", locale).is_empty());
+    assert!(!format!("{locale:?}").is_empty());
 }
 
 #[test]
@@ -208,14 +208,14 @@ fn locale_info_to_string() {
 fn detect_locale_does_not_panic() {
     // Should not panic regardless of environment
     let locale = detect_locale();
-    assert!(!format!("{:?}", locale).is_empty());
+    assert!(!format!("{locale:?}").is_empty());
 }
 
 #[test]
 fn locale_env_returns_map() {
     let env = locale_env();
     // Should return a map (may be empty if no locale vars set)
-    assert!(!format!("{:?}", env).is_empty());
+    assert!(!format!("{env:?}").is_empty());
 }
 
 #[test]

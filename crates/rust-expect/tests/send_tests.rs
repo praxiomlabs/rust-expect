@@ -64,7 +64,7 @@ fn control_char_into_u8() {
 fn basic_send_format_line() {
     // Test that line formatting includes line ending
     let line = "echo hello";
-    let formatted = format!("{}\n", line);
+    let formatted = format!("{line}\n");
     assert!(formatted.ends_with('\n'));
 }
 

@@ -5,7 +5,7 @@ use rust_expect::HealthStatus;
 use std::time::Duration;
 
 #[test]
-fn health_status_variants() {
+const fn health_status_variants() {
     let _ = HealthStatus::Healthy;
     let _ = HealthStatus::Degraded;
     let _ = HealthStatus::Unhealthy;

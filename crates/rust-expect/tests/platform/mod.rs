@@ -42,7 +42,7 @@ mod cross_platform {
         assert_eq!(windows_text, "line1\r\nline2\r\n");
     }
 
-    /// Verify Windows QuickSession configs are correct on any platform.
+    /// Verify Windows `QuickSession` configs are correct on any platform.
     #[test]
     fn windows_quicksession_cross_platform() {
         // cmd.exe config should work on any platform
@@ -73,7 +73,7 @@ mod cross_platform {
         assert!(unc_pattern.matches("\\\\server\\share").is_some());
     }
 
-    /// Verify BackendType is available (PTY should be available on both platforms).
+    /// Verify `BackendType` is available (PTY should be available on both platforms).
     #[test]
     fn backend_availability_cross_platform() {
         // PTY should be available on both Unix and Windows
@@ -81,7 +81,7 @@ mod cross_platform {
         assert_eq!(BackendType::Pty.name(), "pty");
     }
 
-    /// Verify PtyConfig defaults are consistent.
+    /// Verify `PtyConfig` defaults are consistent.
     #[test]
     fn pty_config_cross_platform() {
         let config = PtyConfig::default();

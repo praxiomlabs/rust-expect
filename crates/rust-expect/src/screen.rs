@@ -137,7 +137,7 @@ impl Screen {
                     cursor.col = cols - 1;
                 }
             }
-            0x0a | 0x0b | 0x0c => {
+            0x0a..=0x0c => {
                 // Line feed (LF), Vertical Tab (VT), Form Feed (FF)
                 // All behave the same in VT100: move down one line, scroll if needed
                 // Also reset column (newline mode behavior)

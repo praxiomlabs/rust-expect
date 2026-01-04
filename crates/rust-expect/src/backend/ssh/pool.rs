@@ -238,7 +238,7 @@ impl ConnectionPool {
 
         // Check max connections per host
         {
-            let connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+            let connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(entries) = connections.get(&key) {
                 if entries.len() >= self.config.max_per_host {
                     return Err(crate::error::ExpectError::config(format!(
@@ -258,7 +258,7 @@ impl ConnectionPool {
 
         // Add to pool
         {
-            let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+            let mut connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             connections.entry(key).or_default().push(Arc::clone(&entry));
         }
 
@@ -294,8 +294,8 @@ impl ConnectionPool {
 
         // Check if we should reject due to connection limit
         {
-            let connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
-            let total: usize = connections.values().map(|v| v.len()).sum();
+            let connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let total: usize = connections.values().map(std::vec::Vec::len).sum();
             if total >= self.config.max_total {
                 return Err(crate::error::ExpectError::config(format!(
                     "Maximum total connections ({}) exceeded",
@@ -322,7 +322,7 @@ impl ConnectionPool {
 
         // Add to pool
         {
-            let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+            let mut connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             connections.entry(key).or_default().push(Arc::clone(&entry));
         }
 
@@ -331,7 +331,7 @@ impl ConnectionPool {
 
     /// Try to acquire an existing connection from the pool.
     fn try_acquire_existing(&self, key: &str) -> Option<PoolEntry> {
-        let connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+        let connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if let Some(entries) = connections.get(key) {
             for entry in entries {
@@ -361,7 +361,7 @@ impl ConnectionPool {
     ///
     /// Call this periodically to prevent connection buildup.
     pub fn cleanup(&self) {
-        let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+        let mut connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let idle_timeout = self.config.idle_timeout;
         let max_age = self.config.max_connection_age;
 
@@ -400,7 +400,7 @@ impl ConnectionPool {
     /// Get pool statistics.
     #[must_use]
     pub fn stats(&self) -> PoolStats {
-        let connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+        let connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let mut total = 0;
         let mut active = 0;
@@ -435,7 +435,7 @@ impl ConnectionPool {
     /// This disconnects all sessions and clears the pool. Any outstanding
     /// `PooledConnection` handles will no longer be able to use their sessions.
     pub fn close_all(&self) {
-        let mut connections = self.connections.lock().unwrap_or_else(|e| e.into_inner());
+        let mut connections = self.connections.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         for entries in connections.values() {
             for entry in entries {
@@ -593,7 +593,7 @@ impl PooledConnection {
     ///
     /// For most use cases, prefer `with_session` or `with_session_mut` which
     /// provide safer access patterns.
-    pub fn session(&self) -> Option<std::sync::RwLockReadGuard<'_, SshSession>> {
+    #[must_use] pub fn session(&self) -> Option<std::sync::RwLockReadGuard<'_, SshSession>> {
         self.entry.session.read().ok()
     }
 
@@ -601,7 +601,7 @@ impl PooledConnection {
     ///
     /// For most use cases, prefer `with_session` or `with_session_mut` which
     /// provide safer access patterns.
-    pub fn session_mut(&self) -> Option<std::sync::RwLockWriteGuard<'_, SshSession>> {
+    #[must_use] pub fn session_mut(&self) -> Option<std::sync::RwLockWriteGuard<'_, SshSession>> {
         self.entry.session.write().ok()
     }
 

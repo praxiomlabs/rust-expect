@@ -223,7 +223,7 @@ fn pattern_selector_with_patterns() {
 }
 
 #[test]
-fn ready_type_values() {
+const fn ready_type_values() {
     // Test that ReadyType enum variants exist
     let _ = ReadyType::Matched;
     let _ = ReadyType::Readable;

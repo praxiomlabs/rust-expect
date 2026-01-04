@@ -79,7 +79,7 @@ pub struct InteractContext<'a> {
     pub pattern_index: usize,
 }
 
-impl<'a> InteractContext<'a> {
+impl InteractContext<'_> {
     /// Create a send action for convenience.
     pub fn send(&self, data: impl Into<String>) -> InteractAction {
         InteractAction::send(data)
@@ -234,7 +234,7 @@ where
     }
 
     /// Set the interaction mode.
-    pub fn with_mode(mut self, mode: InteractionMode) -> Self {
+    #[must_use] pub const fn with_mode(mut self, mode: InteractionMode) -> Self {
         self.mode = mode;
         self
     }
@@ -248,19 +248,19 @@ where
     }
 
     /// Disable the escape sequence (interact runs until pattern stops it).
-    pub fn no_escape(mut self) -> Self {
+    #[must_use] pub fn no_escape(mut self) -> Self {
         self.escape_sequence = None;
         self
     }
 
     /// Set a timeout for the interaction.
-    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+    #[must_use] pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
     /// Set the output buffer size.
-    pub fn with_buffer_size(mut self, size: usize) -> Self {
+    #[must_use] pub const fn with_buffer_size(mut self, size: usize) -> Self {
         self.buffer_size = size;
         self
     }
@@ -420,7 +420,7 @@ where
         let mut sigwinch = tokio::signal::unix::signal(
             tokio::signal::unix::SignalKind::window_change(),
         )
-        .map_err(|e| ExpectError::Io(e))?;
+        .map_err(ExpectError::Io)?;
 
         loop {
             // Check timeout

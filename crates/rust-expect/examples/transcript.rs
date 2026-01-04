@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
     ];
 
     for state in states {
-        println!("   State: {:?}", state);
+        println!("   State: {state:?}");
     }
 
     // Example 5: Event types
@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     ];
 
     for (event_type, description) in event_types {
-        println!("   {:?}: {}", event_type, description);
+        println!("   {event_type:?}: {description}");
     }
 
     // Example 6: Real session recording
@@ -134,8 +134,8 @@ async fn main() -> Result<()> {
         .filter(|e| matches!(e.event_type, EventType::Output))
         .count();
 
-    println!("   Input events: {}", input_count);
-    println!("   Output events: {}", output_count);
+    println!("   Input events: {input_count}");
+    println!("   Output events: {output_count}");
 
     // Example 8: Transcript serialization
     println!("\n8. Transcript formats...");
@@ -163,7 +163,7 @@ async fn main() -> Result<()> {
     ];
 
     for use_case in use_cases {
-        println!("   - {}", use_case);
+        println!("   - {use_case}");
     }
 
     // Example 10: Player for playback

@@ -64,14 +64,14 @@ impl PtyBuffer {
 
     /// Returns the number of bytes that can be written.
     #[must_use]
-    pub fn available(&self) -> usize {
+    pub const fn available(&self) -> usize {
         // Reserve one byte to distinguish full from empty
         self.capacity() - self.len() - 1
     }
 
     /// Returns true if the buffer is full.
     #[must_use]
-    pub fn is_full(&self) -> bool {
+    pub const fn is_full(&self) -> bool {
         self.available() == 0
     }
 

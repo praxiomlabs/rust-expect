@@ -41,14 +41,14 @@ fn pii_type_placeholders() {
 #[test]
 fn pii_detector_new() {
     let detector = PiiDetector::new();
-    assert!(!format!("{:?}", detector).is_empty());
+    assert!(!format!("{detector:?}").is_empty());
 }
 
 #[test]
 fn pii_detector_default() {
     let detector = PiiDetector::default();
     // Default detector should have common PII types enabled
-    assert!(!format!("{:?}", detector).is_empty());
+    assert!(!format!("{detector:?}").is_empty());
 }
 
 #[test]
@@ -125,13 +125,13 @@ fn pii_detector_enable_disable() {
 #[test]
 fn pii_detector_min_confidence() {
     let detector = PiiDetector::new().min_confidence(0.9);
-    assert!(!format!("{:?}", detector).is_empty());
+    assert!(!format!("{detector:?}").is_empty());
 }
 
 #[test]
 fn pii_redactor_new() {
     let redactor = PiiRedactor::new();
-    assert!(!format!("{:?}", redactor).is_empty());
+    assert!(!format!("{redactor:?}").is_empty());
 }
 
 #[test]

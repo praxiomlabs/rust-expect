@@ -272,7 +272,7 @@ fn color_from_ansi() {
 #[test]
 fn color_rgb() {
     let color = Color::Rgb(255, 128, 0);
-    assert!(!format!("{:?}", color).is_empty());
+    assert!(!format!("{color:?}").is_empty());
 }
 
 #[test]

@@ -59,7 +59,7 @@ impl RegexCache {
         // Try read path first
         // Note: We recover from lock poisoning since the cache is just an optimization
         {
-            let cache = self.cache.read().unwrap_or_else(|e| e.into_inner());
+            let cache = self.cache.read().unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(entry) = cache.entries.get(pattern) {
                 return Ok(Arc::clone(&entry.regex));
             }
@@ -71,7 +71,7 @@ impl RegexCache {
 
         // Update cache
         {
-            let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
+            let mut cache = self.cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Double-check after acquiring write lock
             if let Some(entry) = cache.entries.get(pattern) {
@@ -103,14 +103,14 @@ impl RegexCache {
     /// Check if a pattern is cached.
     #[must_use]
     pub fn contains(&self, pattern: &str) -> bool {
-        let cache = self.cache.read().unwrap_or_else(|e| e.into_inner());
+        let cache = self.cache.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.entries.contains_key(pattern)
     }
 
     /// Get the current number of cached patterns.
     #[must_use]
     pub fn len(&self) -> usize {
-        let cache = self.cache.read().unwrap_or_else(|e| e.into_inner());
+        let cache = self.cache.read().unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.entries.len()
     }
 
@@ -122,7 +122,7 @@ impl RegexCache {
 
     /// Clear the cache.
     pub fn clear(&self) {
-        let mut cache = self.cache.write().unwrap_or_else(|e| e.into_inner());
+        let mut cache = self.cache.write().unwrap_or_else(std::sync::PoisonError::into_inner);
         cache.entries.clear();
         cache.order.clear();
     }

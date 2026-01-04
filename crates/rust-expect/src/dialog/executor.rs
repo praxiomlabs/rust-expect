@@ -296,7 +296,7 @@ impl DialogExecutor {
             match session.expect_any(&patterns).await {
                 Ok(m) => {
                     output = m.before.clone();
-                    matched_text = Some(m.matched.clone());
+                    matched_text = Some(m.matched);
                 }
                 Err(ExpectError::Timeout { buffer, .. }) => {
                     if step.continue_on_timeout {
@@ -309,8 +309,7 @@ impl DialogExecutor {
                             matched: None,
                             send: None,
                             error: Some(format!(
-                                "Timeout waiting for pattern '{}' after {:?}",
-                                expect_pattern, timeout
+                                "Timeout waiting for pattern '{expect_pattern}' after {timeout:?}"
                             )),
                             next_step: None,
                         });

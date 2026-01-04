@@ -796,25 +796,25 @@ impl ScreenDiff {
 
     /// Check if cursor changed.
     #[must_use]
-    pub fn cursor_changed(&self) -> bool {
+    pub const fn cursor_changed(&self) -> bool {
         self.cursor_changed
     }
 
     /// Get the old cursor position.
     #[must_use]
-    pub fn old_cursor(&self) -> Cursor {
+    pub const fn old_cursor(&self) -> Cursor {
         self.old_cursor
     }
 
     /// Get the new cursor position.
     #[must_use]
-    pub fn new_cursor(&self) -> Cursor {
+    pub const fn new_cursor(&self) -> Cursor {
         self.new_cursor
     }
 
     /// Check if dimensions changed.
     #[must_use]
-    pub fn dimensions_changed(&self) -> bool {
+    pub const fn dimensions_changed(&self) -> bool {
         self.dimensions_changed
     }
 
@@ -869,7 +869,7 @@ impl ScreenDiff {
                     .collect();
 
                 if !row_changes.is_empty() {
-                    output.push_str(&format!("  Row {}:\n", row));
+                    output.push_str(&format!("  Row {row}:\n"));
                     for change in row_changes {
                         let old_char = if change.old.char.is_control() {
                             format!("\\x{:02x}", change.old.char as u8)
@@ -900,9 +900,9 @@ impl ScreenDiff {
         let new_text = new.row_text(row);
 
         if old_text == new_text {
-            format!("  {}: {}", row, old_text)
+            format!("  {row}: {old_text}")
         } else {
-            format!("- {}: {}\n+ {}: {}", row, old_text, row, new_text)
+            format!("- {row}: {old_text}\n+ {row}: {new_text}")
         }
     }
 
@@ -918,13 +918,13 @@ impl ScreenDiff {
 
             if old_text != new_text {
                 if !old_text.is_empty() || row < old.rows {
-                    output.push_str(&format!("- {}: {}\n", row, old_text));
+                    output.push_str(&format!("- {row}: {old_text}\n"));
                 }
                 if !new_text.is_empty() || row < new.rows {
-                    output.push_str(&format!("+ {}: {}\n", row, new_text));
+                    output.push_str(&format!("+ {row}: {new_text}\n"));
                 }
             } else if !old_text.is_empty() {
-                output.push_str(&format!("  {}: {}\n", row, old_text));
+                output.push_str(&format!("  {row}: {old_text}\n"));
             }
         }
 
@@ -935,19 +935,19 @@ impl ScreenDiff {
 impl ScreenBuffer {
     /// Compute the diff between this buffer and another.
     #[must_use]
-    pub fn diff(&self, other: &ScreenBuffer) -> ScreenDiff {
+    pub fn diff(&self, other: &Self) -> ScreenDiff {
         ScreenDiff::compute(self, other)
     }
 
     /// Check if this buffer equals another (content and cursor).
     #[must_use]
-    pub fn equals(&self, other: &ScreenBuffer) -> bool {
+    pub fn equals(&self, other: &Self) -> bool {
         self.diff(other).is_empty()
     }
 
     /// Create a snapshot (clone) of this buffer for later comparison.
     #[must_use]
-    pub fn snapshot(&self) -> ScreenBuffer {
+    pub fn snapshot(&self) -> Self {
         self.clone()
     }
 }
@@ -1135,7 +1135,7 @@ mod tests {
 
     #[test]
     fn diff_cursor_moved() {
-        let mut buf1 = ScreenBuffer::new(3, 10);
+        let buf1 = ScreenBuffer::new(3, 10);
         let mut buf2 = buf1.snapshot();
 
         buf2.goto(2, 5);
@@ -1160,7 +1160,7 @@ mod tests {
 
     #[test]
     fn diff_significant_changes() {
-        let mut buf1 = ScreenBuffer::new(3, 10);
+        let buf1 = ScreenBuffer::new(3, 10);
         let mut buf2 = ScreenBuffer::new(3, 10);
 
         for c in "Hi".chars() {

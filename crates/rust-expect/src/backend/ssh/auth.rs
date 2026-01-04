@@ -107,7 +107,7 @@ impl AuthMethod {
     /// ]);
     /// ```
     #[must_use]
-    pub fn keyboard_interactive(responses: Vec<String>) -> Self {
+    pub const fn keyboard_interactive(responses: Vec<String>) -> Self {
         Self::KeyboardInteractive { responses }
     }
 

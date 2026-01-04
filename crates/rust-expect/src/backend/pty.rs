@@ -173,7 +173,7 @@ impl PtySpawner {
         for (idx, arg) in args.iter().enumerate() {
             let arg_cstring = CString::new(arg.as_str()).map_err(|_| {
                 ExpectError::Spawn(SpawnError::InvalidArgument {
-                    kind: format!("argument[{}]", idx),
+                    kind: format!("argument[{idx}]"),
                     value: arg.clone(),
                     reason: "argument contains null byte".to_string(),
                 })
@@ -592,7 +592,7 @@ impl AsyncRead for AsyncPty {
 
             // SAFETY: fd is a valid file descriptor, unfilled is a valid buffer.
             let result = unsafe {
-                libc::read(fd, unfilled.as_mut_ptr() as *mut libc::c_void, unfilled.len())
+                libc::read(fd, unfilled.as_mut_ptr().cast::<libc::c_void>(), unfilled.len())
             };
 
             if result >= 0 {
@@ -628,7 +628,7 @@ impl AsyncWrite for AsyncPty {
 
             // SAFETY: fd is a valid file descriptor, buf is a valid buffer.
             let result =
-                unsafe { libc::write(fd, buf.as_ptr() as *const libc::c_void, buf.len()) };
+                unsafe { libc::write(fd, buf.as_ptr().cast::<libc::c_void>(), buf.len()) };
 
             if result >= 0 {
                 return Poll::Ready(Ok(result as usize));

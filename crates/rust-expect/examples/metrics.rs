@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let elapsed = timer.elapsed();
-    println!("   Elapsed: {:?}", elapsed);
+    println!("   Elapsed: {elapsed:?}");
 
     // Timer that records to histogram
     let histogram = Histogram::new();

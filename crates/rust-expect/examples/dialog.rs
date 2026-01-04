@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
         .step(DialogStep::expect("password:").then_send("${pass}\n"))
         .build();
 
-    println!("   Variables defined: user={}, pass=****", username);
+    println!("   Variables defined: user={username}, pass=****");
     println!("   Variable substitution test: '{}'", dialog.substitute("Hello ${user}"));
 
     // Example 3: Named dialog with multiple steps

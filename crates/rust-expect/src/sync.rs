@@ -83,7 +83,7 @@ impl SyncSession {
 
     /// Check if the session is active.
     #[must_use]
-    pub fn is_active(&self) -> bool {
+    pub const fn is_active(&self) -> bool {
         !self.inner.is_eof()
     }
 

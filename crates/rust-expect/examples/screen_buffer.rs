@@ -6,7 +6,7 @@
 //! Run with: `cargo run --example screen_buffer --features screen`
 
 #[cfg(feature = "screen")]
-use rust_expect::screen::{Attributes, Cell, Color, Screen, ScreenBuffer, ScreenQueryExt};
+use rust_expect::screen::{Screen, ScreenBuffer, ScreenQueryExt};
 
 fn main() {
     println!("rust-expect Screen Buffer Example");
@@ -98,8 +98,8 @@ fn run_examples() {
     let text = screen.text();
     let has_line1 = text.contains("Line 1");
     let has_line4 = text.contains("Line 4");
-    println!("   Contains 'Line 1': {}", has_line1);
-    println!("   Contains 'Line 4': {}", has_line4);
+    println!("   Contains 'Line 1': {has_line1}");
+    println!("   Contains 'Line 4': {has_line4}");
 
     // Example 7: Screen queries
     println!("\n7. Querying screen content...");

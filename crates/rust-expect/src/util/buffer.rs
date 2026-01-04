@@ -111,7 +111,7 @@ impl RingBuffer {
 
     /// Get the current length of data in the buffer.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         if self.full {
             self.capacity
         } else if self.head >= self.tail {
@@ -123,7 +123,7 @@ impl RingBuffer {
 
     /// Check if the buffer is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         !self.full && self.head == self.tail
     }
 
@@ -314,7 +314,7 @@ impl SpillBuffer {
             .config
             .temp_dir
             .as_ref()
-            .map_or_else(std::env::temp_dir, |p| p.clone());
+            .map_or_else(std::env::temp_dir, std::clone::Clone::clone);
 
         let path = temp_dir.join(format!("rust_expect_buffer_{}", std::process::id()));
 

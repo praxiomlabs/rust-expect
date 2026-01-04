@@ -253,7 +253,7 @@ impl RateLimiter {
 
     /// Reset the counter if the interval has elapsed.
     fn maybe_reset(&self) {
-        let mut last_reset = self.last_reset.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last_reset = self.last_reset.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let elapsed = last_reset.elapsed();
 
         if elapsed.as_millis() as u64 >= self.interval_ms {
@@ -264,7 +264,7 @@ impl RateLimiter {
 
     /// Get the time until the next reset.
     fn time_until_reset(&self) -> std::time::Duration {
-        let last_reset = self.last_reset.lock().unwrap_or_else(|e| e.into_inner());
+        let last_reset = self.last_reset.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let elapsed = last_reset.elapsed();
         let interval = std::time::Duration::from_millis(self.interval_ms);
 
@@ -332,7 +332,7 @@ impl TokenBucket {
 
     /// Refill tokens based on elapsed time.
     fn refill(&self) {
-        let mut last_refill = self.last_refill.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last_refill = self.last_refill.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let elapsed = last_refill.elapsed().as_secs_f64();
         let new_tokens = (elapsed * self.refill_rate) as usize;
 

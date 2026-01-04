@@ -135,7 +135,7 @@ fn logging_config_builder() {
 }
 
 #[test]
-fn log_format_variants() {
+const fn log_format_variants() {
     let _ = LogFormat::Raw;
     let _ = LogFormat::Timestamped;
     let _ = LogFormat::Ndjson;

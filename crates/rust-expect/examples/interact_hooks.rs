@@ -98,7 +98,7 @@ async fn demonstrate_pattern_matching() -> Result<()> {
     Ok(())
 }
 
-/// Demonstrate the ResizeContext structure
+/// Demonstrate the `ResizeContext` structure
 fn demonstrate_resize_context() {
     println!("2. Resize Context Demonstration");
     println!("   -----------------------------");
@@ -123,7 +123,7 @@ fn demonstrate_resize_context() {
         InteractAction::Continue => println!("   Handler action: Continue (resize handled silently)"),
         InteractAction::Send(ref data) => println!("   Handler action: Send {} bytes", data.len()),
         InteractAction::Stop => println!("   Handler action: Stop interaction"),
-        InteractAction::Error(ref msg) => println!("   Handler action: Error - {}", msg),
+        InteractAction::Error(ref msg) => println!("   Handler action: Error - {msg}"),
     }
 
     // Show resize without previous size (initial case)
@@ -135,7 +135,7 @@ fn demonstrate_resize_context() {
     println!();
 }
 
-/// Example resize handler that could be used with on_resize
+/// Example resize handler that could be used with `on_resize`
 fn example_resize_handler(ctx: &ResizeContext) -> InteractAction {
     // Log the resize (in a real application, might update UI)
     eprintln!("[resize] Terminal resized to {}x{}", ctx.size.cols, ctx.size.rows);
@@ -151,14 +151,14 @@ fn example_resize_handler(ctx: &ResizeContext) -> InteractAction {
     InteractAction::Continue
 }
 
-/// Demonstrate the different InteractAction types
+/// Demonstrate the different `InteractAction` types
 fn demonstrate_action_types() {
     println!("3. InteractAction Types Demonstration");
     println!("   -----------------------------------");
 
     // InteractAction::Continue - keep processing
     let continue_action = InteractAction::Continue;
-    println!("   Continue: {:?}", continue_action);
+    println!("   Continue: {continue_action:?}");
 
     // InteractAction::Send - send data to session
     let send_action = InteractAction::send("hello\n");
@@ -173,19 +173,19 @@ fn demonstrate_action_types() {
     let send_bytes_action = InteractAction::send_bytes(vec![0x03]); // Ctrl+C
     match &send_bytes_action {
         InteractAction::Send(data) => {
-            println!("   Send bytes: {:?} (Ctrl+C)", data);
+            println!("   Send bytes: {data:?} (Ctrl+C)");
         }
         _ => unreachable!(),
     }
 
     // InteractAction::Stop - stop the interaction
     let stop_action = InteractAction::Stop;
-    println!("   Stop: {:?}", stop_action);
+    println!("   Stop: {stop_action:?}");
 
     // InteractAction::Error - stop with an error message
     let error_action = InteractAction::Error("Something went wrong".into());
     match &error_action {
-        InteractAction::Error(msg) => println!("   Error: {:?}", msg),
+        InteractAction::Error(msg) => println!("   Error: {msg:?}"),
         _ => unreachable!(),
     }
 

@@ -97,7 +97,7 @@ impl TracingConfig {
 
     /// Set the sampling ratio.
     #[must_use]
-    pub fn with_sampling_ratio(mut self, ratio: f64) -> Self {
+    pub const fn with_sampling_ratio(mut self, ratio: f64) -> Self {
         self.sampling_ratio = ratio.clamp(0.0, 1.0);
         self
     }

@@ -602,8 +602,7 @@ impl PatternSelector {
     pub fn patterns_for(&self, id: SessionId) -> &[Pattern] {
         self.patterns
             .get(&id)
-            .map(Vec::as_slice)
-            .unwrap_or(&self.default_patterns)
+            .map_or(&self.default_patterns, Vec::as_slice)
     }
 
     /// Execute the select operation on a multi-session manager.
@@ -629,7 +628,7 @@ impl PatternSelector {
             Pin<Box<dyn Future<Output = (SessionId, Result<(Match, usize)>)> + Send>>,
         > = FuturesUnordered::new();
 
-        for &id in manager.session_ids().iter() {
+        for &id in &manager.session_ids() {
             let patterns = self.patterns_for(id);
             if patterns.is_empty() {
                 continue;

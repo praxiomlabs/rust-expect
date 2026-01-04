@@ -106,7 +106,7 @@ fn detect_encoding_from_env_works() {
     // This should return something reasonable based on environment
     let encoding = detect_encoding_from_env();
     // Just verify it doesn't panic and returns a valid encoding
-    assert!(!format!("{:?}", encoding).is_empty());
+    assert!(!format!("{encoding:?}").is_empty());
 }
 
 #[test]

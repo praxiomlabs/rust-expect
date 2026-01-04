@@ -28,14 +28,14 @@ fn bench_literal_matching(c: &mut Criterion) {
         // rust-expect
         group.bench_with_input(BenchmarkId::new("rust_expect", name), haystack, |b, h| {
             let pattern = rust_expect::Pattern::literal("$");
-            b.iter(|| pattern.matches(black_box(h)))
+            b.iter(|| pattern.matches(black_box(h)));
         });
 
         // expectrl (uses Contains which is similar)
         group.bench_with_input(BenchmarkId::new("expectrl", name), haystack, |b, h| {
             use expectrl::Needle;
             let needle: &str = "$";
-            b.iter(|| needle.check(black_box(h.as_bytes()), false))
+            b.iter(|| needle.check(black_box(h.as_bytes()), false));
         });
     }
 
@@ -60,14 +60,14 @@ fn bench_regex_matching(c: &mut Criterion) {
         // rust-expect
         group.bench_with_input(BenchmarkId::new("rust_expect", name), &text, |b, t| {
             let p = rust_expect::Pattern::regex(pattern).unwrap();
-            b.iter(|| p.matches(black_box(*t)))
+            b.iter(|| p.matches(black_box(*t)));
         });
 
         // expectrl (Regex is a tuple struct)
         group.bench_with_input(BenchmarkId::new("expectrl", name), &text, |b, t| {
             use expectrl::Needle;
             let re = expectrl::Regex(pattern);
-            b.iter(|| re.check(black_box(t.as_bytes()), false))
+            b.iter(|| re.check(black_box(t.as_bytes()), false));
         });
     }
 
@@ -98,7 +98,7 @@ fn bench_buffer_operations(c: &mut Criterion) {
                         buffer.append(black_box(&data));
                     }
                     buffer
-                })
+                });
             },
         );
 
@@ -111,7 +111,7 @@ fn bench_buffer_operations(c: &mut Criterion) {
                     buffer.extend_from_slice(black_box(&data));
                 }
                 buffer
-            })
+            });
         });
     }
 
@@ -121,7 +121,7 @@ fn bench_buffer_operations(c: &mut Criterion) {
         let data: Vec<u8> = (0..3000).map(|i| (i % 256) as u8).collect();
         buffer.append(&data);
         buffer.append(b"needle_here");
-        b.iter(|| buffer.find(black_box(b"needle_here")))
+        b.iter(|| buffer.find(black_box(b"needle_here")));
     });
 
     group.finish();
@@ -146,10 +146,10 @@ fn bench_multi_pattern(c: &mut Criterion) {
             |b, &n| {
                 let mut set = rust_expect::expect::PatternSet::new();
                 for i in 0..n {
-                    set.add(rust_expect::Pattern::literal(&format!("nomatch{i}")));
+                    set.add(rust_expect::Pattern::literal(format!("nomatch{i}")));
                 }
                 set.add(rust_expect::Pattern::literal("$")); // Last pattern matches
-                b.iter(|| set.find_match(black_box(haystack)))
+                b.iter(|| set.find_match(black_box(haystack)));
             },
         );
 
@@ -157,7 +157,7 @@ fn bench_multi_pattern(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("expectrl_iter", count), &count, |b, &n| {
             use expectrl::Needle;
             let patterns: Vec<String> = (0..n).map(|i| format!("nomatch{i}")).collect();
-            let patterns_ref: Vec<&str> = patterns.iter().map(|s| s.as_str()).collect();
+            let patterns_ref: Vec<&str> = patterns.iter().map(std::string::String::as_str).collect();
             b.iter(|| {
                 for p in &patterns_ref {
                     if let Ok(matches) = p.check(black_box(haystack.as_bytes()), false) {
@@ -173,7 +173,7 @@ fn bench_multi_pattern(c: &mut Criterion) {
                     }
                 }
                 None
-            })
+            });
         });
     }
 
@@ -194,14 +194,14 @@ fn bench_allocation_patterns(c: &mut Criterion) {
             let p1 = rust_expect::Pattern::literal("$");
             let p2 = rust_expect::Pattern::regex(r"\w+@\w+").unwrap();
             black_box((p1, p2))
-        })
+        });
     });
 
     group.bench_function("expectrl_regex_create", |b| {
         b.iter(|| {
             let re = expectrl::Regex(r"\w+@\w+");
             black_box(re)
-        })
+        });
     });
 
     group.finish();

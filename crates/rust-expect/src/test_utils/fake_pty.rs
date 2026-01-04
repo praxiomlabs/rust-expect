@@ -35,7 +35,7 @@ impl FakePty {
 
     /// Queue data to be read.
     pub fn queue_input(&self, data: &[u8]) {
-        let mut buf = self.read_buf.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buf = self.read_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         buf.data.extend(data);
     }
 
@@ -46,7 +46,7 @@ impl FakePty {
 
     /// Get data that was written.
     #[must_use] pub fn take_output(&self) -> Vec<u8> {
-        let mut buf = self.write_buf.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buf = self.write_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         buf.data.drain(..).collect()
     }
 
@@ -58,25 +58,25 @@ impl FakePty {
     /// Check if there's pending output.
     #[must_use]
     pub fn has_output(&self) -> bool {
-        !self.write_buf.lock().unwrap_or_else(|e| e.into_inner()).data.is_empty()
+        !self.write_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner).data.is_empty()
     }
 
     /// Check if there's pending input.
     #[must_use]
     pub fn has_input(&self) -> bool {
-        !self.read_buf.lock().unwrap_or_else(|e| e.into_inner()).data.is_empty()
+        !self.read_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner).data.is_empty()
     }
 
     /// Close the PTY.
     pub fn close(&self) {
-        self.read_buf.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
-        self.write_buf.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
+        self.read_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner).closed = true;
+        self.write_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner).closed = true;
     }
 
     /// Check if closed.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.read_buf.lock().unwrap_or_else(|e| e.into_inner()).closed
+        self.read_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner).closed
     }
 
     /// Simulate terminal output (what the "process" sends).
@@ -109,7 +109,7 @@ impl Default for FakePty {
 
 impl Read for FakePty {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let mut shared = self.read_buf.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shared = self.read_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if shared.closed && shared.data.is_empty() {
             return Ok(0);
         }
@@ -126,7 +126,7 @@ impl Read for FakePty {
 
 impl Write for FakePty {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut shared = self.write_buf.lock().unwrap_or_else(|e| e.into_inner());
+        let mut shared = self.write_buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if shared.closed {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "PTY closed"));
         }

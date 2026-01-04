@@ -123,7 +123,7 @@ pub enum SshSessionState {
 
 #[cfg(feature = "ssh")]
 mod russh_impl {
-    use super::*;
+    use super::{Arc, AuthMethod, HostKeyVerification, SshCredentials, SshError};
     use russh::client;
     use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey};
     use std::path::Path;
@@ -949,7 +949,7 @@ impl std::fmt::Debug for SshSession {
 impl SshSession {
     /// Create a new session.
     #[must_use]
-    pub fn new(config: SshConfig) -> Self {
+    pub const fn new(config: SshConfig) -> Self {
         Self {
             config,
             state: SshSessionState::Disconnected,
@@ -990,10 +990,7 @@ impl SshSession {
         self.state = SshSessionState::Connecting;
 
         // Create the russh client config
-        let ssh_config = Arc::new(russh::client::Config {
-            // Use defaults for now, can be customized later
-            ..Default::default()
-        });
+        let ssh_config = Arc::new(Default::default());
 
         // Create the handler
         let handler = russh_impl::SshClientHandler {
@@ -1066,20 +1063,17 @@ impl SshSession {
     /// Panics if called outside of a tokio runtime context.
     pub fn connect(&mut self) -> crate::error::Result<()> {
         // Try to get the current runtime handle
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                // We're in an async context, use block_in_place
-                tokio::task::block_in_place(|| handle.block_on(self.connect_async()))
-            }
-            Err(_) => {
-                // No runtime, create a temporary one
-                let rt = tokio::runtime::Runtime::new().map_err(|e| {
-                    crate::error::ExpectError::Ssh(SshError::Session {
-                        reason: format!("Failed to create runtime: {e}"),
-                    })
-                })?;
-                rt.block_on(self.connect_async())
-            }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            // We're in an async context, use block_in_place
+            tokio::task::block_in_place(|| handle.block_on(self.connect_async()))
+        } else {
+            // No runtime, create a temporary one
+            let rt = tokio::runtime::Runtime::new().map_err(|e| {
+                crate::error::ExpectError::Ssh(SshError::Session {
+                    reason: format!("Failed to create runtime: {e}"),
+                })
+            })?;
+            rt.block_on(self.connect_async())
         }
     }
 
@@ -1104,7 +1098,7 @@ impl SshSession {
     ///
     /// This is useful for advanced operations like opening channels.
     #[must_use]
-    pub fn handle(&self) -> Option<&russh::client::Handle<russh_impl::SshClientHandler>> {
+    pub const fn handle(&self) -> Option<&russh::client::Handle<russh_impl::SshClientHandler>> {
         self.handle.as_ref()
     }
 

@@ -116,7 +116,7 @@ pub struct PiiMatch {
 impl PiiMatch {
     /// Create a new PII match for a built-in type.
     #[must_use]
-    pub fn new(pii_type: PiiType, start: usize, end: usize, text: String, confidence: f32) -> Self {
+    pub const fn new(pii_type: PiiType, start: usize, end: usize, text: String, confidence: f32) -> Self {
         Self {
             pii_type,
             start,
@@ -279,7 +279,7 @@ impl CustomPattern {
 
     /// Get the confidence score.
     #[must_use]
-    pub fn confidence(&self) -> f32 {
+    pub const fn confidence(&self) -> f32 {
         self.confidence
     }
 
@@ -339,7 +339,7 @@ impl PiiDetector {
 
     /// Create a detector with only custom patterns (no built-in types).
     #[must_use]
-    pub fn custom_only() -> Self {
+    pub const fn custom_only() -> Self {
         Self {
             enabled_types: Vec::new(),
             min_confidence: 0.5,
@@ -434,7 +434,7 @@ impl PiiDetector {
     /// Get the names of all registered custom patterns.
     #[must_use]
     pub fn custom_pattern_names(&self) -> Vec<&str> {
-        self.custom_patterns.iter().map(|p| p.name()).collect()
+        self.custom_patterns.iter().map(CustomPattern::name).collect()
     }
 
     /// Detect PII in the given text.

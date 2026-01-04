@@ -1,6 +1,6 @@
 //! Zero-configuration example.
 //!
-//! This example demonstrates the auto_config module for automatic
+//! This example demonstrates the `auto_config` module for automatic
 //! detection of terminal settings, shell types, and prompts.
 //!
 //! Run with: `cargo run --example zero_config`
@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
     println!("1. Detecting default shell...");
 
     let shell = default_shell();
-    println!("   Default shell: {}", shell);
+    println!("   Default shell: {shell}");
 
     // Example 2: Shell type detection from path
     println!("\n2. Detecting shell type from path...");
@@ -35,13 +35,13 @@ async fn main() -> Result<()> {
 
     for (path, _expected) in shell_types {
         let detected = detect_from_path(path);
-        println!("   {} -> {:?}", path, detected);
+        println!("   {path} -> {detected:?}");
     }
 
     // Example 3: Detect shell from environment
     println!("\n3. Detecting shell from environment...");
     let env_shell = detect_shell();
-    println!("   Current shell: {:?}", env_shell);
+    println!("   Current shell: {env_shell:?}");
 
     // Example 4: Locale detection
     println!("\n4. Detecting locale...");
@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     let locale_vars = ["LANG", "LC_ALL", "LC_CTYPE"];
     for var in locale_vars {
         if let Ok(value) = std::env::var(var) {
-            println!("   {}: {}", var, value);
+            println!("   {var}: {value}");
         }
     }
 
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
     ];
 
     for (prompt, name) in prompts {
-        println!("   '{}' - {}", prompt, name);
+        println!("   '{prompt}' - {name}");
     }
 
     // Example 7: Automatic session setup
@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
 
     // Line ending detection
     let line_ending = if cfg!(windows) { "CRLF" } else { "LF" };
-    println!("   Expected line ending: {}", line_ending);
+    println!("   Expected line ending: {line_ending}");
 
     // Example 10: Prompt configuration
     println!("\n10. Prompt configuration...");

@@ -229,7 +229,7 @@ impl SshChannelStream {
 
     /// Check if EOF has been received.
     #[must_use]
-    pub fn is_eof(&self) -> bool {
+    pub const fn is_eof(&self) -> bool {
         self.eof_received
     }
 

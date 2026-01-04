@@ -8,8 +8,6 @@
 //! Note: This example requires a real SSH server to connect to.
 //! Modify the connection parameters to match your environment.
 
-#[cfg(feature = "ssh")]
-use std::time::Duration;
 
 fn main() {
     println!("rust-expect SSH Session Example");

@@ -325,7 +325,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///     Ok(())
     /// }
     /// ```
-    pub fn interact(&self) -> InteractBuilder<'_, T>
+    #[must_use] pub fn interact(&self) -> InteractBuilder<'_, T>
     where
         T: 'static,
     {
@@ -479,7 +479,7 @@ impl Session<AsyncPty> {
         let spawner = PtySpawner::with_config(pty_config);
 
         // Convert &[&str] to Vec<String> for the spawner
-        let args_owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let args_owned: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
 
         // Spawn the process
         let handle = spawner.spawn(command, &args_owned).await?;
@@ -489,7 +489,7 @@ impl Session<AsyncPty> {
             .map_err(|e| ExpectError::io_context("creating async PTY wrapper", e))?;
 
         // Create the session
-        let mut session = Session::new(async_pty, config);
+        let mut session = Self::new(async_pty, config);
         session.state = SessionState::Running;
 
         Ok(session)

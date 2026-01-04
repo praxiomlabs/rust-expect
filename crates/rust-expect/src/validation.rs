@@ -234,7 +234,7 @@ mod tests {
     fn test_validate_command_with_args() {
         let opts = ValidationOptions::strict();
 
-        assert!(validate_command_with_args("/bin/echo", &["hello", "world"], &opts).is_ok());
-        assert!(validate_command_with_args("/bin/echo", &["hello\0world"], &opts).is_err());
+        assert!(validate_command_with_args("/bin/echo", ["hello", "world"], &opts).is_ok());
+        assert!(validate_command_with_args("/bin/echo", ["hello\0world"], &opts).is_err());
     }
 }

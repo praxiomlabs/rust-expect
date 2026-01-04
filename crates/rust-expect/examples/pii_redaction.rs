@@ -41,7 +41,7 @@ fn run_examples() {
 
     for text in texts {
         let has_pii = contains_pii(text);
-        println!("   '{}' -> PII: {}", text, has_pii);
+        println!("   '{text}' -> PII: {has_pii}");
     }
 
     // Example 2: Quick redaction
@@ -49,16 +49,16 @@ fn run_examples() {
 
     let sensitive = "Contact: john@example.com, SSN: 123-45-6789";
     let redacted = redact(sensitive);
-    println!("   Original: {}", sensitive);
-    println!("   Redacted: {}", redacted);
+    println!("   Original: {sensitive}");
+    println!("   Redacted: {redacted}");
 
     // Example 3: Asterisk redaction
     println!("\n3. Asterisk style redaction...");
 
     let card_info = "Credit card: 4111-1111-1111-1111";
     let masked = redact_asterisks(card_info);
-    println!("   Original: {}", card_info);
-    println!("   Masked:   {}", masked);
+    println!("   Original: {card_info}");
+    println!("   Masked:   {masked}");
 
     // Example 4: PII Detector
     println!("\n4. PII Detector with match details...");
@@ -67,7 +67,7 @@ fn run_examples() {
     let text = "User data: SSN 123-45-6789, email test@test.com";
 
     if detector.contains_pii(text) {
-        println!("   Found PII in: '{}'", text);
+        println!("   Found PII in: '{text}'");
         // The detector can identify specific PII types
         println!("   Types detected: SSN, Email");
     }
@@ -78,7 +78,7 @@ fn run_examples() {
     // Default redactor with placeholders
     let redactor = PiiRedactor::new();
     let sample = "Email: admin@company.com, Phone: 555-1234";
-    println!("   Original: {}", sample);
+    println!("   Original: {sample}");
     println!("   Default:  {}", redactor.redact(sample));
 
     // Redactor with asterisks
@@ -97,7 +97,7 @@ fn run_examples() {
     ];
 
     for (pii_type, description) in pii_types {
-        println!("   {:?}: {}", pii_type, description);
+        println!("   {pii_type:?}: {description}");
     }
 
     // Example 7: Real-world log sanitization
@@ -115,20 +115,20 @@ fn run_examples() {
     println!("   Sanitized logs:");
     for entry in log_entries {
         let safe = redactor.redact(entry);
-        println!("   {}", safe);
+        println!("   {safe}");
     }
 
     // Example 8: Integration with session output
     println!("\n8. Session output sanitization...");
 
     // Simulate terminal output that might contain PII
-    let terminal_output = r#"
+    let terminal_output = r"
         Database query results:
         - User: john.doe@company.com
         - SSN: 555-12-3456
         - Card ending: ****1234
         - Balance: $1,234.56
-    "#;
+    ";
 
     let safe_output = redactor.redact(terminal_output);
     println!("   Sanitized output would hide SSN and email");
@@ -171,11 +171,11 @@ fn demonstrate_streaming_redaction() {
 
     for (i, chunk) in chunks.iter().enumerate() {
         let output = streaming.process(chunk);
-        if !output.is_empty() {
+        if output.is_empty() {
+            println!("   Chunk {}: Buffering (waiting for boundary)", i + 1);
+        } else {
             println!("   Chunk {}: Emitted {} chars", i + 1, output.len());
             combined_output.push_str(&output);
-        } else {
-            println!("   Chunk {}: Buffering (waiting for boundary)", i + 1);
         }
     }
 
@@ -189,7 +189,7 @@ fn demonstrate_streaming_redaction() {
     println!();
     println!("   Combined redacted output:");
     for line in combined_output.lines() {
-        println!("     {}", line);
+        println!("     {line}");
     }
 
     // Verify PII was redacted even when split across chunks

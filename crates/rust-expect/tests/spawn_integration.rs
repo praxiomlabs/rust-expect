@@ -216,7 +216,7 @@ async fn spawn_has_pid() {
         .expect("Failed to spawn true");
 
     let pid = session.pid();
-    assert!(pid > 0, "Expected valid PID, got {}", pid);
+    assert!(pid > 0, "Expected valid PID, got {pid}");
 }
 
 /// Test spawn with custom configuration.

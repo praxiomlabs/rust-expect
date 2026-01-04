@@ -40,7 +40,7 @@ fn lf_normalization() {
     assert_eq!(normalized, lf_text);
 }
 
-/// Test SessionBuilder with Unix-specific configuration.
+/// Test `SessionBuilder` with Unix-specific configuration.
 #[test]
 fn session_builder_unix() {
     let builder = SessionBuilder::new()
@@ -133,7 +133,7 @@ fn dialog_unix_prompts() {
     assert_eq!(dialog.name, "unix_shell");
 }
 
-/// Test QuickSession Unix helpers.
+/// Test `QuickSession` Unix helpers.
 #[test]
 fn quick_session_unix() {
     // bash helper

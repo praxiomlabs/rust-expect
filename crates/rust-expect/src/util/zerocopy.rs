@@ -258,7 +258,7 @@ pub struct VecWriter {
 impl VecWriter {
     /// Create a new vectored writer.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             chunks: Vec::new(),
             total_len: 0,
@@ -294,13 +294,13 @@ impl VecWriter {
 
     /// Get the total length across all chunks.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.total_len
     }
 
     /// Check if the writer is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.total_len == 0
     }
 
@@ -373,7 +373,7 @@ impl<'a> BorrowedView<'a> {
 
     /// Get the length of the view.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match self {
             Self::Borrowed(b) => b.len(),
             Self::Owned(b) => b.len(),
@@ -382,7 +382,7 @@ impl<'a> BorrowedView<'a> {
 
     /// Check if the view is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
@@ -407,7 +407,7 @@ impl<'a> BorrowedView<'a> {
     }
 }
 
-impl<'a> Deref for BorrowedView<'a> {
+impl Deref for BorrowedView<'_> {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
@@ -415,7 +415,7 @@ impl<'a> Deref for BorrowedView<'a> {
     }
 }
 
-impl<'a> AsRef<[u8]> for BorrowedView<'a> {
+impl AsRef<[u8]> for BorrowedView<'_> {
     fn as_ref(&self) -> &[u8] {
         self.as_slice()
     }
@@ -486,7 +486,7 @@ pub struct ReadPool {
 impl ReadPool {
     /// Create a new read pool.
     #[must_use]
-    pub fn new(buffer_size: usize) -> Self {
+    pub const fn new(buffer_size: usize) -> Self {
         Self {
             buffers: Vec::new(),
             buffer_size,

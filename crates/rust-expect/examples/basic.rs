@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
 
     // Get initial dimensions from config
     let (cols, rows) = session.config().dimensions;
-    println!("   Initial dimensions: {}x{}", cols, rows);
+    println!("   Initial dimensions: {cols}x{rows}");
 
     // Resize the terminal
     session.resize_pty(120, 40).await?;

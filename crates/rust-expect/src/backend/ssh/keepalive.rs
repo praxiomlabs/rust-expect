@@ -166,7 +166,7 @@ pub struct KeepaliveState {
 impl KeepaliveState {
     /// Create new state.
     #[must_use]
-    pub fn new(config: KeepaliveConfig) -> Self {
+    pub const fn new(config: KeepaliveConfig) -> Self {
         Self {
             config,
             last_sent: None,
@@ -222,8 +222,7 @@ impl KeepaliveState {
         }
 
         self.pending_since
-            .map(|t| t.elapsed() >= self.config.response_timeout)
-            .unwrap_or(false)
+            .is_some_and(|t| t.elapsed() >= self.config.response_timeout)
     }
 
     /// Record sending a keepalive.
@@ -368,7 +367,7 @@ pub struct KeepaliveManager {
 impl KeepaliveManager {
     /// Create new manager.
     #[must_use]
-    pub fn new(config: KeepaliveConfig) -> Self {
+    pub const fn new(config: KeepaliveConfig) -> Self {
         Self {
             state: KeepaliveState::new(config),
         }

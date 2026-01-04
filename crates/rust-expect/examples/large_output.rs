@@ -73,9 +73,9 @@ async fn main() -> Result<()> {
     for i in 1..=5 {
         let amount = 200; // Try to acquire 200 bytes
         if backpressure.try_acquire(amount) {
-            println!("   Request {}: acquired {} bytes", i, amount);
+            println!("   Request {i}: acquired {amount} bytes");
         } else {
-            println!("   Request {}: buffer full", i);
+            println!("   Request {i}: buffer full");
         }
     }
 
@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
             Err(_) => break,
         }
     }
-    println!("   Total chunks: {}", chunks_received);
+    println!("   Total chunks: {chunks_received}");
 
     // Wait for the final prompt
     session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;

@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     let db1 = group.add("database-1");
 
     println!("   Created group '{}' with {} sessions", group.name(), group.len());
-    println!("   Sessions: web1={}, web2={}, db1={}", web1, web2, db1);
+    println!("   Sessions: web1={web1}, web2={web2}, db1={db1}");
 
     // Mark a session as inactive
     group.set_active(db1, false);
@@ -82,7 +82,7 @@ async fn main() -> Result<()> {
     group.add("session-c");
 
     group.for_each(|id, label| {
-        println!("   Session {}: {}", id, label);
+        println!("   Session {id}: {label}");
     });
 
     // Example 6: Real concurrent sessions with MultiSessionManager
@@ -128,12 +128,12 @@ async fn main() -> Result<()> {
     let id2 = multi_manager.add(s2, "shell-2");
 
     println!("   Added {} sessions to manager", multi_manager.len());
-    println!("   Session IDs: {}, {}", id1, id2);
+    println!("   Session IDs: {id1}, {id2}");
 
     // Get labels
     let label1 = multi_manager.label(id1).await;
     let label2 = multi_manager.label(id2).await;
-    println!("   Labels: {:?}, {:?}", label1, label2);
+    println!("   Labels: {label1:?}, {label2:?}");
 
     // Wait for prompts on all sessions
     let results = multi_manager.expect_all(Pattern::regex(r"[$#>]").unwrap()).await?;

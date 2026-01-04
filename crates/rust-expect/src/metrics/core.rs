@@ -259,7 +259,7 @@ impl MetricsRegistry {
 
     /// Get or create a counter.
     #[must_use] pub fn counter(&self, name: &str) -> Arc<Counter> {
-        let mut counters = self.counters.lock().unwrap_or_else(|e| e.into_inner());
+        let mut counters = self.counters.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         counters
             .entry(name.to_string())
             .or_insert_with(|| Arc::new(Counter::new()))
@@ -268,7 +268,7 @@ impl MetricsRegistry {
 
     /// Get or create a gauge.
     #[must_use] pub fn gauge(&self, name: &str) -> Arc<Gauge> {
-        let mut gauges = self.gauges.lock().unwrap_or_else(|e| e.into_inner());
+        let mut gauges = self.gauges.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         gauges
             .entry(name.to_string())
             .or_insert_with(|| Arc::new(Gauge::new()))
@@ -277,7 +277,7 @@ impl MetricsRegistry {
 
     /// Get or create a histogram.
     #[must_use] pub fn histogram(&self, name: &str) -> Arc<Histogram> {
-        let mut histograms = self.histograms.lock().unwrap_or_else(|e| e.into_inner());
+        let mut histograms = self.histograms.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         histograms
             .entry(name.to_string())
             .or_insert_with(|| Arc::new(Histogram::new()))

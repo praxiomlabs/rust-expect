@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Benchmark
 
 #[cfg(feature = "screen")]
 mod screen_benches {
-    use super::*;
+    use super::{BenchmarkId, Criterion, black_box};
     use rust_expect::screen::{ScreenBuffer, AnsiParser, ScreenQueryExt};
 
     /// Helper to write a string to the buffer character by character.
@@ -17,7 +17,7 @@ mod screen_benches {
     pub fn bench_screen_buffer_write(c: &mut Criterion) {
         let mut group = c.benchmark_group("screen_buffer_write");
 
-        for size in [(80, 24), (120, 40), (200, 50)].iter() {
+        for size in &[(80, 24), (120, 40), (200, 50)] {
             group.bench_with_input(
                 BenchmarkId::from_parameter(format!("{}x{}", size.0, size.1)),
                 size,
@@ -30,7 +30,7 @@ mod screen_benches {
                             }
                         }
                         black_box(buffer)
-                    })
+                    });
                 },
             );
         }
@@ -52,7 +52,7 @@ mod screen_benches {
                     buf.scroll_up(1);
                 }
                 black_box(buf)
-            })
+            });
         });
     }
 
@@ -66,15 +66,15 @@ mod screen_benches {
         write_str(&mut buffer, "Last line with some text");
 
         c.bench_function("screen_query_find", |b| {
-            b.iter(|| buffer.query().find(black_box("needle")))
+            b.iter(|| buffer.query().find(black_box("needle")));
         });
 
         c.bench_function("screen_query_contains", |b| {
-            b.iter(|| buffer.query().contains(black_box("Last line")))
+            b.iter(|| buffer.query().contains(black_box("Last line")));
         });
 
         c.bench_function("screen_query_text", |b| {
-            b.iter(|| buffer.query().text())
+            b.iter(|| buffer.query().text());
         });
     }
 
@@ -89,7 +89,7 @@ mod screen_benches {
                 for byte in simple_text.bytes() {
                     black_box(parser.parse(byte));
                 }
-            })
+            });
         });
 
         // Text with colors
@@ -100,7 +100,7 @@ mod screen_benches {
                 for byte in colored_text.bytes() {
                     black_box(parser.parse(byte));
                 }
-            })
+            });
         });
 
         // Cursor movement
@@ -111,7 +111,7 @@ mod screen_benches {
                 for byte in cursor_seq.bytes() {
                     black_box(parser.parse(byte));
                 }
-            })
+            });
         });
 
         group.finish();

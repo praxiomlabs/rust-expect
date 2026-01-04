@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     ];
 
     for mode in terminal_modes {
-        println!("   Mode: {:?}", mode);
+        println!("   Mode: {mode:?}");
     }
 
     // Example 3: Terminal size
@@ -139,7 +139,7 @@ async fn main() -> Result<()> {
     ];
 
     for (cmd, description) in commands {
-        println!("   {} -> {}", cmd, description);
+        println!("   {cmd} -> {description}");
         session.send_line(cmd).await?;
         // Wait for prompt to return
         session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2)).await?;

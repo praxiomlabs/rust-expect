@@ -258,7 +258,7 @@ fn playback_speed_realtime() {
 #[test]
 fn playback_speed_instant() {
     let speed = PlaybackSpeed::Instant;
-    assert!(!format!("{:?}", speed).is_empty());
+    assert!(!format!("{speed:?}").is_empty());
 }
 
 #[test]

@@ -195,7 +195,7 @@ is feature-complete and ready for initial release. Key achievements:
 
 | Task | Status | Description |
 |------|--------|-------------|
-| User guide | 🟡 Pending | Comprehensive getting started guide |
+| User guide | 🟢 Done | Comprehensive getting started guide (see docs/GUIDE.md) |
 | Migration guide | 🟢 Done | From pexpect/expectrl (see MIGRATION.md) |
 | API reference | 🟢 Done | Generated rustdoc with examples |
 

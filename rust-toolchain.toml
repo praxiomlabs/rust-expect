@@ -1,7 +1,7 @@
-# rust-expect requires Rust 1.85+ for Edition 2024 support
+# rust-expect requires Rust 1.88+ for Edition 2024 and let chains support
 # https://doc.rust-lang.org/edition-guide/rust-2024/index.html
 
 [toolchain]
-channel = "1.85"
+channel = "1.88"
 components = ["rustfmt", "clippy", "rust-docs", "rust-src"]
 profile = "default"

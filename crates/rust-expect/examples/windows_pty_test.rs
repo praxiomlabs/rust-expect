@@ -17,7 +17,7 @@ fn main() {
 use std::time::Duration;
 
 #[cfg(windows)]
-use rust_pty::{PtyConfig, WindowsPtySystem};
+use rust_pty::{PtyConfig, PtySystem, WindowsPtySystem};
 #[cfg(windows)]
 use tokio::io::AsyncReadExt;
 

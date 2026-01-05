@@ -158,7 +158,7 @@ cargo run --example ssh --features ssh
 
 ## Minimum Supported Rust Version
 
-This project requires **Rust 1.85** or later.
+This project requires **Rust 1.88** or later.
 
 ## License
 

@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        rust: [stable, beta, "1.85"]
+        rust: [stable, beta, "1.88"]
         exclude:
           # Windows beta can be flaky, focus on stable and MSRV
           - os: windows-latest
@@ -57,9 +57,7 @@ jobs:
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
-        # Exclude ssh feature on Windows: pageant 0.2.0 requires Rust 1.88 for let chains
-        # but declares MSRV 1.85. Track: https://github.com/warp-tech/russh/issues
-        run: cargo test --workspace --features "mock,screen,pii-redaction,metrics,test-utils,legacy-encoding"
+        run: cargo test --workspace --all-features
         env:
           # Windows may need longer timeouts for PTY operations
           RUST_TEST_TIME_UNIT: 60000
@@ -122,7 +120,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85"
+          toolchain: "1.88"
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -166,7 +164,6 @@ jobs:
           fi
 
   # Windows-specific feature tests
-  # Note: ssh feature excluded - pageant 0.2.0 requires Rust 1.88 for let chains
   windows-features:
     name: Windows Feature Check
     runs-on: windows-latest
@@ -174,10 +171,12 @@ jobs:
       matrix:
         features:
           - ""
+          - "ssh"
           - "mock"
           - "screen"
           - "pii-redaction"
           - "metrics"
+          - "full"
     steps:
       - uses: actions/checkout@v6
 

@@ -236,7 +236,8 @@ impl PtySpawner {
                 unsafe {
                     libc::close(master_fd);
                     libc::setsid();
-                    libc::ioctl(slave_fd, libc::TIOCSCTTY, 0);
+                    // Cast TIOCSCTTY to c_ulong for macOS compatibility (u32 -> u64)
+                    libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::c_ulong, 0);
 
                     libc::dup2(slave_fd, 0);
                     libc::dup2(slave_fd, 1);
@@ -389,7 +390,9 @@ impl PtyHandle {
         // SAFETY: master_fd is a valid PTY file descriptor stored in self.
         // TIOCSWINSZ is a valid ioctl command for PTYs that sets the window size.
         // winsize is a valid pointer to a properly initialized struct on the stack.
-        let result = unsafe { libc::ioctl(self.master_fd, libc::TIOCSWINSZ, &winsize) };
+        // Cast to c_ulong for macOS compatibility (u32 -> u64).
+        let result =
+            unsafe { libc::ioctl(self.master_fd, libc::TIOCSWINSZ as libc::c_ulong, &winsize) };
 
         if result != 0 {
             Err(ExpectError::Io(io::Error::last_os_error()))
@@ -560,7 +563,14 @@ impl AsyncPty {
         };
 
         // SAFETY: The fd is valid and TIOCSWINSZ is a valid ioctl for PTYs.
-        let result = unsafe { libc::ioctl(*self.inner.get_ref(), libc::TIOCSWINSZ, &winsize) };
+        // Cast to c_ulong for macOS compatibility (u32 -> u64).
+        let result = unsafe {
+            libc::ioctl(
+                *self.inner.get_ref(),
+                libc::TIOCSWINSZ as libc::c_ulong,
+                &winsize,
+            )
+        };
 
         if result != 0 {
             Err(ExpectError::Io(io::Error::last_os_error()))

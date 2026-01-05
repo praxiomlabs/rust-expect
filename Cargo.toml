@@ -148,6 +148,8 @@ redundant_pub_crate = "allow"
 match_same_arms = "allow"
 # Allow missing fields in manual Debug impls (intentional for large structs)
 missing_fields_in_debug = "allow"
+# False positive in clippy.toml parsing
+literal_string_with_formatting_args = "allow"
 
 # Release profile optimizations
 [profile.release]

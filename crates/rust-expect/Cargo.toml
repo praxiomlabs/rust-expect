@@ -74,6 +74,10 @@ tracing-subscriber = { workspace = true, optional = true }
 # Prometheus metrics (optional)
 prometheus = { workspace = true, optional = true }
 
+# Windows-specific dependencies
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
 criterion.workspace = true

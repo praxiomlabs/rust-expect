@@ -246,6 +246,7 @@ pub fn liveness_check() -> HealthCheckResult {
 /// Check if a process is alive by PID.
 #[must_use]
 #[cfg(unix)]
+#[allow(unsafe_code)]
 pub fn process_alive(pid: i32) -> bool {
     // Send signal 0 to check if process exists
     unsafe { libc::kill(pid, 0) == 0 }
@@ -253,13 +254,50 @@ pub fn process_alive(pid: i32) -> bool {
 
 /// Check if a process is alive by PID.
 ///
-/// On non-Unix platforms (like Windows), this currently returns `false` as the
-/// implementation requires platform-specific APIs. Future versions may add
-/// proper Windows support via `OpenProcess` and handle checking.
+/// On Windows, this uses `OpenProcess` with `PROCESS_SYNCHRONIZE` access and
+/// `WaitForSingleObject` with a zero timeout to check process state.
 #[must_use]
-#[cfg(not(unix))]
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn process_alive(pid: i32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    };
+
+    if pid <= 0 {
+        return false;
+    }
+
+    // SAFETY: OpenProcess is safe to call with valid parameters.
+    // We use PROCESS_SYNCHRONIZE which is the minimum access needed for WaitForSingleObject.
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid as u32) };
+
+    if handle.is_null() {
+        // Process doesn't exist or we don't have access
+        return false;
+    }
+
+    // SAFETY: WaitForSingleObject is safe with a valid handle and timeout.
+    // A timeout of 0 returns immediately: WAIT_TIMEOUT means still running,
+    // WAIT_OBJECT_0 (0) means the process has terminated.
+    let result = unsafe { WaitForSingleObject(handle, 0) };
+
+    // SAFETY: CloseHandle is safe with a valid handle.
+    unsafe {
+        CloseHandle(handle);
+    }
+
+    result == WAIT_TIMEOUT
+}
+
+/// Check if a process is alive by PID.
+///
+/// On non-Unix, non-Windows platforms, this returns `false` as there is no
+/// portable way to check process liveness.
+#[must_use]
+#[cfg(not(any(unix, windows)))]
 pub fn process_alive(_pid: i32) -> bool {
-    // TODO: Implement using OpenProcess on Windows
     false
 }
 

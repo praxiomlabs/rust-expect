@@ -44,9 +44,21 @@ allow = [
     "Unicode-DFS-2016",
     "CC0-1.0",
     "Unlicense",
+    "OpenSSL",
 ]
 # Confidence threshold for license detection
 confidence-threshold = 0.8
+# Exclude internal test utilities from license checks
+private = { ignore = true }
+exceptions = [
+    # Internal test utilities (not published)
+    { name = "test-echo", allow = ["MIT", "Apache-2.0"] },
+    { name = "test-hang", allow = ["MIT", "Apache-2.0"] },
+    { name = "test-output", allow = ["MIT", "Apache-2.0"] },
+    { name = "test-prompt", allow = ["MIT", "Apache-2.0"] },
+    { name = "test-signals", allow = ["MIT", "Apache-2.0"] },
+    { name = "test-timing", allow = ["MIT", "Apache-2.0"] },
+]
 
 # Clarify licenses that cargo-deny may not detect correctly
 [[licenses.clarify]]
@@ -68,8 +80,8 @@ wildcards = "allow"
 allow = []
 # Deny specific crates
 deny = [
-    # Use thiserror instead
-    { name = "anyhow", wrappers = [] },
+    # Use thiserror instead (allow as transitive dep from prost-derive)
+    { name = "anyhow", wrappers = ["prost-derive"] },
 ]
 # Skip duplicate dependency checks for dev-dependencies
 skip = []

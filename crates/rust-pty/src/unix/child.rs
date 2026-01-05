@@ -118,7 +118,7 @@ impl UnixPtyChild {
         // Use blocking waitpid in a spawn_blocking context
         let result = tokio::task::spawn_blocking(move || waitpid(Some(pid), WaitOptions::empty()))
             .await
-            .map_err(|e| PtyError::Wait(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| PtyError::Wait(io::Error::other(e)))?;
 
         match result {
             Ok(Some((_pid, wait_status))) => {

@@ -37,7 +37,7 @@ impl PtyTransport {
     }
 
     /// Set the process ID.
-    pub fn set_pid(&mut self, pid: u32) {
+    pub const fn set_pid(&mut self, pid: u32) {
         self.pid = Some(pid);
     }
 
@@ -143,7 +143,7 @@ impl PtySpawner {
     }
 
     /// Set the terminal dimensions.
-    pub fn set_dimensions(&mut self, cols: u16, rows: u16) {
+    pub const fn set_dimensions(&mut self, cols: u16, rows: u16) {
         self.config.dimensions = (cols, rows);
     }
 
@@ -195,8 +195,8 @@ impl PtySpawner {
 
             // Open PTY
             if libc::openpty(
-                &mut master,
-                &mut slave,
+                &raw mut master,
+                &raw mut slave,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -409,7 +409,7 @@ impl PtyHandle {
         // SAFETY: self.pid is a valid process ID from fork().
         // status is a valid pointer to a stack-allocated integer.
         // The options argument (0) means blocking wait, which is valid.
-        let result = unsafe { libc::waitpid(self.pid as i32, &mut status, 0) };
+        let result = unsafe { libc::waitpid(self.pid as i32, &raw mut status, 0) };
 
         if result == -1 {
             Err(ExpectError::Io(io::Error::last_os_error()))

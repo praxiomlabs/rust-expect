@@ -96,12 +96,12 @@ impl<W: AsyncWriteExt + Unpin + Send> Sender<W> {
     }
 
     /// Set the line ending.
-    pub fn set_line_ending(&mut self, ending: LineEnding) {
+    pub const fn set_line_ending(&mut self, ending: LineEnding) {
         self.line_ending = ending;
     }
 
     /// Set character delay for slow typing.
-    pub fn set_char_delay(&mut self, delay: Option<Duration>) {
+    pub const fn set_char_delay(&mut self, delay: Option<Duration>) {
         self.char_delay = delay;
     }
 
@@ -139,7 +139,7 @@ impl<W: AsyncWriteExt + Unpin + Send> Sender<W> {
     }
 
     /// Get mutable access to the underlying writer.
-    pub fn writer_mut(&mut self) -> &mut W {
+    pub const fn writer_mut(&mut self) -> &mut W {
         &mut self.writer
     }
 }

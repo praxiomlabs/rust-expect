@@ -4,6 +4,7 @@
 //! including UTF-8 validation, encoding detection, and line ending normalization.
 
 use std::borrow::Cow;
+use std::fmt::Write;
 
 /// Result of encoding a byte sequence to text.
 #[derive(Debug, Clone)]
@@ -103,7 +104,7 @@ pub fn decode_utf8_escape(bytes: &[u8]) -> EncodedText {
                 // Handle the invalid byte(s)
                 let error_len = e.error_len().unwrap_or(1);
                 for byte in &bytes[i..i + error_len] {
-                    result.push_str(&format!("\\x{byte:02x}"));
+                    let _ = write!(result, "\\x{byte:02x}");
                     replacements += 1;
                 }
                 i += error_len;

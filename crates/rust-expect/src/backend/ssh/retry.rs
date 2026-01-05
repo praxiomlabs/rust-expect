@@ -256,7 +256,7 @@ impl RetryState {
     }
 
     /// Reset state.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.attempt = 0;
         self.total_delay = Duration::ZERO;
     }

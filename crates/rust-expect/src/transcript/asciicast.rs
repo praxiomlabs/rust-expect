@@ -1,5 +1,6 @@
 //! Asciinema asciicast v2 format support.
 
+use std::fmt::Write as FmtWrite;
 use std::io::{BufRead, Write};
 use std::time::Duration;
 
@@ -373,7 +374,7 @@ fn escape_json(s: &str) -> String {
             '\r' => result.push_str("\\r"),
             '\t' => result.push_str("\\t"),
             c if c.is_control() => {
-                result.push_str(&format!("\\u{:04x}", c as u32));
+                let _ = write!(result, "\\u{:04x}", c as u32);
             }
             c => result.push(c),
         }

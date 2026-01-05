@@ -196,12 +196,12 @@ impl ScreenBuffer {
     }
 
     /// Save the cursor position.
-    pub fn save_cursor(&mut self) {
+    pub const fn save_cursor(&mut self) {
         self.saved_cursor = Some(self.cursor);
     }
 
     /// Restore the cursor position.
-    pub fn restore_cursor(&mut self) {
+    pub const fn restore_cursor(&mut self) {
         if let Some(pos) = self.saved_cursor {
             self.cursor = pos;
         }
@@ -334,7 +334,7 @@ impl ScreenBuffer {
     }
 
     /// Set the scroll region.
-    pub fn set_scroll_region(&mut self, top: usize, bottom: usize) {
+    pub const fn set_scroll_region(&mut self, top: usize, bottom: usize) {
         if top < bottom && bottom <= self.dimensions.rows as usize {
             self.scroll_region = Some((top, bottom));
         } else {

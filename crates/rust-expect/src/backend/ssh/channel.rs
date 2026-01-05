@@ -505,10 +505,9 @@ impl AsyncWrite for SshChannelStream {
 
         match data_future.poll(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(buf.len())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("SSH write error: {e}"),
-            ))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(io::Error::other(format!("SSH write error: {e}"))))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -529,10 +528,9 @@ impl AsyncWrite for SshChannelStream {
                 this.state = ChannelState::Eof;
                 Poll::Ready(Ok(()))
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("SSH shutdown error: {e}"),
-            ))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(io::Error::other(format!("SSH shutdown error: {e}"))))
+            }
             Poll::Pending => Poll::Pending,
         }
     }

@@ -158,7 +158,7 @@ impl AnsiParser {
         }
     }
 
-    fn ground(&mut self, byte: u8) -> Option<ParseResult> {
+    const fn ground(&mut self, byte: u8) -> Option<ParseResult> {
         match byte {
             0x1b => {
                 self.state = ParserState::Escape;

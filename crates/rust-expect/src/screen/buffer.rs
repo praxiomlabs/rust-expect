@@ -3,7 +3,7 @@
 //! This module provides a 2D screen buffer for terminal emulation,
 //! storing characters, attributes, and cursor position.
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 /// A single cell in the screen buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,7 +183,7 @@ impl Cursor {
     }
 
     /// Move the cursor to a position.
-    pub fn goto(&mut self, row: usize, col: usize) {
+    pub const fn goto(&mut self, row: usize, col: usize) {
         self.row = row;
         self.col = col;
     }
@@ -296,7 +296,7 @@ impl ScreenBuffer {
     }
 
     /// Get mutable cursor.
-    pub fn cursor_mut(&mut self) -> &mut Cursor {
+    pub const fn cursor_mut(&mut self) -> &mut Cursor {
         &mut self.cursor
     }
 
@@ -411,24 +411,24 @@ impl ScreenBuffer {
     }
 
     /// Reset the scroll region to the entire screen.
-    pub fn reset_scroll_region(&mut self) {
+    pub const fn reset_scroll_region(&mut self) {
         self.scroll_region = (0, self.rows.saturating_sub(1));
     }
 
     /// Save the current cursor position.
-    pub fn save_cursor(&mut self) {
+    pub const fn save_cursor(&mut self) {
         self.saved_cursor = Some(self.cursor);
     }
 
     /// Restore the saved cursor position.
-    pub fn restore_cursor(&mut self) {
+    pub const fn restore_cursor(&mut self) {
         if let Some(cursor) = self.saved_cursor.take() {
             self.cursor = cursor;
         }
     }
 
     /// Set the current text style.
-    pub fn set_style(&mut self, fg: Color, bg: Color, attrs: Attributes) {
+    pub const fn set_style(&mut self, fg: Color, bg: Color, attrs: Attributes) {
         self.current_style.fg = fg;
         self.current_style.bg = bg;
         self.current_style.attrs = attrs;
@@ -773,13 +773,13 @@ impl ScreenDiff {
 
     /// Check if there are any changes.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.changes.is_empty() && !self.cursor_changed && !self.dimensions_changed
     }
 
     /// Get the number of cell changes.
     #[must_use]
-    pub fn change_count(&self) -> usize {
+    pub const fn change_count(&self) -> usize {
         self.changes.len()
     }
 
@@ -845,28 +845,30 @@ impl ScreenDiff {
         }
 
         if self.dimensions_changed {
-            output.push_str(&format!(
-                "Dimensions changed: {}x{} -> {}x{}\n",
+            let _ = writeln!(
+                output,
+                "Dimensions changed: {}x{} -> {}x{}",
                 self.old_dims.1, self.old_dims.0, self.new_dims.1, self.new_dims.0
-            ));
+            );
         }
 
         if self.cursor_changed {
-            output.push_str(&format!(
-                "Cursor moved: ({}, {}) -> ({}, {})\n",
+            let _ = writeln!(
+                output,
+                "Cursor moved: ({}, {}) -> ({}, {})",
                 self.old_cursor.row, self.old_cursor.col, self.new_cursor.row, self.new_cursor.col
-            ));
+            );
         }
 
         let significant = self.significant_changes();
         if !significant.is_empty() {
-            output.push_str(&format!("{} cell(s) changed:\n", significant.len()));
+            let _ = writeln!(output, "{} cell(s) changed:", significant.len());
 
             for row in self.changed_rows() {
                 let row_changes: Vec<_> = significant.iter().filter(|c| c.row == row).collect();
 
                 if !row_changes.is_empty() {
-                    output.push_str(&format!("  Row {row}:\n"));
+                    let _ = writeln!(output, "  Row {row}:");
                     for change in row_changes {
                         let old_char = if change.old.char.is_control() {
                             format!("\\x{:02x}", change.old.char as u8)
@@ -878,10 +880,11 @@ impl ScreenDiff {
                         } else {
                             change.new.char.to_string()
                         };
-                        output.push_str(&format!(
-                            "    Col {}: '{}' -> '{}' ({:?})\n",
+                        let _ = writeln!(
+                            output,
+                            "    Col {}: '{}' -> '{}' ({:?})",
                             change.col, old_char, new_char, change.change_type
-                        ));
+                        );
                     }
                 }
             }
@@ -923,13 +926,13 @@ impl ScreenDiff {
 
             if old_text != new_text {
                 if !old_text.is_empty() || row < old.rows {
-                    output.push_str(&format!("- {row}: {old_text}\n"));
+                    let _ = writeln!(output, "- {row}: {old_text}");
                 }
                 if !new_text.is_empty() || row < new.rows {
-                    output.push_str(&format!("+ {row}: {new_text}\n"));
+                    let _ = writeln!(output, "+ {row}: {new_text}");
                 }
             } else if !old_text.is_empty() {
-                output.push_str(&format!("  {row}: {old_text}\n"));
+                let _ = writeln!(output, "  {row}: {old_text}");
             }
         }
 

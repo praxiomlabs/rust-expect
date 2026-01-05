@@ -3,7 +3,7 @@
 //! This module provides utilities for working with byte sequences,
 //! including pattern matching, escaping, and conversion.
 
-use std::fmt;
+use std::fmt::{self, Write};
 
 /// Convert bytes to a human-readable hexdump format.
 #[must_use]
@@ -12,11 +12,11 @@ pub fn hexdump(data: &[u8]) -> String {
 
     for (i, chunk) in data.chunks(16).enumerate() {
         // Offset
-        result.push_str(&format!("{:08x}  ", i * 16));
+        let _ = write!(result, "{:08x}  ", i * 16);
 
         // Hex bytes
         for (j, byte) in chunk.iter().enumerate() {
-            result.push_str(&format!("{byte:02x} "));
+            let _ = write!(result, "{byte:02x} ");
             if j == 7 {
                 result.push(' ');
             }
@@ -64,7 +64,9 @@ pub fn escape_bytes(data: &[u8]) -> String {
             0x07 => result.push_str("\\a"),
             0x08 => result.push_str("\\b"),
             b if b.is_ascii_graphic() || *b == b' ' => result.push(*b as char),
-            b => result.push_str(&format!("\\x{b:02x}")),
+            b => {
+                let _ = write!(result, "\\x{b:02x}");
+            }
         }
     }
 
@@ -220,7 +222,7 @@ pub fn to_visible_string(data: &[u8]) -> String {
                 result.push('^');
                 result.push((b'@' + c as u8) as char);
             } else {
-                result.push_str(&format!("\\x{:02x}", c as u32));
+                let _ = write!(result, "\\x{:02x}", c as u32);
             }
         } else {
             result.push(c);

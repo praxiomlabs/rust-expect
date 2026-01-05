@@ -80,7 +80,7 @@ impl Screen {
     }
 
     /// Get mutable access to the buffer.
-    pub fn buffer_mut(&mut self) -> &mut ScreenBuffer {
+    pub const fn buffer_mut(&mut self) -> &mut ScreenBuffer {
         &mut self.buffer
     }
 

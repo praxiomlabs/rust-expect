@@ -44,7 +44,7 @@ impl HumanTyper {
     }
 
     /// Set the configuration.
-    pub fn set_config(&mut self, config: HumanTypingConfig) {
+    pub const fn set_config(&mut self, config: HumanTypingConfig) {
         self.config = config;
     }
 

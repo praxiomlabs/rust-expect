@@ -75,12 +75,12 @@ impl PersistentPattern {
     }
 
     /// Disable this pattern.
-    pub fn disable(&mut self) {
+    pub const fn disable(&mut self) {
         self.enabled = false;
     }
 
     /// Enable this pattern.
-    pub fn enable(&mut self) {
+    pub const fn enable(&mut self) {
         self.enabled = true;
     }
 }

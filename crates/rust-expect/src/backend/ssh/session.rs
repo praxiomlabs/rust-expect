@@ -477,7 +477,7 @@ mod russh_impl {
     }
 
     /// Authenticate using the configured methods.
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
     pub async fn authenticate(
         handle: &mut client::Handle<SshClientHandler>,
         credentials: &SshCredentials,
@@ -1123,7 +1123,7 @@ impl SshSession {
     }
 
     /// Get a mutable reference to the russh handle.
-    pub fn handle_mut(
+    pub const fn handle_mut(
         &mut self,
     ) -> Option<&mut russh::client::Handle<russh_impl::SshClientHandler>> {
         self.handle.as_mut()

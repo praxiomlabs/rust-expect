@@ -130,7 +130,7 @@ impl PtyBuffer {
     }
 
     /// Clear all data from the buffer.
-    pub fn clear(&mut self) {
+    pub const fn clear(&mut self) {
         self.read_pos = 0;
         self.write_pos = 0;
     }

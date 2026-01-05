@@ -3,6 +3,7 @@
 //! This module provides pre-configured scenarios for common
 //! terminal interactions like login prompts, shell sessions, etc.
 
+use std::fmt::Write;
 use std::time::Duration;
 
 use super::event::{EventTimeline, MockEvent};
@@ -109,7 +110,7 @@ pub fn sudo_scenario(command: &str) -> Scenario {
 pub fn menu_scenario(options: &[&str]) -> Scenario {
     let mut menu = String::from("Please select an option:\n");
     for (i, option) in options.iter().enumerate() {
-        menu.push_str(&format!("  {}. {}\n", i + 1, option));
+        let _ = writeln!(menu, "  {}. {}", i + 1, option);
     }
     menu.push_str("Enter your choice: ");
 

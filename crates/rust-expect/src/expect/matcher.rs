@@ -47,7 +47,7 @@ impl Matcher {
     }
 
     /// Set the default timeout.
-    pub fn set_default_timeout(&mut self, timeout: Duration) {
+    pub const fn set_default_timeout(&mut self, timeout: Duration) {
         self.default_timeout = timeout;
     }
 
@@ -55,7 +55,7 @@ impl Matcher {
     ///
     /// When set, pattern matching will only search the last N bytes
     /// of the buffer, improving performance for large buffers.
-    pub fn set_search_window(&mut self, size: Option<usize>) {
+    pub const fn set_search_window(&mut self, size: Option<usize>) {
         self.search_window = size;
     }
 
@@ -289,7 +289,7 @@ impl ExpectState {
     }
 
     /// Mark EOF as detected.
-    pub fn set_eof(&mut self) {
+    pub const fn set_eof(&mut self) {
         self.eof_detected = true;
     }
 

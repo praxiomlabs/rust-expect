@@ -432,7 +432,7 @@ impl PiiDetector {
 
     /// Get the number of custom patterns registered.
     #[must_use]
-    pub fn custom_pattern_count(&self) -> usize {
+    pub const fn custom_pattern_count(&self) -> usize {
         self.custom_patterns.len()
     }
 

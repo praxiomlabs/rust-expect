@@ -68,7 +68,7 @@ impl LargeBuffer {
     }
 
     /// Set whether to delete the file on drop.
-    pub fn set_cleanup(&mut self, cleanup: bool) {
+    pub const fn set_cleanup(&mut self, cleanup: bool) {
         self.cleanup = cleanup;
     }
 
@@ -353,7 +353,7 @@ impl AdaptiveBuffer {
 
     /// Get the current size of the buffer.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         match self {
             Self::Memory(buf) => buf.len(),
             Self::File(large) => large.len(),
@@ -362,7 +362,7 @@ impl AdaptiveBuffer {
 
     /// Check if the buffer is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 

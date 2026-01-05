@@ -144,7 +144,7 @@ impl TestSession {
     }
 
     /// Close the session.
-    pub fn close(&mut self) {
+    pub const fn close(&mut self) {
         self.closed = true;
     }
 

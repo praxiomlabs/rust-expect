@@ -139,7 +139,7 @@ impl<'a> Player<'a> {
 
     /// Get total events.
     #[must_use]
-    pub fn total_events(&self) -> usize {
+    pub const fn total_events(&self) -> usize {
         self.transcript.events.len()
     }
 
@@ -160,12 +160,12 @@ impl<'a> Player<'a> {
     }
 
     /// Pause playback.
-    pub fn pause(&mut self) {
+    pub const fn pause(&mut self) {
         self.state = PlayerState::Paused;
     }
 
     /// Stop playback.
-    pub fn stop(&mut self) {
+    pub const fn stop(&mut self) {
         self.state = PlayerState::Stopped;
         self.index = 0;
         self.start_time = None;

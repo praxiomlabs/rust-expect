@@ -289,7 +289,7 @@ impl VecWriter {
 
     /// Get the number of chunks.
     #[must_use]
-    pub fn chunk_count(&self) -> usize {
+    pub const fn chunk_count(&self) -> usize {
         self.chunks.len()
     }
 
@@ -517,7 +517,7 @@ impl ReadPool {
 
     /// Get the number of buffers in the pool.
     #[must_use]
-    pub fn available(&self) -> usize {
+    pub const fn available(&self) -> usize {
         self.buffers.len()
     }
 }

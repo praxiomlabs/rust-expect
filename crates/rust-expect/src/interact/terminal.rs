@@ -104,12 +104,12 @@ impl Terminal {
     }
 
     /// Set terminal mode.
-    pub fn set_mode(&mut self, mode: TerminalMode) {
+    pub const fn set_mode(&mut self, mode: TerminalMode) {
         self.mode = mode;
     }
 
     /// Save current state.
-    pub fn save_state(&mut self) {
+    pub const fn save_state(&mut self) {
         self.saved_state = Some(TerminalState {
             mode: self.mode,
             echo: true,
@@ -118,7 +118,7 @@ impl Terminal {
     }
 
     /// Restore saved state.
-    pub fn restore_state(&mut self) {
+    pub const fn restore_state(&mut self) {
         if let Some(state) = self.saved_state.take() {
             self.mode = state.mode;
         }

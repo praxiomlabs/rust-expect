@@ -165,19 +165,19 @@ impl EventTimeline {
     }
 
     /// Reset the timeline to the beginning.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.position = 0;
     }
 
     /// Check if there are more events.
     #[must_use]
-    pub fn has_more(&self) -> bool {
+    pub const fn has_more(&self) -> bool {
         self.position < self.events.len()
     }
 
     /// Get the number of remaining events.
     #[must_use]
-    pub fn remaining(&self) -> usize {
+    pub const fn remaining(&self) -> usize {
         self.events.len().saturating_sub(self.position)
     }
 

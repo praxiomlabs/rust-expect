@@ -39,11 +39,11 @@ pub enum InteractionEvent {
 #[derive(Default)]
 pub struct HookManager {
     /// Input processing hooks.
-    input_hooks: Vec<InputHook>,
+    inputs: Vec<InputHook>,
     /// Output processing hooks.
-    output_hooks: Vec<OutputHook>,
+    outputs: Vec<OutputHook>,
     /// Event notification hooks.
-    event_hooks: Vec<EventHook>,
+    events: Vec<EventHook>,
 }
 
 impl HookManager {
@@ -58,7 +58,7 @@ impl HookManager {
     where
         F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
     {
-        self.input_hooks.push(Arc::new(hook));
+        self.inputs.push(Arc::new(hook));
     }
 
     /// Add an output processing hook.
@@ -66,7 +66,7 @@ impl HookManager {
     where
         F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
     {
-        self.output_hooks.push(Arc::new(hook));
+        self.outputs.push(Arc::new(hook));
     }
 
     /// Add an event notification hook.
@@ -74,13 +74,13 @@ impl HookManager {
     where
         F: Fn(InteractionEvent) + Send + Sync + 'static,
     {
-        self.event_hooks.push(Arc::new(hook));
+        self.events.push(Arc::new(hook));
     }
 
     /// Process input through all hooks.
     #[must_use]
     pub fn process_input(&self, mut data: Vec<u8>) -> Vec<u8> {
-        for hook in &self.input_hooks {
+        for hook in &self.inputs {
             data = hook(&data);
         }
         data
@@ -89,7 +89,7 @@ impl HookManager {
     /// Process output through all hooks.
     #[must_use]
     pub fn process_output(&self, mut data: Vec<u8>) -> Vec<u8> {
-        for hook in &self.output_hooks {
+        for hook in &self.outputs {
             data = hook(&data);
         }
         data
@@ -97,25 +97,25 @@ impl HookManager {
 
     /// Notify all event hooks.
     pub fn notify(&self, event: &InteractionEvent) {
-        for hook in &self.event_hooks {
+        for hook in &self.events {
             hook(event.clone());
         }
     }
 
     /// Clear all hooks.
     pub fn clear(&mut self) {
-        self.input_hooks.clear();
-        self.output_hooks.clear();
-        self.event_hooks.clear();
+        self.inputs.clear();
+        self.outputs.clear();
+        self.events.clear();
     }
 }
 
 impl std::fmt::Debug for HookManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HookManager")
-            .field("input_hooks", &self.input_hooks.len())
-            .field("output_hooks", &self.output_hooks.len())
-            .field("event_hooks", &self.event_hooks.len())
+            .field("inputs", &self.inputs.len())
+            .field("outputs", &self.outputs.len())
+            .field("events", &self.events.len())
             .finish()
     }
 }

@@ -368,7 +368,7 @@ pub struct BlockingExpect<'a> {
 
 impl<'a> BlockingExpect<'a> {
     /// Create a new blocking expect operation.
-    pub fn new(session: &'a mut SyncSession) -> Self {
+    pub const fn new(session: &'a mut SyncSession) -> Self {
         let timeout = session.config().timeout.default;
         Self { session, timeout }
     }

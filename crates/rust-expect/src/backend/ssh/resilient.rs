@@ -228,7 +228,7 @@ impl ResilientSession {
     }
 
     /// Get mutable underlying session.
-    pub fn session_mut(&mut self) -> Option<&mut SshSession> {
+    pub const fn session_mut(&mut self) -> Option<&mut SshSession> {
         self.session.as_mut()
     }
 

@@ -206,7 +206,7 @@ impl AsyncRead for MockTransport {
 
         // Check for error
         if let Some(error) = state.error.take() {
-            return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, error)));
+            return Poll::Ready(Err(io::Error::other(error)));
         }
 
         // Check for EOF
@@ -296,7 +296,7 @@ impl MockSession {
     }
 
     /// Get mutable access to the transport.
-    pub fn transport_mut(&mut self) -> &mut MockTransport {
+    pub const fn transport_mut(&mut self) -> &mut MockTransport {
         &mut self.transport
     }
 

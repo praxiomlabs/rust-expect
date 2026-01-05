@@ -188,7 +188,6 @@ impl AsyncRead for UnixPtyMaster {
                 }
                 Err(rustix::io::Errno::AGAIN) => {
                     guard.clear_ready();
-                    continue;
                 }
                 Err(e) => {
                     return Poll::Ready(Err(io::Error::from_raw_os_error(e.raw_os_error())));
@@ -219,7 +218,6 @@ impl AsyncWrite for UnixPtyMaster {
                 Ok(n) => return Poll::Ready(Ok(n)),
                 Err(rustix::io::Errno::AGAIN) => {
                     guard.clear_ready();
-                    continue;
                 }
                 Err(e) => {
                     return Poll::Ready(Err(io::Error::from_raw_os_error(e.raw_os_error())));

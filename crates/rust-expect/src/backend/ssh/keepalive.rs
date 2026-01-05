@@ -245,7 +245,7 @@ impl KeepaliveState {
     }
 
     /// Record a missed keepalive (timeout).
-    pub fn record_missed(&mut self) {
+    pub const fn record_missed(&mut self) {
         self.missed_count += 1;
         self.pending_response = false;
         self.pending_since = None;
@@ -300,7 +300,7 @@ impl KeepaliveState {
     }
 
     /// Reset state for reconnection.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.last_sent = None;
         self.last_received = None;
         self.missed_count = 0;
@@ -386,7 +386,7 @@ impl KeepaliveManager {
     }
 
     /// Get mutable state.
-    pub fn state_mut(&mut self) -> &mut KeepaliveState {
+    pub const fn state_mut(&mut self) -> &mut KeepaliveState {
         &mut self.state
     }
 
@@ -458,7 +458,7 @@ impl KeepaliveManager {
     /// Record that a keepalive timed out.
     ///
     /// Call this when the response timeout expires without a response.
-    pub fn record_timeout(&mut self) {
+    pub const fn record_timeout(&mut self) {
         self.state.record_missed();
     }
 
@@ -468,7 +468,7 @@ impl KeepaliveManager {
     }
 
     /// Handle keepalive timeout (alias for `record_timeout`).
-    pub fn handle_timeout(&mut self) {
+    pub const fn handle_timeout(&mut self) {
         self.record_timeout();
     }
 
@@ -491,7 +491,7 @@ impl KeepaliveManager {
     }
 
     /// Reset the manager for reconnection.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.state.reset();
     }
 }

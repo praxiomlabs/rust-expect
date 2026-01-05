@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 
     let mut session = Session::spawn("/bin/sh", &[]).await?;
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
     // Generate a moderate amount of output
@@ -31,7 +31,7 @@ async fn main() -> Result<()> {
 
     // Wait for all output and the next prompt
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(5))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(5))
         .await?;
 
     let buffer = session.buffer();
@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
 
     // Wait for the final prompt
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
     // Example 6: Ring buffer for memory efficiency

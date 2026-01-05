@@ -111,7 +111,7 @@ async fn main() -> Result<()> {
     // Spawn and record a session
     let mut session = Session::spawn("/bin/sh", &[]).await?;
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
     // Record the initial output
@@ -125,7 +125,7 @@ async fn main() -> Result<()> {
     recorder.record_output(m.matched.as_bytes());
 
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
     recorder.record_output(b"$ ");
 

@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
     // Create a simple interactive script
     let mut session = Session::spawn("/bin/sh", &[]).await?;
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
     // Create a shell script that prompts

@@ -30,9 +30,9 @@ async fn main() -> Result<()> {
     let mut session = Session::spawn("/bin/sh", &[]).await?;
 
     // Wait for shell prompt ($ or similar)
-    // Use a regex to match common prompts
+    // Use the convenience method for common shell prompts
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(5))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(5))
         .await?;
     println!("   Shell started, prompt detected");
 

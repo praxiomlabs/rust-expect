@@ -111,10 +111,10 @@ async fn main() -> Result<()> {
 
     // Wait for both prompts
     session1
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
     session2
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
     println!("   Session 1 PID: {}", session1.pid());
@@ -158,7 +158,7 @@ async fn main() -> Result<()> {
 
     // Wait for prompts on all sessions
     let results = multi_manager
-        .expect_all(Pattern::regex(r"[$#>]").unwrap())
+        .expect_all(Pattern::shell_prompt())
         .await?;
     println!("   Got {} prompt responses", results.len());
 

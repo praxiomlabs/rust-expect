@@ -140,7 +140,7 @@ async fn main() -> Result<()> {
 
     let mut session = Session::spawn("/bin/sh", &[]).await?;
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
     // Simulate an interactive workflow
@@ -155,7 +155,7 @@ async fn main() -> Result<()> {
         session.send_line(cmd).await?;
         // Wait for prompt to return
         session
-            .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+            .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
             .await?;
     }
 

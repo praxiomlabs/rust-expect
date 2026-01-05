@@ -32,7 +32,7 @@ fn main() -> Result<()> {
     println!("   Shell spawned with PID: {}", session.pid());
 
     // Wait for prompt
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(5))?;
+    session.expect_timeout(Pattern::shell_prompt(), Duration::from_secs(5))?;
     println!("   Prompt detected");
 
     // Send commands synchronously
@@ -56,7 +56,7 @@ fn main() -> Result<()> {
     println!("\n3. Timeout handling...");
 
     let mut session = SyncSession::spawn("/bin/sh", &[])?;
-    session.expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))?;
+    session.expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))?;
 
     // Send a command that won't produce the expected output
     session.send_line("echo 'different output'")?;

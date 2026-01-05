@@ -43,7 +43,7 @@ async fn demonstrate_pattern_matching() -> Result<()> {
 
     // Wait for initial prompt
     session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
     // Create counters to track pattern matches
@@ -86,7 +86,7 @@ async fn demonstrate_pattern_matching() -> Result<()> {
 
     // Wait for prompt
     let _ = session
-        .expect_timeout(Pattern::regex(r"[$#>]").unwrap(), Duration::from_secs(2))
+        .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await;
 
     // Clean up
@@ -226,7 +226,7 @@ fn demonstrate_action_types() {
 //
 //     // Wait for initial prompt
 //     session.expect_timeout(
-//         Pattern::regex(r"[$#>]").unwrap(),
+//         Pattern::shell_prompt(),
 //         Duration::from_secs(2),
 //     ).await?;
 //

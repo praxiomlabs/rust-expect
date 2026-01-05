@@ -88,8 +88,8 @@ async fn main() -> Result<()> {
     // Spawn a shell with automatic configuration
     let mut session = Session::spawn(&default_shell(), &[]).await?;
 
-    // Detect the prompt pattern automatically
-    let prompt_pattern = Pattern::regex(r"[$#>]\s*$").unwrap();
+    // Use the built-in shell prompt pattern
+    let prompt_pattern = Pattern::shell_prompt();
     session
         .expect_timeout(prompt_pattern.clone(), Duration::from_secs(5))
         .await?;

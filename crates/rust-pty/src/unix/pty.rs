@@ -341,11 +341,11 @@ mod tests {
 
     #[tokio::test]
     async fn window_size_operations() {
-        let (master, slave_path) = UnixPtyMaster::open().unwrap();
+        let (master, _slave_path) = UnixPtyMaster::open().unwrap();
 
         // On macOS, we need to open the slave before setting window size works reliably
         #[cfg(target_os = "macos")]
-        let _slave_fd = open_slave(&slave_path).unwrap();
+        let _slave_fd = open_slave(&_slave_path).unwrap();
 
         // Set window size
         let size = WindowSize::new(120, 40);

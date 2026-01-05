@@ -156,7 +156,7 @@ impl AsyncRead for WindowsPtyMaster {
                         Ok(buffer)
                     })
                     .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                    .map_err(io::Error::other)
                     .and_then(|r| r);
 
                     // Store result and wake

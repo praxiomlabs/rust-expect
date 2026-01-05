@@ -157,9 +157,7 @@ async fn main() -> Result<()> {
     println!("   Labels: {label1:?}, {label2:?}");
 
     // Wait for prompts on all sessions
-    let results = multi_manager
-        .expect_all(Pattern::shell_prompt())
-        .await?;
+    let results = multi_manager.expect_all(Pattern::shell_prompt()).await?;
     println!("   Got {} prompt responses", results.len());
 
     // Send to all sessions at once

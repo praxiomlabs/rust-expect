@@ -179,7 +179,7 @@ fn spawn_error_pty_allocation() {
 
 #[test]
 fn spawn_error_io_wrapper() {
-    let io_err = io::Error::new(io::ErrorKind::Other, "custom error");
+    let io_err = io::Error::other("custom error");
     let err = SpawnError::Io(io_err);
 
     let msg = err.to_string();

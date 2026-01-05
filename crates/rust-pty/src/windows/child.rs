@@ -105,7 +105,7 @@ impl WindowsPtyChild {
             Ok(exit_code)
         })
         .await
-        .map_err(|e| PtyError::Wait(io::Error::new(io::ErrorKind::Other, e)))?
+        .map_err(|e| PtyError::Wait(io::Error::other(e)))?
         .map_err(PtyError::Wait)?;
 
         let status = ExitStatus::Terminated(exit_code);

@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 
     // Example 2: Pattern matching on error types
     println!("\n2. Pattern matching on error types...");
-    demonstrate_error_pattern_matching().await?;
+    demonstrate_error_pattern_matching();
 
     // Example 3: Error recovery with retries
     println!("\n3. Error recovery with retries...");
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
 
     // Example 6: Using error context
     println!("\n6. Using error context...");
-    demonstrate_error_context().await?;
+    demonstrate_error_context();
 
     // Example 7: Graceful degradation
     println!("\n7. Graceful degradation strategies...");
@@ -85,7 +85,7 @@ async fn demonstrate_timeout_handling() -> Result<()> {
 }
 
 /// Demonstrate pattern matching on different error types
-async fn demonstrate_error_pattern_matching() -> Result<()> {
+fn demonstrate_error_pattern_matching() {
     let errors: Vec<ExpectError> = vec![
         ExpectError::timeout(Duration::from_secs(5), "password:", "Enter username:"),
         ExpectError::pattern_not_found("expected_output", "actual output here"),
@@ -99,9 +99,7 @@ async fn demonstrate_error_pattern_matching() -> Result<()> {
             ExpectError::Timeout {
                 duration, pattern, ..
             } => {
-                format!(
-                    "Retry with longer timeout (was {duration:?} for pattern '{pattern}')"
-                )
+                format!("Retry with longer timeout (was {duration:?} for pattern '{pattern}')")
             }
             ExpectError::PatternNotFound { pattern, .. } => {
                 format!("Verify pattern '{pattern}' is correct, or wait longer")
@@ -121,12 +119,10 @@ async fn demonstrate_error_pattern_matching() -> Result<()> {
         };
         println!("   {:20} -> {}", error_type_name(&err), recovery);
     }
-
-    Ok(())
 }
 
 /// Get a short name for an error type
-fn error_type_name(err: &ExpectError) -> &'static str {
+const fn error_type_name(err: &ExpectError) -> &'static str {
     match err {
         ExpectError::Timeout { .. } => "Timeout",
         ExpectError::PatternNotFound { .. } => "PatternNotFound",
@@ -149,9 +145,7 @@ async fn demonstrate_retry_logic() -> Result<()> {
         .await?;
 
     // Simulate a command that might fail initially
-    session
-        .send_line("echo 'ready after delay'")
-        .await?;
+    session.send_line("echo 'ready after delay'").await?;
 
     // Retry with exponential backoff - inline for clarity
     let max_attempts = 3u32;
@@ -263,7 +257,7 @@ async fn demonstrate_spawn_error_handling() {
 }
 
 /// Demonstrate using error context for better diagnostics
-async fn demonstrate_error_context() -> Result<()> {
+fn demonstrate_error_context() {
     // Example: wrapping I/O errors with context
     let io_result: std::io::Result<()> = Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
@@ -286,8 +280,6 @@ async fn demonstrate_error_context() -> Result<()> {
         std::io::Error::new(std::io::ErrorKind::PermissionDenied, "read-only filesystem"),
     );
     println!("   Contextualized error: {contextualized}");
-
-    Ok(())
 }
 
 /// Demonstrate graceful degradation when errors occur
@@ -330,7 +322,9 @@ async fn demonstrate_graceful_degradation() -> Result<()> {
         .await?;
 
     // Try to use an optional feature
-    session.send_line("which jq 2>/dev/null || echo 'NOT_FOUND'").await?;
+    session
+        .send_line("which jq 2>/dev/null || echo 'NOT_FOUND'")
+        .await?;
     let m = session
         .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;

@@ -84,8 +84,8 @@ pub use encoding::{
 };
 pub use error::{ExpectError, Result, SpawnError};
 pub use expect::{
-    CacheStats, CompiledRegex, Matcher, Pattern, PatternManager, PatternSet, RegexCache,
-    RingBuffer, GLOBAL_CACHE, get_regex,
+    CacheStats, CompiledRegex, GLOBAL_CACHE, Matcher, Pattern, PatternManager, PatternSet,
+    RegexCache, RingBuffer, get_regex,
 };
 pub use health::{HealthChecker, HealthStatus};
 pub use interact::{

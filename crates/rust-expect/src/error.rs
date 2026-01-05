@@ -620,7 +620,7 @@ mod tests {
         let err = ExpectError::timeout(Duration::from_secs(1), "test", "the buffer");
         assert_eq!(err.buffer(), Some("the buffer"));
 
-        let io_err = ExpectError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test"));
+        let io_err = ExpectError::Io(std::io::Error::other("test"));
         assert!(io_err.buffer().is_none());
     }
 

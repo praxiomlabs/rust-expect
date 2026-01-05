@@ -9,10 +9,13 @@
 //! Run with: `cargo run --example ssh_session --features ssh`
 
 #[cfg(feature = "ssh")]
+#[allow(clippy::too_many_lines)]
 fn main() {
     use std::time::Duration;
 
-    use rust_expect::backend::ssh::{AuthMethod, HostKeyVerification, SshCredentials, SshSessionBuilder};
+    use rust_expect::backend::ssh::{
+        AuthMethod, HostKeyVerification, SshCredentials, SshSessionBuilder,
+    };
 
     println!("rust-expect SSH Authentication Strategies");
     println!("==========================================\n");
@@ -33,8 +36,7 @@ fn main() {
 
     // 1b. Public key authentication
     println!("\n   b) Public Key Authentication");
-    let _key_creds = SshCredentials::new("deploy")
-        .with_key("/home/user/.ssh/id_ed25519");
+    let _key_creds = SshCredentials::new("deploy").with_key("/home/user/.ssh/id_ed25519");
     println!("      .with_key(\"/home/user/.ssh/id_ed25519\")");
     println!("      Use case: Most secure, standard for automation");
     println!("      Tip: Use Ed25519 keys for best security/performance");
@@ -55,19 +57,17 @@ fn main() {
 
     // 1e. Keyboard-interactive authentication
     println!("\n   e) Keyboard-Interactive Authentication");
-    let _kbd_creds = SshCredentials::new("user")
-        .with_keyboard_interactive("my_password");
+    let _kbd_creds = SshCredentials::new("user").with_keyboard_interactive("my_password");
     println!("      .with_keyboard_interactive(password)");
     println!("      Use case: PAM-based servers, cloud instances");
     println!("      Note: Many servers use this instead of direct password");
 
     // 1f. Keyboard-interactive with MFA
     println!("\n   f) Multi-Factor Authentication (MFA)");
-    let _mfa_creds = SshCredentials::new("secure-user")
-        .with_keyboard_interactive_responses(vec![
-            "password".to_string(),
-            "123456".to_string(), // TOTP code
-        ]);
+    let _mfa_creds = SshCredentials::new("secure-user").with_keyboard_interactive_responses(vec![
+        "password".to_string(),
+        "123456".to_string(), // TOTP code
+    ]);
     println!("      .with_keyboard_interactive_responses(vec![password, otp])");
     println!("      Use case: 2FA/MFA-enabled servers");
     println!("      Tip: Use TOTP libraries to generate codes dynamically");
@@ -81,10 +81,10 @@ fn main() {
 
     // Methods are tried in order until one succeeds
     let fallback_creds = SshCredentials::new("user")
-        .with_agent()                                    // Try agent first
-        .with_key("/home/user/.ssh/id_ed25519")          // Then specific key
-        .with_keyboard_interactive("password")           // Then kbd-interactive
-        .with_password("fallback_password");             // Finally password
+        .with_agent() // Try agent first
+        .with_key("/home/user/.ssh/id_ed25519") // Then specific key
+        .with_keyboard_interactive("password") // Then kbd-interactive
+        .with_password("fallback_password"); // Finally password
 
     println!("   Methods tried in order:");
     for (i, method) in fallback_creds.auth_methods.iter().enumerate() {
@@ -121,23 +121,34 @@ fn main() {
     println!("   -------------------------------");
 
     let policies = [
-        (HostKeyVerification::KnownHosts, "KnownHosts",
-         "Check against ~/.ssh/known_hosts (DEFAULT, RECOMMENDED)"),
-        (HostKeyVerification::Tofu, "Tofu",
-         "Trust On First Use - accept new, verify known"),
-        (HostKeyVerification::RejectUnknown, "RejectUnknown",
-         "Reject any unknown hosts (strictest)"),
+        (
+            HostKeyVerification::KnownHosts,
+            "KnownHosts",
+            "Check against ~/.ssh/known_hosts (DEFAULT, RECOMMENDED)",
+        ),
+        (
+            HostKeyVerification::Tofu,
+            "Tofu",
+            "Trust On First Use - accept new, verify known",
+        ),
+        (
+            HostKeyVerification::RejectUnknown,
+            "RejectUnknown",
+            "Reject any unknown hosts (strictest)",
+        ),
     ];
 
     for (policy, name, desc) in policies {
-        println!("   {:15} - {}", name, desc);
+        println!("   {name:15} - {desc}");
         let _ = policy; // Just to use the variable
     }
 
     #[cfg(feature = "insecure-skip-verify")]
     {
-        println!("   {:15} - DANGEROUS: Skip verification (testing only)",
-            "AcceptAll");
+        println!(
+            "   {:15} - DANGEROUS: Skip verification (testing only)",
+            "AcceptAll"
+        );
     }
 
     // =========================================================================
@@ -175,18 +186,15 @@ fn main() {
     println!("   -------------------------------");
 
     println!("\n   a) GitHub/GitLab deployment:");
-    let _git_creds = SshCredentials::new("git")
-        .with_key("/home/deploy/.ssh/deploy_key");
+    let _git_creds = SshCredentials::new("git").with_key("/home/deploy/.ssh/deploy_key");
     println!("      User: 'git', Key: deploy-specific key");
 
     println!("\n   b) AWS EC2 instance:");
-    let _ec2_creds = SshCredentials::new("ec2-user")
-        .with_key("/home/user/.ssh/aws-key.pem");
+    let _ec2_creds = SshCredentials::new("ec2-user").with_key("/home/user/.ssh/aws-key.pem");
     println!("      User: 'ec2-user' or 'ubuntu', Key: .pem file");
 
     println!("\n   c) Cloud server with password (keyboard-interactive):");
-    let _cloud_creds = SshCredentials::new("root")
-        .with_keyboard_interactive("server_password");
+    let _cloud_creds = SshCredentials::new("root").with_keyboard_interactive("server_password");
     println!("      Many cloud providers use keyboard-interactive");
 
     println!("\n   d) Interactive development:");

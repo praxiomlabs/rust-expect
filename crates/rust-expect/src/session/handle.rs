@@ -521,7 +521,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// # Errors
     ///
     /// Returns an error if any command times out or I/O fails.
-    /// On error, partial results are lost; consider using [`run_script_with_results`]
+    /// On error, partial results are lost; consider using [`Self::run_script_with_results`]
     /// if you need to capture partial results on failure.
     pub async fn run_script<I, S>(&mut self, commands: I, prompt: Pattern) -> Result<Vec<Match>>
     where

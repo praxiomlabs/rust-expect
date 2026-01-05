@@ -135,6 +135,8 @@ fn regex_with_special_characters() {
 fn pattern_clone_works() {
     let original = Pattern::regex(r"\d+").unwrap();
     let cloned = original.clone();
+    // Verify both original and clone work independently
+    assert!(original.matches("456").is_some());
     assert!(cloned.matches("123").is_some());
 }
 

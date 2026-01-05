@@ -460,12 +460,9 @@ impl WindowsPtyHandle {
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         use rust_pty::{PtyMaster, WindowSize};
         let size = WindowSize::new(cols, rows);
-        self.master.resize(size).map_err(|e| {
-            ExpectError::Io(io::Error::new(
-                io::ErrorKind::Other,
-                format!("resize failed: {e}"),
-            ))
-        })?;
+        self.master
+            .resize(size)
+            .map_err(|e| ExpectError::Io(io::Error::other(format!("resize failed: {e}"))))?;
         self.dimensions = (cols, rows);
         Ok(())
     }
@@ -478,12 +475,9 @@ impl WindowsPtyHandle {
 
     /// Kill the process.
     pub fn kill(&mut self) -> Result<()> {
-        self.child.kill().map_err(|e| {
-            ExpectError::Io(io::Error::new(
-                io::ErrorKind::Other,
-                format!("kill failed: {e}"),
-            ))
-        })
+        self.child
+            .kill()
+            .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
     }
 }
 
@@ -754,12 +748,9 @@ impl WindowsAsyncPty {
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         use rust_pty::{PtyMaster, WindowSize};
         let size = WindowSize::new(cols, rows);
-        self.master.resize(size).map_err(|e| {
-            ExpectError::Io(io::Error::new(
-                io::ErrorKind::Other,
-                format!("resize failed: {e}"),
-            ))
-        })?;
+        self.master
+            .resize(size)
+            .map_err(|e| ExpectError::Io(io::Error::other(format!("resize failed: {e}"))))?;
         self.dimensions = (cols, rows);
         Ok(())
     }
@@ -772,12 +763,9 @@ impl WindowsAsyncPty {
 
     /// Kill the child process.
     pub fn kill(&mut self) -> Result<()> {
-        self.child.kill().map_err(|e| {
-            ExpectError::Io(io::Error::new(
-                io::ErrorKind::Other,
-                format!("kill failed: {e}"),
-            ))
-        })
+        self.child
+            .kill()
+            .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
     }
 }
 

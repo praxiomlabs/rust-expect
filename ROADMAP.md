@@ -1,7 +1,7 @@
 # rust-expect Roadmap
 
 **Version:** 1.0.0
-**Last Updated:** 2025-01-03
+**Last Updated:** 2025-01-05
 **Status:** Feature Complete - Preparing for Release
 
 ---
@@ -188,7 +188,7 @@ is feature-complete and ready for initial release. Key achievements:
 | Task | Status | Description |
 |------|--------|-------------|
 | API review | 🟢 Done | API audit completed |
-| MSRV policy | 🟢 Done | Rust 1.85+ (Edition 2024) |
+| MSRV policy | 🟢 Done | Rust 1.88+ (Edition 2024) |
 | Semver compliance | 🟢 Done | Breaking change audit complete |
 
 ### Documentation

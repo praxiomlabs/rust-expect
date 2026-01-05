@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated development toolchain to Rust 1.92
+- MSRV remains at 1.88 for Edition 2024 and let chains support
+
+### Fixed
+
+- macOS PTY compatibility for window size operations
+- Windows SSH pageant authentication handling
+- Resolved all clippy lints including `io_other_error` and `collapsible_if`
+- Fixed broken intra-doc link in session handle documentation
+- CI fixes for cross-platform testing (Windows SSH, macOS PTY)
+
+### Added
+
+- Convenience pattern methods: `shell_prompt()`, `password_prompt()`, `login_prompt()`, `ipv4()`, `email()`, `error_indicator()`, `success_indicator()`
+- Session helper methods for common operations
+- Comprehensive pattern matching and error handling tests
+- New examples demonstrating convenience patterns
+
 ## [0.1.0] - 2025-01-03
 
 ### Added

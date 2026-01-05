@@ -18,13 +18,13 @@ fn regex_pattern_matches() {
 
 #[test]
 fn pattern_set_matches_any() {
-    let set = PatternSet::new()
-        .add(Pattern::literal("login:"))
+    let mut set = PatternSet::new();
+    set.add(Pattern::literal("login:"))
         .add(Pattern::literal("password:"));
 
-    assert!(set.find("Please enter login:").is_some());
-    assert!(set.find("Enter password:").is_some());
-    assert!(set.find("unknown prompt").is_none());
+    assert!(set.find_match("Please enter login:").is_some());
+    assert!(set.find_match("Enter password:").is_some());
+    assert!(set.find_match("unknown prompt").is_none());
 }
 
 #[test]
@@ -34,7 +34,10 @@ fn pattern_special_types() {
 
     let timeout = Pattern::timeout(std::time::Duration::from_secs(5));
     assert!(timeout.is_timeout());
-    assert_eq!(timeout.timeout_duration(), Some(std::time::Duration::from_secs(5)));
+    assert_eq!(
+        timeout.timeout_duration(),
+        Some(std::time::Duration::from_secs(5))
+    );
 }
 
 #[test]
@@ -49,12 +52,12 @@ fn pattern_extract_match() {
 
 #[test]
 fn pattern_set_returns_index() {
-    let set = PatternSet::new()
-        .add(Pattern::literal("first"))
+    let mut set = PatternSet::new();
+    set.add(Pattern::literal("first"))
         .add(Pattern::literal("second"))
         .add(Pattern::literal("third"));
 
-    let result = set.find("contains second pattern");
+    let result = set.find_match("contains second pattern");
     assert!(result.is_some());
     let (idx, _) = result.unwrap();
     assert_eq!(idx, 1);
@@ -63,7 +66,7 @@ fn pattern_set_returns_index() {
 #[test]
 fn empty_pattern_set() {
     let set = PatternSet::new();
-    assert!(set.find("anything").is_none());
+    assert!(set.find_match("anything").is_none());
 }
 
 #[test]
@@ -137,14 +140,14 @@ fn pattern_clone_works() {
 
 #[test]
 fn pattern_set_add_chain() {
-    let set = PatternSet::new()
-        .add(Pattern::literal("a"))
+    let mut set = PatternSet::new();
+    set.add(Pattern::literal("a"))
         .add(Pattern::literal("b"))
         .add(Pattern::literal("c"));
 
-    assert!(set.find("a").is_some());
-    assert!(set.find("b").is_some());
-    assert!(set.find("c").is_some());
+    assert!(set.find_match("a").is_some());
+    assert!(set.find_match("b").is_some());
+    assert!(set.find_match("c").is_some());
     assert_eq!(set.len(), 3);
 }
 
@@ -207,5 +210,7 @@ fn success_indicator_pattern() {
     assert!(success_pat.matches("Success!").is_some());
     assert!(success_pat.matches("OK").is_some());
     assert!(success_pat.matches("PASSED").is_some());
-    assert!(success_pat.matches("done").is_some());
+    assert!(success_pat.matches("complete").is_some());
+    // "done" is not included in the pattern
+    assert!(success_pat.matches("done").is_none());
 }

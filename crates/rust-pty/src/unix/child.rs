@@ -332,7 +332,8 @@ where
                 }
 
                 // Set controlling terminal
-                if libc::ioctl(slave_raw, libc::TIOCSCTTY, 0) == -1 {
+                // Cast TIOCSCTTY to c_ulong for macOS compatibility (u32 -> u64)
+                if libc::ioctl(slave_raw, libc::TIOCSCTTY as libc::c_ulong, 0) == -1 {
                     return Err(io::Error::last_os_error());
                 }
 

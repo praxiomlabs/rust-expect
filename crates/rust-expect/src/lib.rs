@@ -83,7 +83,10 @@ pub use encoding::{
     detect_line_ending, normalize_line_endings, strip_ansi,
 };
 pub use error::{ExpectError, Result, SpawnError};
-pub use expect::{Matcher, Pattern, PatternManager, PatternSet, RingBuffer};
+pub use expect::{
+    CacheStats, CompiledRegex, Matcher, Pattern, PatternManager, PatternSet, RegexCache,
+    RingBuffer, GLOBAL_CACHE, get_regex,
+};
 pub use health::{HealthChecker, HealthStatus};
 pub use interact::{
     InteractAction, InteractBuilder, InteractContext, InteractEndReason, InteractResult,

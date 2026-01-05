@@ -100,12 +100,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     }
 
     /// Get mutable access to the pattern manager.
-    pub fn pattern_manager_mut(&mut self) -> &mut PatternManager {
+    pub const fn pattern_manager_mut(&mut self) -> &mut PatternManager {
         &mut self.pattern_manager
     }
 
     /// Set the session state.
-    pub fn set_state(&mut self, state: SessionState) {
+    pub const fn set_state(&mut self, state: SessionState) {
         self.state = state;
     }
 
@@ -486,6 +486,146 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let mut patterns = PatternSet::new();
         patterns.add(Pattern::eof()).add(Pattern::timeout(timeout));
         self.expect_any(&patterns).await
+    }
+
+    /// Run a batch of commands, waiting for the prompt after each.
+    ///
+    /// This is a convenience method for executing multiple shell commands
+    /// in sequence. For each command, it sends the command line and waits
+    /// for the prompt pattern to appear.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::{Session, Pattern};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("/bin/bash", &[]).await?;
+    ///     session.expect(Pattern::shell_prompt()).await?;
+    ///
+    ///     // Run a batch of commands
+    ///     let results = session.run_script(
+    ///         &["pwd", "whoami", "date"],
+    ///         Pattern::shell_prompt(),
+    ///     ).await?;
+    ///
+    ///     for result in &results {
+    ///         println!("Output: {}", result.before.trim());
+    ///     }
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any command times out or I/O fails.
+    /// On error, partial results are lost; consider using [`run_script_with_results`]
+    /// if you need to capture partial results on failure.
+    pub async fn run_script<I, S>(&mut self, commands: I, prompt: Pattern) -> Result<Vec<Match>>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut results = Vec::new();
+
+        for cmd in commands {
+            self.send_line(cmd.as_ref()).await?;
+            let result = self.expect(prompt.clone()).await?;
+            results.push(result);
+        }
+
+        Ok(results)
+    }
+
+    /// Run a batch of commands with a specific timeout per command.
+    ///
+    /// Like [`run_script`](Self::run_script), but applies the given timeout
+    /// to each command individually.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any command times out or I/O fails.
+    pub async fn run_script_timeout<I, S>(
+        &mut self,
+        commands: I,
+        prompt: Pattern,
+        timeout: Duration,
+    ) -> Result<Vec<Match>>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut results = Vec::new();
+
+        for cmd in commands {
+            self.send_line(cmd.as_ref()).await?;
+            let result = self.expect_timeout(prompt.clone(), timeout).await?;
+            results.push(result);
+        }
+
+        Ok(results)
+    }
+
+    /// Run a batch of commands, collecting results even on failure.
+    ///
+    /// Unlike [`run_script`](Self::run_script), this method continues
+    /// collecting results and returns them along with any error that occurred.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(results, error)` where:
+    /// - `results` contains the matches for successfully completed commands
+    /// - `error` is `Some(err)` if an error occurred, `None` if all commands succeeded
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::{Session, Pattern};
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), rust_expect::ExpectError> {
+    ///     let mut session = Session::spawn("/bin/bash", &[]).await?;
+    ///     session.expect(Pattern::shell_prompt()).await?;
+    ///
+    ///     let (results, error) = session.run_script_with_results(
+    ///         &["pwd", "bad_command", "date"],
+    ///         Pattern::shell_prompt(),
+    ///     ).await;
+    ///
+    ///     println!("Completed {} commands", results.len());
+    ///     if let Some(e) = error {
+    ///         eprintln!("Script failed at command {}: {}", results.len(), e);
+    ///     }
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
+    pub async fn run_script_with_results<I, S>(
+        &mut self,
+        commands: I,
+        prompt: Pattern,
+    ) -> (Vec<Match>, Option<ExpectError>)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut results = Vec::new();
+
+        for cmd in commands {
+            match self.send_line(cmd.as_ref()).await {
+                Ok(()) => {}
+                Err(e) => return (results, Some(e)),
+            }
+
+            match self.expect(prompt.clone()).await {
+                Ok(result) => results.push(result),
+                Err(e) => return (results, Some(e)),
+            }
+        }
+
+        (results, None)
     }
 }
 

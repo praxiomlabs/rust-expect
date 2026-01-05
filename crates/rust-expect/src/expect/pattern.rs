@@ -156,6 +156,164 @@ impl Pattern {
             _ => None,
         }
     }
+
+    // =========================================================================
+    // Convenience pattern constructors
+    // =========================================================================
+
+    /// Create a pattern that matches common shell prompts.
+    ///
+    /// Matches prompts ending with `$`, `#`, `>`, or `%` followed by optional whitespace.
+    /// This handles most Unix shells (bash, zsh, sh) and root prompts.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_expect::Pattern;
+    ///
+    /// let prompt = Pattern::shell_prompt();
+    /// assert!(prompt.matches("user@host:~$ ").is_some());
+    /// assert!(prompt.matches("root@host:~# ").is_some());
+    /// assert!(prompt.matches("> ").is_some());
+    /// ```
+    #[must_use]
+    pub fn shell_prompt() -> Self {
+        // Use a fallback to literal if regex somehow fails (it won't for this pattern)
+        Self::regex(r"[$#>%]\s*$").unwrap_or_else(|_| Self::Literal("$ ".to_string()))
+    }
+
+    /// Create a pattern that matches any common prompt character.
+    ///
+    /// A simpler alternative to `shell_prompt()` that uses glob matching.
+    /// Less precise but faster for simple cases.
+    #[must_use]
+    pub fn any_prompt() -> Self {
+        Self::Glob("*$*".to_string())
+    }
+
+    /// Create a pattern that matches IPv4 addresses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the regex compilation fails (should not happen).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_expect::Pattern;
+    ///
+    /// let ipv4 = Pattern::ipv4().unwrap();
+    /// assert!(ipv4.matches("Server IP: 192.168.1.1").is_some());
+    /// assert!(ipv4.matches("10.0.0.255 is local").is_some());
+    /// ```
+    pub fn ipv4() -> Result<Self, regex::Error> {
+        Self::regex(
+            r"\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b"
+        )
+    }
+
+    /// Create a pattern that matches email addresses.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the regex compilation fails (should not happen).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_expect::Pattern;
+    ///
+    /// let email = Pattern::email().unwrap();
+    /// assert!(email.matches("Contact: user@example.com").is_some());
+    /// ```
+    pub fn email() -> Result<Self, regex::Error> {
+        Self::regex(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+    }
+
+    /// Create a pattern that matches ISO 8601 timestamps.
+    ///
+    /// Matches formats like `2024-01-15T10:30:00` or `2024-01-15 10:30:00`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the regex compilation fails (should not happen).
+    pub fn timestamp_iso8601() -> Result<Self, regex::Error> {
+        Self::regex(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
+    }
+
+    /// Create a pattern that matches common error indicators.
+    ///
+    /// Matches words like "error", "failed", "fatal" (case-insensitive).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_expect::Pattern;
+    ///
+    /// let error = Pattern::error_indicator();
+    /// assert!(error.matches("Error: connection refused").is_some());
+    /// assert!(error.matches("Command FAILED").is_some());
+    /// ```
+    #[must_use]
+    pub fn error_indicator() -> Self {
+        Self::regex(r"(?i)\b(?:error|failed|fatal)\b")
+            .unwrap_or_else(|_| Self::Glob("*[Ee]rror*".to_string()))
+    }
+
+    /// Create a pattern that matches common success indicators.
+    ///
+    /// Matches words like "success", "passed", "complete", "ok" (case-insensitive).
+    #[must_use]
+    pub fn success_indicator() -> Self {
+        Self::regex(r"(?i)\b(?:success|successful|passed|complete|ok)\b")
+            .unwrap_or_else(|_| Self::Glob("*[Ss]uccess*".to_string()))
+    }
+
+    /// Create a pattern that matches common password prompts.
+    ///
+    /// Matches prompts like "Password:", "password: ", "Passphrase:".
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rust_expect::Pattern;
+    ///
+    /// let pwd = Pattern::password_prompt();
+    /// assert!(pwd.matches("Password: ").is_some());
+    /// assert!(pwd.matches("Enter passphrase: ").is_some());
+    /// ```
+    #[must_use]
+    pub fn password_prompt() -> Self {
+        Self::regex(r"(?i)(?:password|passphrase)\s*:\s*$")
+            .unwrap_or_else(|_| Self::Literal("password:".to_string()))
+    }
+
+    /// Create a pattern that matches common login/username prompts.
+    ///
+    /// Matches prompts like "login:", "Username:", "user: ".
+    #[must_use]
+    pub fn login_prompt() -> Self {
+        Self::regex(r"(?i)(?:login|username|user)\s*:\s*$")
+            .unwrap_or_else(|_| Self::Literal("login:".to_string()))
+    }
+
+    /// Create a pattern that matches common yes/no confirmation prompts.
+    ///
+    /// Matches prompts like "[y/n]", "(yes/no)", "[Y/n]".
+    #[must_use]
+    pub fn confirmation_prompt() -> Self {
+        Self::regex(r"\[([yYnN])/([yYnN])\]|\(([yY]es)/([nN]o)\)")
+            .unwrap_or_else(|_| Self::Glob("*[y/n]*".to_string()))
+    }
+
+    /// Create a pattern that matches common "continue?" prompts.
+    ///
+    /// Matches prompts like "Continue?", "Do you want to continue?", "Press any key".
+    #[must_use]
+    pub fn continue_prompt() -> Self {
+        Self::regex(r"(?i)(?:continue\s*\?|press any key|hit enter)")
+            .unwrap_or_else(|_| Self::Glob("*continue*".to_string()))
+    }
 }
 
 impl fmt::Debug for Pattern {
@@ -328,13 +486,13 @@ impl PatternSet {
 
     /// Get the number of patterns in the set.
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.patterns.len()
     }
 
     /// Check if the set is empty.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.patterns.is_empty()
     }
 

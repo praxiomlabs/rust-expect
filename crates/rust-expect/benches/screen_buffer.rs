@@ -1,8 +1,10 @@
 //! Screen buffer benchmarks.
 #![allow(missing_docs)]
 
+use std::hint::black_box;
+
 #[allow(unused_imports)]
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 #[cfg(feature = "screen")]
 mod screen_benches {

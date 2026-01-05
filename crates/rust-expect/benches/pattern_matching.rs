@@ -1,7 +1,9 @@
 //! Pattern matching benchmarks.
 #![allow(missing_docs)]
 
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use rust_expect::expect::{Pattern, PatternSet, RingBuffer};
 
 fn bench_literal_pattern(c: &mut Criterion) {

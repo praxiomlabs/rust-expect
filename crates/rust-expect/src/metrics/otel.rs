@@ -132,7 +132,11 @@ impl TracingConfig {
 pub enum TracingError {
     /// OpenTelemetry trace error.
     #[error("OpenTelemetry trace error: {0}")]
-    Trace(#[from] opentelemetry::trace::TraceError),
+    Trace(#[from] opentelemetry_sdk::trace::TraceError),
+
+    /// OTLP exporter build error.
+    #[error("OTLP exporter build error: {0}")]
+    ExporterBuild(#[from] opentelemetry_otlp::ExporterBuildError),
 
     /// Already initialized.
     #[error("Tracing already initialized")]

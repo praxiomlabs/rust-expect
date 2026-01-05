@@ -68,10 +68,10 @@ just ci-status-all
 The `full` feature enables most optional features. Always test with it:
 
 ```bash
-# Local verification must use all features
-just ci-all           # Includes --all-features
-just test-all         # Tests with all features
-just clippy-all       # Lints with all features
+# Local verification uses all features by default
+just ci               # Includes --all-features
+just test             # Tests with all features
+just clippy           # Lints with all features
 
 # This catches issues like:
 # - Missing feature gates
@@ -238,13 +238,15 @@ cargo publish -p rust-expect
 just release-check
 
 # This executes:
-# 1. ci-all          - Full CI with all features
-# 2. wip-check       - No TODO/FIXME/unimplemented! in src/
-# 3. panic-audit     - Review .unwrap() and .expect() usage
-# 4. version-sync    - README version matches Cargo.toml
-# 5. metadata-check  - Cargo.toml has required fields
-# 6. audit           - No known vulnerabilities
-# 7. deny            - License and advisory compliance
+# 1. ci-release         - Full CI pipeline (fmt, clippy, tests, docs, semver, MSRV)
+# 2. check-feature-flags - Verify all feature combinations compile
+# 3. wip-check          - No TODO/FIXME/unimplemented! in src/
+# 4. panic-audit        - Review .unwrap() and .expect() usage
+# 5. version-sync       - README version matches Cargo.toml
+# 6. typos              - Spell check documentation
+# 7. machete            - Detect unused dependencies
+# 8. metadata-check     - Cargo.toml has required fields
+# 9. url-check          - Verify repository URLs are correct
 ```
 
 ### Manual Checks
@@ -395,12 +397,15 @@ cargo check -p rust-expect --features "mock test-utils"
 
 | Check | Default Features | All Features |
 |-------|------------------|--------------|
-| `cargo fmt --check` | ✅ | ✅ |
+| `cargo +nightly fmt --check` | ✅ | ✅ |
 | `cargo clippy` | ✅ | ✅ |
 | `cargo test` | ✅ | ✅ |
 | `cargo doc` | ✅ | ✅ |
 | `cargo audit` | ✅ | ✅ |
 | `cargo deny check` | ✅ | ✅ |
+
+**Note:** Nightly rustfmt is used for unstable options like `imports_granularity` (import grouping).
+Run `just setup-tools` to install the nightly toolchain with rustfmt.
 
 ### Platform Matrix
 
@@ -649,6 +654,21 @@ sudo apt install gh  # Ubuntu
 
 # Authenticate
 gh auth login
+```
+
+### Nightly Rustfmt
+
+This project uses nightly rustfmt for unstable formatting options like `imports_granularity`:
+
+```bash
+# Install nightly toolchain with rustfmt
+rustup toolchain install nightly --component rustfmt --profile minimal
+
+# Or run the setup-tools recipe which handles this
+just setup-tools
+
+# Verify nightly rustfmt is available
+cargo +nightly fmt --version
 ```
 
 ### Just Command Runner

@@ -1,9 +1,10 @@
 //! Line ending detection and handling.
 
 /// Line ending style.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineEnding {
     /// Unix-style LF (\n).
+    #[default]
     Lf,
     /// Windows-style CRLF (\r\n).
     CrLf,
@@ -44,19 +45,6 @@ impl LineEnding {
             Self::CrLf => "CRLF",
             Self::Cr => "CR",
             Self::Unknown => "Unknown",
-        }
-    }
-}
-
-impl Default for LineEnding {
-    fn default() -> Self {
-        #[cfg(windows)]
-        {
-            Self::CrLf
-        }
-        #[cfg(not(windows))]
-        {
-            Self::Lf
         }
     }
 }

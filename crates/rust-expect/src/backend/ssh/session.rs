@@ -313,22 +313,21 @@ mod russh_impl {
         let known_hosts_path = get_known_hosts_path();
 
         // Create .ssh directory if it doesn't exist
-        if let Some(parent) = known_hosts_path.parent() {
-            if !parent.exists() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    tracing::warn!(
-                        error = %e,
-                        "Failed to create .ssh directory, accepting key without saving"
-                    );
-                    return Ok(true);
-                }
-                // Set proper permissions on Unix
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ =
-                        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
-                }
+        if let Some(parent) = known_hosts_path.parent()
+            && !parent.exists()
+        {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to create .ssh directory, accepting key without saving"
+                );
+                return Ok(true);
+            }
+            // Set proper permissions on Unix
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
             }
         }
 

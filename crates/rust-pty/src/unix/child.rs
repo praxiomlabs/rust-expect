@@ -147,10 +147,10 @@ impl UnixPtyChild {
         use rustix::process::{WaitOptions, waitpid};
 
         // Check cached status first
-        if let Ok(guard) = self.exit_status.try_lock() {
-            if let Some(s) = *guard {
-                return Ok(Some(s));
-            }
+        if let Ok(guard) = self.exit_status.try_lock()
+            && let Some(s) = *guard
+        {
+            return Ok(Some(s));
         }
 
         let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| {

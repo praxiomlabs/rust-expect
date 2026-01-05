@@ -101,11 +101,11 @@ impl RegexCache {
             }
 
             // Evict if necessary
-            if cache.entries.len() >= self.max_size {
-                if let Some(oldest) = cache.order.first().cloned() {
-                    cache.entries.remove(&oldest);
-                    cache.order.remove(0);
-                }
+            if cache.entries.len() >= self.max_size
+                && let Some(oldest) = cache.order.first().cloned()
+            {
+                cache.entries.remove(&oldest);
+                cache.order.remove(0);
             }
 
             // Insert new entry

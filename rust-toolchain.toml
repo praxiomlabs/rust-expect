@@ -2,6 +2,6 @@
 # https://doc.rust-lang.org/edition-guide/rust-2024/index.html
 
 [toolchain]
-channel = "1.88"
+channel = "1.92"
 components = ["rustfmt", "clippy", "rust-docs", "rust-src"]
 profile = "default"

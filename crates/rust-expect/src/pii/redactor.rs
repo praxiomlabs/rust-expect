@@ -107,10 +107,10 @@ impl PiiRedactor {
     /// Get the replacement string for a match.
     fn get_replacement(&self, m: &PiiMatch) -> String {
         // Check for custom placeholder first (for built-in types only)
-        if !m.is_custom() {
-            if let Some(custom) = self.custom_placeholders.get(&m.pii_type) {
-                return custom.clone();
-            }
+        if !m.is_custom()
+            && let Some(custom) = self.custom_placeholders.get(&m.pii_type)
+        {
+            return custom.clone();
         }
 
         match self.style {
@@ -211,10 +211,10 @@ impl StreamingRedactor {
         }
 
         // Try to find a space
-        if self.buffer.len() > 100 {
-            if let Some(pos) = self.buffer[..100].rfind(' ') {
-                return pos + 1;
-            }
+        if self.buffer.len() > 100
+            && let Some(pos) = self.buffer[..100].rfind(' ')
+        {
+            return pos + 1;
         }
 
         0

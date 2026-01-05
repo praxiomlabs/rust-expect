@@ -408,13 +408,12 @@ fn unescape_json(s: &str) -> String {
                             }
                         }
                     }
-                    if hex.len() == 4 {
-                        if let Ok(code) = u32::from_str_radix(&hex, 16) {
-                            if let Some(ch) = char::from_u32(code) {
-                                result.push(ch);
-                                continue;
-                            }
-                        }
+                    if hex.len() == 4
+                        && let Ok(code) = u32::from_str_radix(&hex, 16)
+                        && let Some(ch) = char::from_u32(code)
+                    {
+                        result.push(ch);
+                        continue;
                     }
                     // Invalid escape, keep as-is
                     result.push_str("\\u");

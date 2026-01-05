@@ -254,6 +254,7 @@ impl Default for SshCredentials {
 /// is enabled. Using it in production environments enables MITM attacks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum HostKeyVerification {
     /// Accept all keys without verification.
     ///
@@ -269,15 +270,10 @@ pub enum HostKeyVerification {
     /// Reject unknown keys.
     RejectUnknown,
     /// Check against `known_hosts` file.
+    #[default]
     KnownHosts,
     /// Accept on first use, then verify (Trust On First Use).
     Tofu,
-}
-
-impl Default for HostKeyVerification {
-    fn default() -> Self {
-        Self::KnownHosts
-    }
 }
 
 #[cfg(test)]

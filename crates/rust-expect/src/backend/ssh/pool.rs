@@ -225,15 +225,15 @@ impl ConnectionPool {
         let key = Self::make_key(ssh_config);
 
         // Try to get an existing connection
-        if self.config.reuse_connections {
-            if let Some(conn) = self.try_acquire_existing(&key) {
-                // Validate if configured
-                if self.config.validate_on_checkout && !conn.is_connected() {
-                    // Connection is stale, release it and create new
-                    conn.release();
-                } else {
-                    return Ok(PooledConnection::new(conn));
-                }
+        if self.config.reuse_connections
+            && let Some(conn) = self.try_acquire_existing(&key)
+        {
+            // Validate if configured
+            if self.config.validate_on_checkout && !conn.is_connected() {
+                // Connection is stale, release it and create new
+                conn.release();
+            } else {
+                return Ok(PooledConnection::new(conn));
             }
         }
 
@@ -243,13 +243,13 @@ impl ConnectionPool {
                 .connections
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if let Some(entries) = connections.get(&key) {
-                if entries.len() >= self.config.max_per_host {
-                    return Err(crate::error::ExpectError::config(format!(
-                        "Maximum connections per host ({}) exceeded for {}",
-                        self.config.max_per_host, key
-                    )));
-                }
+            if let Some(entries) = connections.get(&key)
+                && entries.len() >= self.config.max_per_host
+            {
+                return Err(crate::error::ExpectError::config(format!(
+                    "Maximum connections per host ({}) exceeded for {}",
+                    self.config.max_per_host, key
+                )));
             }
         }
 
@@ -290,15 +290,15 @@ impl ConnectionPool {
         let key = Self::make_key(ssh_config);
 
         // Try to get an existing connection
-        if self.config.reuse_connections {
-            if let Some(conn) = self.try_acquire_existing(&key) {
-                // Validate if configured
-                if self.config.validate_on_checkout && !conn.is_connected() {
-                    // Connection is stale, release it and try next
-                    conn.release();
-                } else {
-                    return Ok(PooledConnection::new(conn));
-                }
+        if self.config.reuse_connections
+            && let Some(conn) = self.try_acquire_existing(&key)
+        {
+            // Validate if configured
+            if self.config.validate_on_checkout && !conn.is_connected() {
+                // Connection is stale, release it and try next
+                conn.release();
+            } else {
+                return Ok(PooledConnection::new(conn));
             }
         }
 
@@ -316,13 +316,13 @@ impl ConnectionPool {
                 )));
             }
 
-            if let Some(entries) = connections.get(&key) {
-                if entries.len() >= self.config.max_per_host {
-                    return Err(crate::error::ExpectError::config(format!(
-                        "Maximum connections per host ({}) exceeded for {}",
-                        self.config.max_per_host, key
-                    )));
-                }
+            if let Some(entries) = connections.get(&key)
+                && entries.len() >= self.config.max_per_host
+            {
+                return Err(crate::error::ExpectError::config(format!(
+                    "Maximum connections per host ({}) exceeded for {}",
+                    self.config.max_per_host, key
+                )));
             }
         }
 
@@ -356,10 +356,10 @@ impl ConnectionPool {
         if let Some(entries) = connections.get(key) {
             for entry in entries {
                 // Check connection age
-                if let Some(max_age) = self.config.max_connection_age {
-                    if entry.age() > max_age {
-                        continue;
-                    }
+                if let Some(max_age) = self.config.max_connection_age
+                    && entry.age() > max_age
+                {
+                    continue;
                 }
 
                 // Try to acquire (atomic compare-and-swap)
@@ -401,10 +401,10 @@ impl ConnectionPool {
                 }
 
                 // Remove if too old
-                if let Some(max) = max_age {
-                    if entry.age() > max {
-                        return false;
-                    }
+                if let Some(max) = max_age
+                    && entry.age() > max
+                {
+                    return false;
                 }
 
                 // Remove if idle too long (approximation based on created time)

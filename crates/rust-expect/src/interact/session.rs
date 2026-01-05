@@ -440,14 +440,14 @@ where
 
         loop {
             // Check timeout
-            if let Some(deadline) = deadline {
-                if std::time::Instant::now() >= deadline {
-                    self.hook_manager.notify(&InteractionEvent::Ended);
-                    return Ok(InteractResult {
-                        reason: InteractEndReason::Timeout,
-                        buffer: self.buffer.clone(),
-                    });
-                }
+            if let Some(deadline) = deadline
+                && std::time::Instant::now() >= deadline
+            {
+                self.hook_manager.notify(&InteractionEvent::Ended);
+                return Ok(InteractResult {
+                    reason: InteractEndReason::Timeout,
+                    buffer: self.buffer.clone(),
+                });
             }
 
             let read_timeout = self.mode.read_timeout;

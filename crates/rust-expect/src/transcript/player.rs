@@ -6,20 +6,15 @@ use std::time::{Duration, Instant};
 use super::format::{EventType, Transcript, TranscriptEvent};
 
 /// Playback speed.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum PlaybackSpeed {
     /// Real-time playback.
+    #[default]
     Realtime,
     /// Fixed speed multiplier.
     Speed(f64),
     /// Maximum speed (instant).
     Instant,
-}
-
-impl Default for PlaybackSpeed {
-    fn default() -> Self {
-        Self::Realtime
-    }
 }
 
 /// Playback options.

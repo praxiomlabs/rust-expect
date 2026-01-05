@@ -104,14 +104,14 @@ pub fn validate_command(command: &str, options: &ValidationOptions) -> crate::er
         }));
     }
 
-    if options.reject_shell_metacharacters {
-        if let Some(c) = find_shell_metachar(command) {
-            return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
-                kind: "command".to_string(),
-                value: command.to_string(),
-                reason: format!("command contains shell metacharacter '{c}'"),
-            }));
-        }
+    if options.reject_shell_metacharacters
+        && let Some(c) = find_shell_metachar(command)
+    {
+        return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
+            kind: "command".to_string(),
+            value: command.to_string(),
+            reason: format!("command contains shell metacharacter '{c}'"),
+        }));
     }
 
     Ok(())
@@ -136,14 +136,14 @@ pub fn validate_argument(arg: &str, options: &ValidationOptions) -> crate::error
         }));
     }
 
-    if options.reject_shell_metacharacters {
-        if let Some(c) = find_shell_metachar(arg) {
-            return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
-                kind: "argument".to_string(),
-                value: arg.to_string(),
-                reason: format!("argument contains shell metacharacter '{c}'"),
-            }));
-        }
+    if options.reject_shell_metacharacters
+        && let Some(c) = find_shell_metachar(arg)
+    {
+        return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
+            kind: "argument".to_string(),
+            value: arg.to_string(),
+            reason: format!("argument contains shell metacharacter '{c}'"),
+        }));
     }
 
     Ok(())

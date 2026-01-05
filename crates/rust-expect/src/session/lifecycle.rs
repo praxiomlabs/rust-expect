@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::types::{ControlChar, ProcessExitStatus, SessionState};
 
 /// Shutdown strategy for closing a session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShutdownStrategy {
     /// Send exit command and wait for graceful shutdown.
     Graceful,
@@ -17,13 +17,8 @@ pub enum ShutdownStrategy {
     /// Send SIGKILL (or equivalent) immediately.
     Kill,
     /// Try graceful, then terminate, then kill.
+    #[default]
     Escalating,
-}
-
-impl Default for ShutdownStrategy {
-    fn default() -> Self {
-        Self::Escalating
-    }
 }
 
 /// Configuration for session shutdown.

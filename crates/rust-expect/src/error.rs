@@ -204,7 +204,7 @@ pub enum ExpectError {
         /// The session that encountered the error.
         session_id: usize,
         /// The underlying error.
-        error: Box<ExpectError>,
+        error: Box<Self>,
     },
 
     /// Session is not in interact mode.

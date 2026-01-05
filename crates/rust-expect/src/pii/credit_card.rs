@@ -68,7 +68,7 @@ pub fn luhn_check(number: &str) -> bool {
         })
         .sum();
 
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 /// Mask a credit card number (show only last 4 digits).

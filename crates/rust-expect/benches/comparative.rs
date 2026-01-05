@@ -164,17 +164,17 @@ fn bench_multi_pattern(c: &mut Criterion) {
                 patterns.iter().map(std::string::String::as_str).collect();
             b.iter(|| {
                 for p in &patterns_ref {
-                    if let Ok(matches) = p.check(black_box(haystack.as_bytes()), false) {
-                        if !matches.is_empty() {
-                            return Some(*p);
-                        }
+                    if let Ok(matches) = p.check(black_box(haystack.as_bytes()), false)
+                        && !matches.is_empty()
+                    {
+                        return Some(*p);
                     }
                 }
                 // Check the matching pattern
-                if let Ok(matches) = "$".check(black_box(haystack.as_bytes()), false) {
-                    if !matches.is_empty() {
-                        return Some("$");
-                    }
+                if let Ok(matches) = "$".check(black_box(haystack.as_bytes()), false)
+                    && !matches.is_empty()
+                {
+                    return Some("$");
                 }
                 None
             });

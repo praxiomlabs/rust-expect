@@ -107,18 +107,17 @@ impl Recorder {
             return false;
         }
 
-        if let Some(max_dur) = self.max_duration {
-            if self.elapsed() > max_dur {
-                return false;
-            }
+        if let Some(max_dur) = self.max_duration
+            && self.elapsed() > max_dur
+        {
+            return false;
         }
 
-        if let Some(max_events) = self.max_events {
-            if let Ok(t) = self.transcript.lock() {
-                if t.events.len() >= max_events {
-                    return false;
-                }
-            }
+        if let Some(max_events) = self.max_events
+            && let Ok(t) = self.transcript.lock()
+            && t.events.len() >= max_events
+        {
+            return false;
         }
 
         true

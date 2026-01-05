@@ -646,66 +646,71 @@ mod russh_impl {
                     #[cfg(windows)]
                     {
                         // Try Pageant first (PuTTY SSH agent)
-                        // Note: connect_pageant() returns AgentClient directly (not Result).
-                        // Errors are detected when calling request_identities().
                         tracing::debug!(user = %username, "Trying Pageant SSH agent");
-                        let mut agent =
-                            russh::keys::agent::client::AgentClient::connect_pageant().await;
-                        match agent.request_identities().await {
-                            Ok(keys) => {
-                                tracing::debug!(
-                                    user = %username,
-                                    key_count = keys.len(),
-                                    "Found keys in Pageant"
-                                );
+                        match russh::keys::agent::client::AgentClient::connect_pageant().await {
+                            Ok(mut agent) => match agent.request_identities().await {
+                                Ok(keys) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        key_count = keys.len(),
+                                        "Found keys in Pageant"
+                                    );
 
-                                for key in keys {
-                                    let rsa_hash = handle
-                                        .best_supported_rsa_hash()
-                                        .await
-                                        .ok()
-                                        .flatten()
-                                        .flatten();
+                                    for key in keys {
+                                        let rsa_hash = handle
+                                            .best_supported_rsa_hash()
+                                            .await
+                                            .ok()
+                                            .flatten()
+                                            .flatten();
 
-                                    match handle
-                                        .authenticate_publickey_with(
-                                            username,
-                                            key.clone(),
-                                            rsa_hash,
-                                            &mut agent,
-                                        )
-                                        .await
-                                    {
-                                        Ok(auth_result) if auth_result.success() => {
-                                            tracing::info!(
-                                                user = %username,
-                                                key_type = %key.algorithm().as_str(),
-                                                "Pageant authentication successful"
-                                            );
-                                            return Ok(true);
-                                        }
-                                        Ok(_) => {
-                                            tracing::debug!(
-                                                user = %username,
-                                                key_type = %key.algorithm().as_str(),
-                                                "Pageant key rejected, trying next"
-                                            );
-                                        }
-                                        Err(e) => {
-                                            tracing::debug!(
-                                                user = %username,
-                                                error = %e,
-                                                "Pageant authentication error"
-                                            );
+                                        match handle
+                                            .authenticate_publickey_with(
+                                                username,
+                                                key.clone(),
+                                                rsa_hash,
+                                                &mut agent,
+                                            )
+                                            .await
+                                        {
+                                            Ok(auth_result) if auth_result.success() => {
+                                                tracing::info!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "Pageant authentication successful"
+                                                );
+                                                return Ok(true);
+                                            }
+                                            Ok(_) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    key_type = %key.algorithm().as_str(),
+                                                    "Pageant key rejected, trying next"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::debug!(
+                                                    user = %username,
+                                                    error = %e,
+                                                    "Pageant authentication error"
+                                                );
+                                            }
                                         }
                                     }
                                 }
-                            }
+                                Err(e) => {
+                                    tracing::debug!(
+                                        user = %username,
+                                        error = %e,
+                                        "Failed to get identities from Pageant, trying OpenSSH agent"
+                                    );
+                                }
+                            },
                             Err(e) => {
                                 tracing::debug!(
                                     user = %username,
                                     error = %e,
-                                    "Pageant not available or failed to get identities, trying OpenSSH agent"
+                                    "Pageant not available, trying OpenSSH agent"
                                 );
                             }
                         }

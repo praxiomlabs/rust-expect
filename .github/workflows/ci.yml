@@ -57,7 +57,9 @@ jobs:
 
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
-        run: cargo test --workspace --all-features
+        # Exclude ssh feature on Windows: pageant 0.2.0 requires Rust 1.88 for let chains
+        # but declares MSRV 1.85. Track: https://github.com/warp-tech/russh/issues
+        run: cargo test --workspace --features "mock,screen,pii-redaction,metrics,test-utils,legacy-encoding"
         env:
           # Windows may need longer timeouts for PTY operations
           RUST_TEST_TIME_UNIT: 60000
@@ -164,6 +166,7 @@ jobs:
           fi
 
   # Windows-specific feature tests
+  # Note: ssh feature excluded - pageant 0.2.0 requires Rust 1.88 for let chains
   windows-features:
     name: Windows Feature Check
     runs-on: windows-latest
@@ -173,7 +176,8 @@ jobs:
           - ""
           - "mock"
           - "screen"
-          - "full"
+          - "pii-redaction"
+          - "metrics"
     steps:
       - uses: actions/checkout@v6
 

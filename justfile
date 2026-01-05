@@ -17,14 +17,19 @@ edition := "2024"
 # Main crate for default operations
 main_crate := "rust-expect"
 
-# Default features for quick builds (works everywhere)
-default_features := ""
-
-# All features for comprehensive testing (full feature set)
-all_features := "full"
-
 # Parallel job count (use all available cores)
 jobs := `nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4`
+
+# ============================================================================
+# FEATURE CONFIGURATION
+# ============================================================================
+
+# Control feature flags via environment variable:
+#   just test                     # all features (default, comprehensive)
+#   FEATURES=none just test       # default features only (fast)
+#   FEATURES=ssh,screen just test # specific features
+features := env_var_or_default("FEATURES", "all")
+_ff := if features == "all" { "--all-features" } else if features == "none" { "" } else { "--features " + features }
 
 # ============================================================================
 # PLATFORM DETECTION
@@ -118,8 +123,10 @@ setup-tools:
     set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Installing Rust development tools...\n'
 
-    # Core tools
-    rustup component add rustfmt clippy
+    # Core tools (nightly rustfmt for unstable options like imports_granularity)
+    rustup component add clippy
+    rustup toolchain install nightly --component rustfmt --profile minimal
+    printf '{{cyan}}[INFO]{{reset}} Using nightly rustfmt for import grouping support\n'
 
     # Optional but recommended tools
     TOOLS=(
@@ -194,39 +201,21 @@ setup:
 # ============================================================================
 
 [group('build')]
-[doc("Build workspace (default features)")]
+[doc("Build workspace (use FEATURES=none for fast builds)")]
 build:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building workspace (default features)...\n'
-    {{cargo}} build --workspace -j {{jobs}}
+    printf '{{cyan}}[INFO]{{reset}} Building workspace (features={{features}})...\n'
+    {{cargo}} build --workspace {{_ff}} -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Build complete\n'
 
 [group('build')]
-[doc("Build workspace with ALL features")]
-build-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building workspace (all features)...\n'
-    {{cargo}} build --workspace --all-features -j {{jobs}}
-    printf '{{green}}[OK]{{reset}}   Build complete\n'
-
-[group('build')]
-[doc("Check workspace compiles (default features, fast)")]
+[doc("Check workspace compiles (use FEATURES=none for fast checks)")]
 check:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Checking workspace (default features)...\n'
-    {{cargo}} check --workspace -j {{jobs}}
-    printf '{{green}}[OK]{{reset}}   Check complete\n'
-
-[group('build')]
-[doc("Check workspace compiles with ALL features")]
-check-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Checking workspace (all features)...\n'
-    {{cargo}} check --workspace --all-features -j {{jobs}}
+    printf '{{cyan}}[INFO]{{reset}} Checking workspace (features={{features}})...\n'
+    {{cargo}} check --workspace {{_ff}} -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Check complete\n'
 
 [group('build')]
@@ -234,17 +223,8 @@ check-all:
 build-release:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building workspace (release mode)...\n'
-    {{cargo}} build --workspace --release -j {{jobs}}
-    printf '{{green}}[OK]{{reset}}   Release build complete\n'
-
-[group('build')]
-[doc("Build in release mode with ALL features")]
-build-release-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building workspace (release, all features)...\n'
-    {{cargo}} build --workspace --release --all-features -j {{jobs}}
+    printf '{{cyan}}[INFO]{{reset}} Building workspace (release, features={{features}})...\n'
+    {{cargo}} build --workspace --release {{_ff}} -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Release build complete\n'
 
 [group('build')]
@@ -252,7 +232,7 @@ build-release-all:
 msrv-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Checking MSRV ({{msrv}}) compliance...\n'
+    printf '{{cyan}}[INFO]{{reset}} Checking MSRV ({{msrv}}) compliance (features={{features}})...\n'
 
     # Check if MSRV toolchain is installed
     if ! rustup run {{msrv}} cargo --version &> /dev/null; then
@@ -260,22 +240,7 @@ msrv-check:
         rustup install {{msrv}}
     fi
 
-    rustup run {{msrv}} cargo check --workspace
-    printf '{{green}}[OK]{{reset}}   MSRV check passed ({{msrv}})\n'
-
-[group('build')]
-[doc("Check MSRV compliance with ALL features")]
-msrv-check-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Checking MSRV ({{msrv}}) compliance (all features)...\n'
-
-    if ! rustup run {{msrv}} cargo --version &> /dev/null; then
-        printf '{{yellow}}[WARN]{{reset}} Installing Rust {{msrv}}...\n'
-        rustup install {{msrv}}
-    fi
-
-    rustup run {{msrv}} cargo check --workspace --all-features
+    rustup run {{msrv}} cargo check --workspace {{_ff}}
     printf '{{green}}[OK]{{reset}}   MSRV check passed ({{msrv}})\n'
 
 # ============================================================================
@@ -283,21 +248,12 @@ msrv-check-all:
 # ============================================================================
 
 [group('test')]
-[doc("Run tests (default features)")]
+[doc("Run tests")]
 test:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running tests (default features)...\n'
-    {{cargo}} test --workspace -j {{jobs}}
-    printf '{{green}}[OK]{{reset}}   Tests passed\n'
-
-[group('test')]
-[doc("Run tests with ALL features")]
-test-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running tests (all features)...\n'
-    {{cargo}} test --workspace --all-features -j {{jobs}}
+    printf '{{cyan}}[INFO]{{reset}} Running tests (features={{features}})...\n'
+    {{cargo}} test --workspace {{_ff}} -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Tests passed\n'
 
 [group('test')]
@@ -305,17 +261,8 @@ test-all:
 nextest:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running tests with nextest...\n'
-    {{cargo}} nextest run --workspace -j {{jobs}}
-    printf '{{green}}[OK]{{reset}}   Tests passed\n'
-
-[group('test')]
-[doc("Run tests with nextest and ALL features")]
-nextest-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running tests with nextest (all features)...\n'
-    {{cargo}} nextest run --workspace --all-features -j {{jobs}}
+    printf '{{cyan}}[INFO]{{reset}} Running tests with nextest (features={{features}})...\n'
+    {{cargo}} nextest run --workspace {{_ff}} -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Tests passed\n'
 
 [group('test')]
@@ -323,17 +270,8 @@ nextest-all:
 nextest-locked:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running tests with nextest (locked)...\n'
-    {{cargo}} nextest run --workspace --locked -j {{jobs}}
-    printf '{{green}}[OK]{{reset}}   Tests passed\n'
-
-[group('test')]
-[doc("Run tests with nextest using locked deps and ALL features (CI mode)")]
-nextest-locked-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running tests with nextest (locked, all features)...\n'
-    {{cargo}} nextest run --workspace --all-features --locked -j {{jobs}}
+    printf '{{cyan}}[INFO]{{reset}} Running tests with nextest (locked, features={{features}})...\n'
+    {{cargo}} nextest run --workspace {{_ff}} --locked -j {{jobs}}
     printf '{{green}}[OK]{{reset}}   Tests passed\n'
 
 [group('test')]
@@ -342,7 +280,7 @@ test-one name:
     #!/usr/bin/env bash
     set -euo pipefail
     printf '{{cyan}}[INFO]{{reset}} Running test: {{name}}\n'
-    {{cargo}} test --workspace --all-features -- "{{name}}" --nocapture
+    {{cargo}} test --workspace {{_ff}} -- "{{name}}" --nocapture
     printf '{{green}}[OK]{{reset}}   Test passed\n'
 
 [group('test')]
@@ -404,39 +342,30 @@ check-feature-flags:
 # ============================================================================
 
 [group('lint')]
-[doc("Format code with rustfmt")]
+[doc("Format code with rustfmt (uses nightly for import grouping)")]
 fmt:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Formatting code...\n'
-    {{cargo}} fmt --all
+    printf '{{cyan}}[INFO]{{reset}} Formatting code (nightly rustfmt)...\n'
+    cargo +nightly fmt --all
     printf '{{green}}[OK]{{reset}}   Code formatted\n'
 
 [group('lint')]
-[doc("Check formatting without modifying files")]
+[doc("Check formatting without modifying files (uses nightly for import grouping)")]
 fmt-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Checking code formatting...\n'
-    {{cargo}} fmt --all -- --check
+    printf '{{cyan}}[INFO]{{reset}} Checking code formatting (nightly rustfmt)...\n'
+    cargo +nightly fmt --all -- --check
     printf '{{green}}[OK]{{reset}}   Formatting check passed\n'
 
 [group('lint')]
-[doc("Run clippy lints (default features)")]
+[doc("Run clippy lints")]
 clippy:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running clippy (default features)...\n'
-    {{cargo}} clippy --workspace --all-targets -- -D warnings
-    printf '{{green}}[OK]{{reset}}   Clippy passed\n'
-
-[group('lint')]
-[doc("Run clippy lints with ALL features")]
-clippy-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running clippy (all features)...\n'
-    {{cargo}} clippy --workspace --all-targets --all-features -- -D warnings
+    printf '{{cyan}}[INFO]{{reset}} Running clippy (features={{features}})...\n'
+    {{cargo}} clippy --workspace --all-targets {{_ff}} -- -D warnings
     printf '{{green}}[OK]{{reset}}   Clippy passed\n'
 
 [group('lint')]
@@ -444,8 +373,8 @@ clippy-all:
 clippy-fix:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running clippy with auto-fix...\n'
-    {{cargo}} clippy --workspace --all-targets --all-features --fix --allow-dirty --allow-staged
+    printf '{{cyan}}[INFO]{{reset}} Running clippy with auto-fix (features={{features}})...\n'
+    {{cargo}} clippy --workspace --all-targets {{_ff}} --fix --allow-dirty --allow-staged
     printf '{{green}}[OK]{{reset}}   Clippy fixes applied\n'
 
 [group('lint')]
@@ -489,31 +418,17 @@ semver:
 lint: fmt-check clippy
     @printf '{{green}}[OK]{{reset}}   All lints passed\n'
 
-[group('lint')]
-[doc("Run all lints with ALL features")]
-lint-all: fmt-check clippy-all
-    @printf '{{green}}[OK]{{reset}}   All lints passed (all features)\n'
-
 # ============================================================================
 # DOCUMENTATION RECIPES
 # ============================================================================
 
 [group('docs')]
-[doc("Build documentation (default features)")]
+[doc("Build documentation")]
 doc:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building documentation...\n'
-    {{cargo}} doc --workspace --no-deps
-    printf '{{green}}[OK]{{reset}}   Documentation built: target/doc/{{main_crate}}/index.html\n'
-
-[group('docs')]
-[doc("Build documentation with ALL features")]
-doc-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building documentation (all features)...\n'
-    {{cargo}} doc --workspace --no-deps --all-features
+    printf '{{cyan}}[INFO]{{reset}} Building documentation (features={{features}})...\n'
+    {{cargo}} doc --workspace --no-deps {{_ff}}
     printf '{{green}}[OK]{{reset}}   Documentation built: target/doc/{{main_crate}}/index.html\n'
 
 [group('docs')]
@@ -521,17 +436,8 @@ doc-all:
 doc-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Checking documentation...\n'
-    RUSTDOCFLAGS="-D warnings" {{cargo}} doc --workspace --no-deps
-    printf '{{green}}[OK]{{reset}}   Documentation check passed\n'
-
-[group('docs')]
-[doc("Build documentation and check for warnings (all features)")]
-doc-check-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Checking documentation (all features)...\n'
-    RUSTDOCFLAGS="-D warnings" {{cargo}} doc --workspace --no-deps --all-features
+    printf '{{cyan}}[INFO]{{reset}} Checking documentation (features={{features}})...\n'
+    RUSTDOCFLAGS="-D warnings" {{cargo}} doc --workspace --no-deps {{_ff}}
     printf '{{green}}[OK]{{reset}}   Documentation check passed\n'
 
 [group('docs')]
@@ -551,17 +457,8 @@ doc-open: doc
 coverage:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Generating coverage report (HTML)...\n'
-    {{cargo}} llvm-cov --workspace --html
-    printf '{{green}}[OK]{{reset}}   Coverage report: target/llvm-cov/html/index.html\n'
-
-[group('coverage')]
-[doc("Generate test coverage report with ALL features")]
-coverage-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Generating coverage report (all features)...\n'
-    {{cargo}} llvm-cov --workspace --all-features --html
+    printf '{{cyan}}[INFO]{{reset}} Generating coverage report (features={{features}})...\n'
+    {{cargo}} llvm-cov --workspace {{_ff}} --html
     printf '{{green}}[OK]{{reset}}   Coverage report: target/llvm-cov/html/index.html\n'
 
 [group('coverage')]
@@ -569,17 +466,8 @@ coverage-all:
 coverage-lcov:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Generating coverage report (LCOV)...\n'
-    {{cargo}} llvm-cov --workspace --lcov --output-path lcov.info
-    printf '{{green}}[OK]{{reset}}   Coverage report: lcov.info\n'
-
-[group('coverage')]
-[doc("Generate coverage in LCOV format with ALL features")]
-coverage-lcov-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Generating coverage report (LCOV, all features)...\n'
-    {{cargo}} llvm-cov --workspace --all-features --lcov --output-path lcov.info
+    printf '{{cyan}}[INFO]{{reset}} Generating coverage report (LCOV, features={{features}})...\n'
+    {{cargo}} llvm-cov --workspace {{_ff}} --lcov --output-path lcov.info
     printf '{{green}}[OK]{{reset}}   Coverage report: lcov.info\n'
 
 [group('coverage')]
@@ -639,8 +527,8 @@ bench-compare:
 example name:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Running example: {{name}}\n'
-    {{cargo}} run -p {{main_crate}} --example "{{name}}" --all-features
+    printf '{{cyan}}[INFO]{{reset}} Running example: {{name}} (features={{features}})\n'
+    {{cargo}} run -p {{main_crate}} --example "{{name}}" {{_ff}}
     printf '{{green}}[OK]{{reset}}   Example complete\n'
 
 [group('examples')]
@@ -648,17 +536,8 @@ example name:
 examples:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building examples (default features)...\n'
-    {{cargo}} build -p {{main_crate}} --examples
-    printf '{{green}}[OK]{{reset}}   Examples built\n'
-
-[group('examples')]
-[doc("Build all examples with ALL features")]
-examples-all:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Building examples (all features)...\n'
-    {{cargo}} build -p {{main_crate}} --examples --all-features
+    printf '{{cyan}}[INFO]{{reset}} Building examples (features={{features}})...\n'
+    {{cargo}} build -p {{main_crate}} --examples {{_ff}}
     printf '{{green}}[OK]{{reset}}   Examples built\n'
 
 [group('examples')]
@@ -688,14 +567,9 @@ examples-list:
 # ============================================================================
 
 [group('dev')]
-[doc("Full development check (default features)")]
+[doc("Full development check (build + test + lint)")]
 dev: build test lint
     @printf '{{green}}[OK]{{reset}}   Development checks passed\n'
-
-[group('dev')]
-[doc("Full development check with ALL features")]
-dev-all: build-all test-all lint-all
-    @printf '{{green}}[OK]{{reset}}   Development checks passed (all features)\n'
 
 [group('dev')]
 [no-exit-message]
@@ -703,8 +577,8 @@ dev-all: build-all test-all lint-all
 watch:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Watching for changes (tests)...\n'
-    {{cargo}} watch -x "test --workspace"
+    printf '{{cyan}}[INFO]{{reset}} Watching for changes (tests, features={{features}})...\n'
+    {{cargo}} watch -x "test --workspace {{_ff}}"
 
 [group('dev')]
 [no-exit-message]
@@ -712,8 +586,8 @@ watch:
 watch-check:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Watching for changes (check)...\n'
-    {{cargo}} watch -x "check --workspace"
+    printf '{{cyan}}[INFO]{{reset}} Watching for changes (check, features={{features}})...\n'
+    {{cargo}} watch -x "check --workspace {{_ff}}"
 
 [group('dev')]
 [no-exit-message]
@@ -721,8 +595,8 @@ watch-check:
 watch-clippy:
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '{{cyan}}[INFO]{{reset}} Watching for changes (clippy)...\n'
-    {{cargo}} watch -x "clippy --workspace --all-targets"
+    printf '{{cyan}}[INFO]{{reset}} Watching for changes (clippy, features={{features}})...\n'
+    {{cargo}} watch -x "clippy --workspace --all-targets {{_ff}}"
 
 # ============================================================================
 # CI/CD RECIPES
@@ -745,19 +619,11 @@ version-sync:
     printf '{{green}}[OK]{{reset}}   Version sync check complete (v%s)\n' "$VERSION"
 
 [group('ci')]
-[doc("Standard CI pipeline (default features, fast local checks)")]
+[doc("Standard CI pipeline (fmt + clippy + test + doc + examples)")]
 ci: fmt-check clippy nextest-locked doc-check examples
     #!/usr/bin/env bash
     set -euo pipefail
-    printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete ══════{{reset}}\n\n'
-    printf '{{green}}[OK]{{reset}}   All CI checks passed\n'
-
-[group('ci')]
-[doc("CI pipeline with ALL features (matches GitHub Actions)")]
-ci-all: fmt-check clippy-all nextest-locked-all doc-check-all examples-all
-    #!/usr/bin/env bash
-    set -euo pipefail
-    printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete (all features) ══════{{reset}}\n\n'
+    printf '\n{{bold}}{{blue}}══════ CI Pipeline Complete (features={{features}}) ══════{{reset}}\n\n'
     printf '{{green}}[OK]{{reset}}   All CI checks passed\n'
 
 [group('ci')]
@@ -776,19 +642,9 @@ ci-full: ci coverage-lcov audit deny
     @printf '{{green}}[OK]{{reset}}   Full CI pipeline passed\n'
 
 [group('ci')]
-[doc("Full CI with ALL features and security audit")]
-ci-full-all: ci-all coverage-lcov-all audit deny
-    @printf '{{green}}[OK]{{reset}}   Full CI pipeline passed (all features)\n'
-
-[group('ci')]
-[doc("Complete CI with all checks (for releases, default features)")]
+[doc("Complete CI with all checks (for releases)")]
 ci-release: ci-full semver msrv-check test-features
     @printf '{{green}}[OK]{{reset}}   Release CI pipeline passed\n'
-
-[group('ci')]
-[doc("Complete CI with ALL FEATURES (REQUIRED for releases)")]
-ci-release-all: ci-full-all semver msrv-check-all test-features
-    @printf '{{green}}[OK]{{reset}}   Release CI pipeline passed (all features)\n'
 
 [group('ci')]
 [doc("Check if CI passed on the main branch (use before tagging)")]
@@ -1043,8 +899,8 @@ typos:
     printf '{{green}}[OK]{{reset}}   Typos check passed\n'
 
 [group('release')]
-[doc("Prepare for release (validates ALL features - REQUIRED before tagging)")]
-release-check: ci-release-all check-feature-flags wip-check panic-audit version-sync typos machete metadata-check url-check
+[doc("Prepare for release (runs full CI with all features)")]
+release-check: ci-release check-feature-flags wip-check panic-audit version-sync typos machete metadata-check url-check
     #!/usr/bin/env bash
     set -euo pipefail
     printf '\n{{bold}}{{blue}}══════ Release Validation ══════{{reset}}\n\n'
@@ -1057,7 +913,7 @@ release-check: ci-release-all check-feature-flags wip-check panic-audit version-
     if [ -n "$(git log @{u}.. 2>/dev/null)" ]; then
         printf '{{yellow}}[WARN]{{reset}} Unpushed commits detected\n'
     fi
-    printf '{{green}}[OK]{{reset}}   Ready for release (all features validated)\n'
+    printf '{{green}}[OK]{{reset}}   Ready for release\n'
     printf '\n{{cyan}}[NEXT]{{reset}} Run: just ci-status-all && just tag\n'
 
 [group('release')]
@@ -1344,16 +1200,19 @@ help:
     printf '\n{{bold}}{{project_name}} v{{version}}{{reset}} — Terminal Automation Library\n'
     printf 'MSRV: {{msrv}} | Edition: {{edition}} | Platform: {{platform}}\n\n'
     printf '{{bold}}Usage:{{reset}} just [recipe] [arguments...]\n\n'
-    printf '{{bold}}Recipe Naming Convention:{{reset}}\n'
-    printf '  Base recipes use DEFAULT features (work everywhere)\n'
-    printf '  -all variants use ALL features\n\n'
+    printf '{{bold}}Feature Control:{{reset}}\n'
+    printf '  Recipes default to ALL features (comprehensive testing).\n'
+    printf '  Override with FEATURES environment variable:\n\n'
+    printf '    just test                      # all features (default)\n'
+    printf '    FEATURES=none just test        # default features only (fast)\n'
+    printf '    FEATURES=ssh,screen just test  # specific features\n\n'
     printf '{{bold}}Quick Start:{{reset}}\n'
     printf '  just bootstrap   Full setup (system pkgs + tools + hooks)\n'
     printf '  just setup       Check development environment\n'
     printf '  just quick       Fast feedback (fmt + clippy + check)\n'
-    printf '  just ci          Run CI pipeline (default features)\n'
-    printf '  just ci-all      Run CI pipeline (all features)\n\n'
-    printf '{{bold}}Feature Flags:{{reset}}\n'
+    printf '  just ci          Run CI pipeline\n'
+    printf '  just ci-release  Full release validation\n\n'
+    printf '{{bold}}Available Features:{{reset}}\n'
     printf '  ssh             SSH backend (russh)\n'
     printf '  mock            Mock sessions for testing\n'
     printf '  screen          VT100 terminal emulation\n'

@@ -12,6 +12,7 @@ use std::task::{Context, Poll};
 
 use rustix::fs::{OFlags, fcntl_setfl};
 use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+#[cfg(not(target_os = "macos"))]
 use rustix::termios::{Winsize, tcsetwinsize};
 use tokio::io::unix::AsyncFd;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -118,15 +119,55 @@ impl UnixPtyMaster {
             return Err(PtyError::Closed);
         }
 
-        let winsize = Winsize {
-            ws_col: size.cols,
-            ws_row: size.rows,
-            ws_xpixel: size.xpixel,
-            ws_ypixel: size.ypixel,
-        };
+        // On macOS, use libc::ioctl directly with TIOCSWINSZ
+        #[cfg(target_os = "macos")]
+        {
+            #[allow(clippy::struct_field_names)]
+            #[repr(C)]
+            struct LibcWinsize {
+                ws_row: libc::c_ushort,
+                ws_col: libc::c_ushort,
+                ws_xpixel: libc::c_ushort,
+                ws_ypixel: libc::c_ushort,
+            }
 
-        tcsetwinsize(self.async_fd.get_ref(), winsize)
-            .map_err(|e| PtyError::Resize(io::Error::from_raw_os_error(e.raw_os_error())))
+            let winsize = LibcWinsize {
+                ws_row: size.rows,
+                ws_col: size.cols,
+                ws_xpixel: size.xpixel,
+                ws_ypixel: size.ypixel,
+            };
+
+            // SAFETY: ioctl with TIOCSWINSZ is the standard way to set terminal window size.
+            // We're passing a valid winsize struct to a valid file descriptor.
+            #[allow(unsafe_code)]
+            let result = unsafe {
+                libc::ioctl(
+                    self.async_fd.as_raw_fd(),
+                    libc::TIOCSWINSZ,
+                    &raw const winsize,
+                )
+            };
+
+            if result == -1 {
+                return Err(PtyError::Resize(io::Error::last_os_error()));
+            }
+            Ok(())
+        }
+
+        // On other Unix systems, use rustix
+        #[cfg(not(target_os = "macos"))]
+        {
+            let winsize = Winsize {
+                ws_col: size.cols,
+                ws_row: size.rows,
+                ws_xpixel: size.xpixel,
+                ws_ypixel: size.ypixel,
+            };
+
+            tcsetwinsize(self.async_fd.get_ref(), winsize)
+                .map_err(|e| PtyError::Resize(io::Error::from_raw_os_error(e.raw_os_error())))
+        }
     }
 
     /// Get the current window size.
@@ -289,12 +330,22 @@ mod tests {
 
         let (master, slave_path) = result.unwrap();
         assert!(master.is_open());
-        assert!(slave_path.starts_with("/dev/pts/") || slave_path.starts_with("/dev/pty"));
+        // Linux uses /dev/pts/N, macOS uses /dev/ttys* (slave), BSD may use /dev/ttyp* or /dev/pty*
+        assert!(
+            slave_path.starts_with("/dev/pts/")
+                || slave_path.starts_with("/dev/ttys")
+                || slave_path.starts_with("/dev/ttyp")
+                || slave_path.starts_with("/dev/pty")
+        );
     }
 
     #[tokio::test]
     async fn window_size_operations() {
-        let (master, _) = UnixPtyMaster::open().unwrap();
+        let (master, slave_path) = UnixPtyMaster::open().unwrap();
+
+        // On macOS, we need to open the slave before setting window size works reliably
+        #[cfg(target_os = "macos")]
+        let _slave_fd = open_slave(&slave_path).unwrap();
 
         // Set window size
         let size = WindowSize::new(120, 40);

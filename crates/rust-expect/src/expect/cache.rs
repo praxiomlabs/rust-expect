@@ -3,9 +3,11 @@
 //! This module provides a cache for compiled regular expressions,
 //! avoiding the overhead of recompiling patterns on each use.
 
-use regex::Regex;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
+
+use regex::Regex;
 
 /// Default maximum cache size.
 pub const DEFAULT_CACHE_SIZE: usize = 100;
@@ -16,6 +18,10 @@ pub const DEFAULT_CACHE_SIZE: usize = 100;
 pub struct RegexCache {
     cache: RwLock<LruCache>,
     max_size: usize,
+    /// Total cache hits (for statistics).
+    total_hits: AtomicUsize,
+    /// Total cache misses (for statistics).
+    total_misses: AtomicUsize,
 }
 
 struct LruCache {
@@ -25,8 +31,8 @@ struct LruCache {
 
 struct CacheEntry {
     regex: Arc<Regex>,
-    #[allow(dead_code)]
-    hits: usize,
+    /// Number of times this pattern has been accessed.
+    hits: AtomicUsize,
 }
 
 impl RegexCache {
@@ -39,6 +45,8 @@ impl RegexCache {
                 order: Vec::with_capacity(max_size),
             }),
             max_size,
+            total_hits: AtomicUsize::new(0),
+            total_misses: AtomicUsize::new(0),
         }
     }
 
@@ -64,9 +72,15 @@ impl RegexCache {
                 .read()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(entry) = cache.entries.get(pattern) {
+                // Track cache hit
+                entry.hits.fetch_add(1, Ordering::Relaxed);
+                self.total_hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(Arc::clone(&entry.regex));
             }
         }
+
+        // Track cache miss
+        self.total_misses.fetch_add(1, Ordering::Relaxed);
 
         // Compile the regex
         let regex = Regex::new(pattern)?;
@@ -79,8 +93,10 @@ impl RegexCache {
                 .write()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            // Double-check after acquiring write lock
+            // Double-check after acquiring write lock (another thread may have inserted)
             if let Some(entry) = cache.entries.get(pattern) {
+                // Count as hit since we're returning a cached entry
+                entry.hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(Arc::clone(&entry.regex));
             }
 
@@ -97,7 +113,7 @@ impl RegexCache {
                 pattern.to_string(),
                 CacheEntry {
                     regex: Arc::clone(&regex),
-                    hits: 0,
+                    hits: AtomicUsize::new(1), // First access
                 },
             );
             cache.order.push(pattern.to_string());
@@ -146,6 +162,77 @@ impl RegexCache {
     #[must_use]
     pub const fn max_size(&self) -> usize {
         self.max_size
+    }
+
+    /// Get cache statistics.
+    #[must_use]
+    pub fn stats(&self) -> CacheStats {
+        let cache = self
+            .cache
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        CacheStats {
+            size: cache.entries.len(),
+            max_size: self.max_size,
+            total_hits: self.total_hits.load(Ordering::Relaxed),
+            total_misses: self.total_misses.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Get the total number of cache hits.
+    #[must_use]
+    pub fn total_hits(&self) -> usize {
+        self.total_hits.load(Ordering::Relaxed)
+    }
+
+    /// Get the total number of cache misses.
+    #[must_use]
+    pub fn total_misses(&self) -> usize {
+        self.total_misses.load(Ordering::Relaxed)
+    }
+
+    /// Get the cache hit rate as a ratio (0.0 to 1.0).
+    ///
+    /// Returns 1.0 if no accesses have been made.
+    #[must_use]
+    pub fn hit_rate(&self) -> f64 {
+        let hits = self.total_hits.load(Ordering::Relaxed);
+        let misses = self.total_misses.load(Ordering::Relaxed);
+        let total = hits + misses;
+        if total == 0 {
+            1.0
+        } else {
+            hits as f64 / total as f64
+        }
+    }
+}
+
+/// Statistics about a regex cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheStats {
+    /// Current number of cached patterns.
+    pub size: usize,
+    /// Maximum cache size.
+    pub max_size: usize,
+    /// Total cache hits.
+    pub total_hits: usize,
+    /// Total cache misses.
+    pub total_misses: usize,
+}
+
+impl CacheStats {
+    /// Get the cache hit rate as a ratio (0.0 to 1.0).
+    ///
+    /// Returns 1.0 if no accesses have been made.
+    #[must_use]
+    pub fn hit_rate(&self) -> f64 {
+        let total = self.total_hits + self.total_misses;
+        if total == 0 {
+            1.0
+        } else {
+            self.total_hits as f64 / total as f64
+        }
     }
 }
 
@@ -211,5 +298,45 @@ mod tests {
         let r1 = get_regex(r"\w+").unwrap();
         let r2 = get_regex(r"\w+").unwrap();
         assert!(Arc::ptr_eq(&r1, &r2));
+    }
+
+    #[test]
+    fn cache_stats_tracking() {
+        let cache = RegexCache::new(10);
+
+        // Initial state
+        let stats = cache.stats();
+        assert_eq!(stats.size, 0);
+        assert_eq!(stats.total_hits, 0);
+        assert_eq!(stats.total_misses, 0);
+
+        // First access (miss)
+        cache.get_or_compile(r"\d+").unwrap();
+        assert_eq!(cache.total_misses(), 1);
+        assert_eq!(cache.total_hits(), 0);
+
+        // Second access (hit)
+        cache.get_or_compile(r"\d+").unwrap();
+        assert_eq!(cache.total_misses(), 1);
+        assert_eq!(cache.total_hits(), 1);
+
+        // Third access (hit)
+        cache.get_or_compile(r"\d+").unwrap();
+        assert_eq!(cache.total_hits(), 2);
+
+        // New pattern (miss)
+        cache.get_or_compile(r"\w+").unwrap();
+        assert_eq!(cache.total_misses(), 2);
+
+        // Check hit rate (2 hits out of 4 total = 0.5)
+        let hit_rate = cache.hit_rate();
+        assert!((hit_rate - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn cache_stats_hit_rate_empty() {
+        let cache = RegexCache::new(10);
+        // Empty cache should return 1.0 hit rate (no failures yet)
+        assert!((cache.hit_rate() - 1.0).abs() < 0.001);
     }
 }

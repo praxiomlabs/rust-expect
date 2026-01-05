@@ -60,9 +60,8 @@ vte = { workspace = true, optional = true }
 # Bitflags for terminal attributes (screen buffer)
 bitflags = { workspace = true, optional = true }
 
-# SSH support (optional)
+# SSH support (optional) - russh 0.56+ includes keys module natively
 russh = { workspace = true, optional = true }
-russh-keys = { workspace = true, optional = true }
 
 # OpenTelemetry for distributed tracing (optional)
 opentelemetry = { workspace = true, optional = true }
@@ -99,7 +98,7 @@ harness = false
 default = []
 
 # Enable SSH backend for remote sessions
-ssh = ["dep:russh", "dep:russh-keys"]
+ssh = ["dep:russh"]
 
 # Enable mock backend for testing
 mock = []

@@ -45,10 +45,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Create a new session with the given transport.
     pub fn new(transport: T, config: SessionConfig) -> Self {
         let buffer_size = config.buffer.max_size;
+        let mut matcher = Matcher::new(buffer_size);
+        matcher.set_default_timeout(config.timeout.default);
         Self {
             transport: Arc::new(Mutex::new(transport)),
             config,
-            matcher: Matcher::new(buffer_size),
+            matcher,
             pattern_manager: PatternManager::new(),
             state: SessionState::Starting,
             id: SessionId::new(),

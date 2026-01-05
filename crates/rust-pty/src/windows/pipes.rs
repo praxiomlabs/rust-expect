@@ -3,9 +3,8 @@
 //! This module provides utilities for creating and managing the pipes
 //! used for ConPTY input and output.
 
-use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
-use std::ptr;
+use std::{io, ptr};
 
 use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Pipes::CreatePipe;

@@ -1,4 +1,5 @@
 //! Pattern matching benchmarks.
+#![allow(missing_docs)]
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use rust_expect::expect::{Pattern, PatternSet, RingBuffer};

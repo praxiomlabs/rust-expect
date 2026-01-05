@@ -9,10 +9,11 @@
 
 #![cfg(windows)]
 
+use std::time::Duration;
+
 use rust_expect::backend::{BackendType, PtyConfig};
 use rust_expect::prelude::*;
 use rust_expect::{Dialog, DialogStep};
-use std::time::Duration;
 
 /// Test Windows line ending detection.
 #[test]

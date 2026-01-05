@@ -25,11 +25,12 @@
 //! // Connection is returned to pool when `conn` is dropped
 //! ```
 
-use super::session::{SshConfig, SshSession};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
+
+use super::session::{SshConfig, SshSession};
 
 /// Connection pool configuration.
 #[derive(Debug, Clone)]
@@ -345,6 +346,7 @@ impl ConnectionPool {
     }
 
     /// Try to acquire an existing connection from the pool.
+    #[allow(clippy::significant_drop_tightening)]
     fn try_acquire_existing(&self, key: &str) -> Option<PoolEntry> {
         let connections = self
             .connections
@@ -665,7 +667,7 @@ mod tests {
         assert_eq!(stats.idle, 0);
         assert_eq!(stats.connected, 0);
         assert!(stats.is_empty());
-        assert_eq!(stats.utilization(), 0.0);
+        assert!(stats.utilization().abs() < f64::EPSILON);
     }
 
     #[test]
@@ -725,6 +727,6 @@ mod tests {
             connected: 8,
             hosts: 2,
         };
-        assert_eq!(stats.utilization(), 50.0);
+        assert!((stats.utilization() - 50.0).abs() < f64::EPSILON);
     }
 }

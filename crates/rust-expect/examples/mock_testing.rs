@@ -18,7 +18,6 @@ fn main() {
     {
         println!("This example requires the 'mock' feature.");
         println!("Run with: cargo run --example mock_testing --features mock");
-        return;
     }
 
     #[cfg(feature = "mock")]
@@ -37,7 +36,7 @@ fn run_examples() {
     // Example 2: Mock builder pattern
     println!("\n2. Using MockBuilder...");
 
-    let transport = MockBuilder::new()
+    let _transport = MockBuilder::new()
         .output("Welcome to the system\n")
         .delay_ms(100)
         .output("Login: ")
@@ -54,11 +53,11 @@ fn run_examples() {
     println!("\n3. Pre-built scenarios...");
 
     // Login scenario
-    let login = login_mock();
+    let _login = login_mock();
     println!("   Created login scenario mock");
 
     // Shell scenario
-    let shell = shell_mock("$ ");
+    let _shell = shell_mock("$ ");
     println!("   Created shell scenario mock");
 
     // Example 4: Custom scenarios
@@ -73,7 +72,7 @@ fn run_examples() {
 
     println!("   Created FTP session scenario: {}", scenario.name());
 
-    let ftp_mock = MockTransport::from_scenario(&scenario);
+    let _ftp_mock = MockTransport::from_scenario(&scenario);
     println!("   Mock transport ready for testing");
 
     // Example 5: Mock session for expect testing
@@ -85,7 +84,7 @@ fn run_examples() {
         .expect_respond("whoami", "user\n$ ")
         .expect_respond("exit", "logout\n");
 
-    let session = MockSession::from_scenario(&scenario);
+    let _session = MockSession::from_scenario(&scenario);
     println!("   Created mock SSH session");
     println!("   Ready for expect script testing");
 
@@ -113,7 +112,7 @@ fn run_examples() {
     // Example 7: Timeline-based mock
     println!("\n7. Event timeline mock...");
 
-    let transport = MockBuilder::new()
+    let _transport = MockBuilder::new()
         .output("Connecting...")
         .delay_ms(500)
         .output(" connected!\n")

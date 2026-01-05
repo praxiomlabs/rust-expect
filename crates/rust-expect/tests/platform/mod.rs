@@ -12,9 +12,10 @@ mod windows;
 
 // Cross-platform tests that verify Windows configuration without requiring Windows
 mod cross_platform {
+    use std::time::Duration;
+
     use rust_expect::backend::{BackendType, PtyConfig};
     use rust_expect::prelude::*;
-    use std::time::Duration;
 
     /// Verify Windows line ending configuration works on any platform.
     #[test]

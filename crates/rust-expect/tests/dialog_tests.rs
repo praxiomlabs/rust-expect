@@ -1,7 +1,8 @@
 //! Integration tests for dialog scripting.
 
-use rust_expect::{Dialog, DialogBuilder, DialogStep};
 use std::time::Duration;
+
+use rust_expect::{Dialog, DialogBuilder, DialogStep};
 
 #[test]
 fn dialog_step_expect() {

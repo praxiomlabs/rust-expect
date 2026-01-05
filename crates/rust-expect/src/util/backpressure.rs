@@ -17,6 +17,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
 /// A backpressure controller for limiting data flow and concurrent operations.
@@ -266,6 +267,7 @@ impl RateLimiter {
     }
 
     /// Get the time until the next reset.
+    #[allow(clippy::significant_drop_tightening)]
     fn time_until_reset(&self) -> std::time::Duration {
         let last_reset = self
             .last_reset

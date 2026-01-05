@@ -4,6 +4,7 @@
 
 use std::future::Future;
 use std::time::Duration;
+
 use tokio::time::{Timeout, timeout};
 
 /// Extension trait for adding timeouts to futures.

@@ -5,12 +5,13 @@
 //!
 //! Run with: `cargo run --example interactive`
 
+use std::time::Duration;
+
 use rust_expect::interact::{
     HookBuilder, HookManager, InputFilter, InteractionMode, OutputFilter, Terminal, TerminalMode,
     TerminalSize, TerminalState,
 };
 use rust_expect::prelude::*;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {

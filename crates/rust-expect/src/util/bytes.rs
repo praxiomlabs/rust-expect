@@ -75,7 +75,7 @@ pub fn escape_bytes(data: &[u8]) -> String {
 #[must_use]
 pub fn unescape_bytes(s: &str) -> Vec<u8> {
     let mut result = Vec::new();
-    let mut chars = s.chars().peekable();
+    let mut chars = s.chars();
 
     while let Some(c) = chars.next() {
         if c == '\\' {

@@ -26,19 +26,21 @@
 //! }
 //! ```
 
-use crate::config::SessionConfig;
-use crate::error::{ExpectError, Result};
-use crate::expect::{Pattern, PatternSet};
-use crate::types::Match;
-use futures::stream::{FuturesUnordered, StreamExt};
 use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
+
+use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
+
+use crate::config::SessionConfig;
+use crate::error::{ExpectError, Result};
+use crate::expect::{Pattern, PatternSet};
+use crate::types::Match;
 
 /// Unique identifier for a session within a multi-session manager.
 pub type SessionId = usize;
@@ -186,6 +188,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static> MultiSessionManag
     /// Remove a session from the manager.
     ///
     /// Returns the session if it existed.
+    #[allow(clippy::unused_async)]
     pub async fn remove(&mut self, id: SessionId) -> Option<crate::session::Session<T>> {
         if let Some(arc) = self.sessions.remove(&id) {
             // Try to unwrap the Arc - this will only succeed if we have the only reference
@@ -354,6 +357,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static> MultiSessionManag
     /// # Errors
     ///
     /// Returns an error if all sessions timeout or encounter errors.
+    #[allow(clippy::type_complexity)]
     pub async fn expect_any(&self, pattern: impl Into<Pattern>) -> Result<SelectResult> {
         let pattern = pattern.into();
         self.expect_any_of(&[pattern]).await
@@ -364,6 +368,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static> MultiSessionManag
     /// # Errors
     ///
     /// Returns an error if all sessions timeout or encounter errors.
+    #[allow(clippy::type_complexity)]
     pub async fn expect_any_of(&self, patterns: &[Pattern]) -> Result<SelectResult> {
         if self.sessions.is_empty() {
             return Err(ExpectError::NoSessions);
@@ -419,7 +424,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static> MultiSessionManag
         }
 
         // All futures completed without a match
-        Err(last_error.unwrap_or(ExpectError::Timeout {
+        Err(last_error.unwrap_or_else(|| ExpectError::Timeout {
             duration: self.default_timeout,
             pattern: "multi-session expect".to_string(),
             buffer: String::new(),
@@ -443,6 +448,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static> MultiSessionManag
     /// # Errors
     ///
     /// Returns an error if any session fails.
+    #[allow(clippy::type_complexity)]
     pub async fn expect_all_of(&self, patterns: &[Pattern]) -> Result<Vec<SelectResult>> {
         if self.sessions.is_empty() {
             return Err(ExpectError::NoSessions);
@@ -608,6 +614,7 @@ impl PatternSelector {
     /// # Errors
     ///
     /// Returns an error if no sessions match or all timeout.
+    #[allow(clippy::type_complexity)]
     pub async fn select<T>(&self, manager: &MultiSessionManager<T>) -> Result<SelectResult>
     where
         T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
@@ -682,8 +689,9 @@ impl PatternSelector {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::io::DuplexStream;
+
+    use super::*;
 
     // Helper to create a mock session transport
     fn create_mock_transport() -> (DuplexStream, DuplexStream) {

@@ -5,8 +5,9 @@
 //!
 //! Run with: `cargo run --example basic`
 
-use rust_expect::prelude::*;
 use std::time::Duration;
+
+use rust_expect::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {

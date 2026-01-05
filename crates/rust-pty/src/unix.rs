@@ -29,6 +29,8 @@ mod child;
 mod pty;
 mod signals;
 
+use std::ffi::OsStr;
+
 pub use buffer::PtyBuffer;
 pub use child::{UnixPtyChild, spawn_child};
 pub use pty::{UnixPtyMaster, open_slave};
@@ -36,8 +38,6 @@ pub use signals::{
     PtySignalEvent, SignalHandle, is_sigchld, is_sigwinch, on_window_change, sigchld, sigwinch,
     start_signal_handler,
 };
-
-use std::ffi::OsStr;
 
 use crate::config::PtyConfig;
 use crate::error::Result;

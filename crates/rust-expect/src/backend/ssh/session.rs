@@ -3,10 +3,10 @@
 //! This module provides SSH session handling with actual russh integration
 //! when the `ssh` feature is enabled.
 
-use super::auth::{AuthMethod, HostKeyVerification, SshCredentials};
 use std::sync::Arc;
 use std::time::Duration;
 
+use super::auth::{AuthMethod, HostKeyVerification, SshCredentials};
 #[cfg(feature = "ssh")]
 use crate::error::SshError;
 
@@ -123,10 +123,12 @@ pub enum SshSessionState {
 
 #[cfg(feature = "ssh")]
 mod russh_impl {
-    use super::{Arc, AuthMethod, HostKeyVerification, SshCredentials, SshError};
+    use std::path::Path;
+
     use russh::client;
     use russh::keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey};
-    use std::path::Path;
+
+    use super::{Arc, AuthMethod, HostKeyVerification, SshCredentials, SshError};
 
     /// Client handler for russh that manages host key verification.
     pub struct SshClientHandler {
@@ -176,6 +178,7 @@ mod russh_impl {
     }
 
     /// Check a server key against the `known_hosts` file.
+    #[allow(clippy::unnecessary_wraps)]
     fn check_known_hosts(
         host: &str,
         port: u16,
@@ -255,14 +258,13 @@ mod russh_impl {
                         "Host key verified against known_hosts"
                     );
                     return Ok(true);
-                } else {
-                    // Key mismatch - potential MITM attack!
-                    tracing::error!(
-                        host = %host,
-                        "HOST KEY MISMATCH! Possible man-in-the-middle attack!"
-                    );
-                    return Ok(false);
                 }
+                // Key mismatch - potential MITM attack!
+                tracing::error!(
+                    host = %host,
+                    "HOST KEY MISMATCH! Possible man-in-the-middle attack!"
+                );
+                return Ok(false);
             }
         }
 
@@ -302,6 +304,7 @@ mod russh_impl {
     }
 
     /// Handle Trust On First Use - accept and save the key.
+    #[allow(clippy::unnecessary_wraps)]
     fn handle_tofu(
         host: &str,
         port: u16,
@@ -474,6 +477,7 @@ mod russh_impl {
     }
 
     /// Authenticate using the configured methods.
+    #[allow(clippy::too_many_lines)]
     pub async fn authenticate(
         handle: &mut client::Handle<SshClientHandler>,
         credentials: &SshCredentials,
@@ -1006,7 +1010,7 @@ impl SshSession {
         self.state = SshSessionState::Connecting;
 
         // Create the russh client config
-        let ssh_config = Arc::new(Default::default());
+        let ssh_config = Arc::new(russh::client::Config::default());
 
         // Create the handler
         let handler = russh_impl::SshClientHandler {

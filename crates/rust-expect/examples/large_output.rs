@@ -5,11 +5,13 @@
 //!
 //! Run with: `cargo run --example large_output`
 
-use rust_expect::prelude::*;
-use rust_expect::util::Backpressure;
 use std::time::Duration;
 
+use rust_expect::prelude::*;
+use rust_expect::util::Backpressure;
+
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     println!("rust-expect Large Output Handling Example");
     println!("=========================================\n");

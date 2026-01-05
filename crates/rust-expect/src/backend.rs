@@ -5,12 +5,10 @@
 
 mod pty;
 
-pub use pty::{EnvMode, PtyConfig, PtySpawner, PtyTransport};
-
 // Export AsyncPty and PtyHandle for Unix platforms
 #[cfg(unix)]
 pub use pty::{AsyncPty, PtyHandle};
-
+pub use pty::{EnvMode, PtyConfig, PtySpawner, PtyTransport};
 // Export WindowsAsyncPty and WindowsPtyHandle for Windows platforms
 #[cfg(windows)]
 pub use pty::{WindowsAsyncPty, WindowsPtyHandle};

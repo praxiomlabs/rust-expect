@@ -7,13 +7,11 @@
 use std::io;
 use std::os::windows::io::{AsRawHandle, OwnedHandle, RawHandle};
 use std::pin::Pin;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-
 use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 
@@ -163,10 +161,11 @@ impl AsyncRead for WindowsPtyMaster {
 
                     // Store result and wake
                     let mut state = pending_read.lock().unwrap();
-                    let waker = match std::mem::replace(&mut *state, PendingReadState::Ready(result)) {
-                        PendingReadState::InProgress(waker) => waker,
-                        _ => None,
-                    };
+                    let waker =
+                        match std::mem::replace(&mut *state, PendingReadState::Ready(result)) {
+                            PendingReadState::InProgress(waker) => waker,
+                            _ => None,
+                        };
                     drop(state);
                     if let Some(w) = waker {
                         w.wake();

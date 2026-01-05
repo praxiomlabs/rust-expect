@@ -30,9 +30,10 @@
 //! assert!(eof.is_eof());
 //! ```
 
-use regex::Regex;
 use std::fmt;
 use std::time::Duration;
+
+use regex::Regex;
 
 /// A pattern that can be matched against terminal output.
 #[derive(Clone)]

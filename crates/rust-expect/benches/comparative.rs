@@ -1,9 +1,10 @@
-//! Comparative benchmarks between rust-expect and expectrl.
+//! Comparative benchmarks between this library and expectrl.
 //!
-//! This benchmark suite compares the performance of rust-expect against
+//! This benchmark suite compares the performance of this library against
 //! expectrl for common terminal automation operations.
 //!
 //! Run with: `cargo bench --bench comparative`
+#![allow(missing_docs)]
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 

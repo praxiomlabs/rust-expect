@@ -69,51 +69,46 @@ pub mod screen;
 pub mod pii;
 
 // Re-export commonly used items from Phase 4
+// Re-export commonly used items from Phase 6
+pub use auto_config::{LocaleInfo, ShellType, detect_shell};
+// Re-export commonly used items from Phase 5
+pub use backend::{BackendType, PtyConfig, PtySpawner};
 pub use config::{
     BufferConfig, EncodingConfig, HumanTypingConfig, InteractConfig, LineEnding, LogFormat,
     LoggingConfig, SessionConfig, TimeoutConfig,
 };
+pub use dialog::{Dialog, DialogBuilder, DialogStep};
 pub use encoding::{
     DetectedEncoding, EncodedText, LineEndingStyle, decode_utf8_lossy, detect_encoding_from_env,
     detect_line_ending, normalize_line_endings, strip_ansi,
 };
 pub use error::{ExpectError, Result, SpawnError};
-pub use types::{
-    ControlChar, Dimensions, ExpectResult, Match, ProcessExitStatus, SessionId, SessionState,
-};
-
-// Re-export commonly used items from Phase 5
-pub use backend::{BackendType, PtyConfig, PtySpawner};
 pub use expect::{Matcher, Pattern, PatternManager, PatternSet, RingBuffer};
-pub use send::{AnsiSend, BasicSend, HumanTyper, Sender};
-pub use session::{QuickSession, Session, SessionBuilder};
-pub use sync::{SyncSession, block_on};
-pub use util::{Backpressure, Deadline, TimeoutExt};
-
-// Re-export commonly used items from Phase 6
-pub use auto_config::{LocaleInfo, ShellType, detect_shell};
-pub use dialog::{Dialog, DialogBuilder, DialogStep};
 pub use health::{HealthChecker, HealthStatus};
 pub use interact::{
     InteractAction, InteractBuilder, InteractContext, InteractEndReason, InteractResult,
     InteractionMode, ResizeContext, ResizeHook, TerminalMode, TerminalState,
 };
 pub use metrics::{Counter, Gauge, Histogram, MetricsRegistry, SessionMetrics};
+// Conditional re-exports
+#[cfg(feature = "mock")]
+pub use mock::{MockBuilder, MockSession, MockTransport, Scenario};
 pub use multi::{
     GroupBuilder, GroupManager, GroupResult, MultiSessionManager, PatternSelector, ReadyType,
     SelectResult, SendResult, SessionGroup,
 };
-pub use transcript::{Player, Recorder, Transcript, TranscriptEvent};
-
-// Conditional re-exports
-#[cfg(feature = "mock")]
-pub use mock::{MockBuilder, MockSession, MockTransport, Scenario};
-
-#[cfg(feature = "screen")]
-pub use screen::{Attributes, Cell, ScreenBuffer};
-
 #[cfg(feature = "pii-redaction")]
 pub use pii::{PiiDetector, PiiRedactor, PiiType};
+#[cfg(feature = "screen")]
+pub use screen::{Attributes, Cell, ScreenBuffer};
+pub use send::{AnsiSend, BasicSend, HumanTyper, Sender};
+pub use session::{QuickSession, Session, SessionBuilder};
+pub use sync::{SyncSession, block_on};
+pub use transcript::{Player, Recorder, Transcript, TranscriptEvent};
+pub use types::{
+    ControlChar, Dimensions, ExpectResult, Match, ProcessExitStatus, SessionId, SessionState,
+};
+pub use util::{Backpressure, Deadline, TimeoutExt};
 
 // Test utilities (Phase 7)
 #[cfg(any(test, feature = "test-utils"))]

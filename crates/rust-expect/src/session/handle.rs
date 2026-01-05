@@ -3,22 +3,22 @@
 //! This module provides the main `Session` type that users interact with
 //! to control spawned processes, send input, and expect output.
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::Mutex;
+
+#[cfg(unix)]
+use crate::backend::{AsyncPty, PtyConfig, PtySpawner};
+#[cfg(windows)]
+use crate::backend::{PtyConfig, PtySpawner, WindowsAsyncPty};
 use crate::config::SessionConfig;
 use crate::dialog::{Dialog, DialogExecutor, DialogResult};
 use crate::error::{ExpectError, Result};
 use crate::expect::{ExpectState, MatchResult, Matcher, Pattern, PatternManager, PatternSet};
 use crate::interact::InteractBuilder;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Mutex;
-
-#[cfg(unix)]
-use crate::backend::{AsyncPty, PtyConfig, PtySpawner};
-
-#[cfg(windows)]
-use crate::backend::{PtyConfig, PtySpawner, WindowsAsyncPty};
 
 /// A session handle for interacting with a spawned process.
 ///
@@ -112,6 +112,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// # Errors
     ///
     /// Returns an error if the write fails.
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
         if matches!(self.state, SessionState::Closed | SessionState::Exited(_)) {
             return Err(ExpectError::SessionClosed);
@@ -270,7 +271,17 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 self.matcher.append(&buf[..n]);
                 Ok(n)
             }
-            Ok(Err(e)) => Err(ExpectError::io_context("reading from process", e)),
+            Ok(Err(e)) => {
+                // On Linux, reading from PTY master returns EIO when the slave is closed
+                // (i.e., the child process has terminated). Treat this as EOF.
+                // See: https://bugs.python.org/issue5380
+                if is_pty_eof_error(&e) {
+                    self.eof = true;
+                    Ok(0)
+                } else {
+                    Err(ExpectError::io_context("reading from process", e))
+                }
+            }
             Err(_) => {
                 // Timeout, but not an error - caller will handle
                 Ok(0)
@@ -280,9 +291,18 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
     /// Wait for the process to exit.
     ///
+    /// This method blocks until EOF is detected on the session, which typically
+    /// happens when the child process terminates.
+    ///
+    /// # Warning
+    ///
+    /// This method has no timeout and may block indefinitely if the process
+    /// does not exit. Consider using [`wait_timeout`](Self::wait_timeout) or
+    /// [`expect_eof_timeout`](Self::expect_eof_timeout) for bounded waits.
+    ///
     /// # Errors
     ///
-    /// Returns an error if waiting fails.
+    /// Returns an error if waiting fails due to I/O error.
     pub async fn wait(&mut self) -> Result<ProcessExitStatus> {
         // Read until EOF
         while !self.eof {
@@ -292,6 +312,39 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         }
 
         // Return unknown status - actual status depends on backend
+        self.state = SessionState::Exited(ProcessExitStatus::Unknown);
+        Ok(ProcessExitStatus::Unknown)
+    }
+
+    /// Wait for the process to exit with a timeout.
+    ///
+    /// Like [`wait`](Self::wait), but with a maximum duration to wait.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The timeout expires before the process exits
+    /// - An I/O error occurs while waiting
+    pub async fn wait_timeout(&mut self, timeout: Duration) -> Result<ProcessExitStatus> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        while !self.eof {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(ExpectError::timeout(
+                    timeout,
+                    "<EOF>",
+                    self.matcher.buffer_str(),
+                ));
+            }
+
+            // Use smaller of remaining time or 100ms for polling
+            let poll_timeout = remaining.min(Duration::from_millis(100));
+            if self.read_with_timeout(poll_timeout).await? == 0 && !self.eof {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+
         self.state = SessionState::Exited(ProcessExitStatus::Unknown);
         Ok(ProcessExitStatus::Unknown)
     }
@@ -687,4 +740,35 @@ pub trait SessionExt {
         &mut self,
         dimensions: Dimensions,
     ) -> impl std::future::Future<Output = Result<()>> + Send;
+}
+
+/// Check if an I/O error indicates PTY EOF.
+///
+/// On Linux, reading from the PTY master returns EIO when the slave side
+/// has been closed (i.e., the child process has terminated). This is different
+/// from the standard EOF behavior where `read()` returns 0 bytes.
+///
+/// This function returns true for errors that should be treated as EOF:
+/// - EIO (errno 5) on Unix systems
+/// - `BrokenPipe` on any platform
+fn is_pty_eof_error(e: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+
+    // BrokenPipe indicates the other end has closed
+    if e.kind() == ErrorKind::BrokenPipe {
+        return true;
+    }
+
+    // On Unix, check for EIO which indicates slave PTY closed
+    #[cfg(unix)]
+    {
+        if let Some(errno) = e.raw_os_error() {
+            // EIO is 5 on Linux/macOS/BSD
+            if errno == libc::EIO {
+                return true;
+            }
+        }
+    }
+
+    false
 }

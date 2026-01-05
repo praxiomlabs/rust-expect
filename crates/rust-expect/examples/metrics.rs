@@ -5,9 +5,10 @@
 //!
 //! Run with: `cargo run --example metrics`
 
+use std::time::Duration;
+
 use rust_expect::metrics::{Counter, Gauge, Histogram, MetricsRegistry, SessionMetrics, Timer};
 use rust_expect::prelude::*;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {

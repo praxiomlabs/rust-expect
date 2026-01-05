@@ -3,8 +3,9 @@
 //! This module provides utilities for managing session lifecycle,
 //! including graceful shutdown, signal handling, and cleanup.
 
-use crate::types::{ControlChar, ProcessExitStatus, SessionState};
 use std::time::Duration;
+
+use crate::types::{ControlChar, ProcessExitStatus, SessionState};
 
 /// Shutdown strategy for closing a session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,7 +148,7 @@ impl LifecycleManager {
     }
 
     /// Emit a lifecycle event.
-    pub fn emit(&self, event: LifecycleEvent) {
+    pub fn emit(&self, event: &LifecycleEvent) {
         for callback in &self.callbacks {
             callback(event.clone());
         }
@@ -156,7 +157,7 @@ impl LifecycleManager {
     /// Update the session state and emit event.
     pub fn set_state(&mut self, state: SessionState) {
         self.state = state;
-        self.emit(LifecycleEvent::StateChanged(state));
+        self.emit(&LifecycleEvent::StateChanged(state));
     }
 
     /// Get the current state.
@@ -168,35 +169,35 @@ impl LifecycleManager {
     /// Signal that the session has started.
     pub fn started(&mut self) {
         self.set_state(SessionState::Running);
-        self.emit(LifecycleEvent::Started);
+        self.emit(&LifecycleEvent::Started);
     }
 
     /// Signal that the session is ready.
     pub fn ready(&mut self) {
-        self.emit(LifecycleEvent::Ready);
+        self.emit(&LifecycleEvent::Ready);
     }
 
     /// Signal that the session is shutting down.
     pub fn shutting_down(&mut self) {
         self.set_state(SessionState::Closing);
-        self.emit(LifecycleEvent::ShuttingDown);
+        self.emit(&LifecycleEvent::ShuttingDown);
     }
 
     /// Signal that the session has closed.
     pub fn closed(&mut self) {
         self.set_state(SessionState::Closed);
-        self.emit(LifecycleEvent::Closed);
+        self.emit(&LifecycleEvent::Closed);
     }
 
     /// Signal that the session has exited.
     pub fn exited(&mut self, status: ProcessExitStatus) {
         self.set_state(SessionState::Exited(status));
-        self.emit(LifecycleEvent::Exited(status));
+        self.emit(&LifecycleEvent::Exited(status));
     }
 
     /// Signal an error.
     pub fn error(&mut self, message: impl Into<String>) {
-        self.emit(LifecycleEvent::Error(message.into()));
+        self.emit(&LifecycleEvent::Error(message.into()));
     }
 }
 

@@ -32,9 +32,10 @@
 //! assert_eq!(&bytes[..], b"hello world");
 //! ```
 
-use bytes::{Buf, Bytes, BytesMut};
 use std::io::{self, IoSlice, Write};
 use std::ops::{Deref, Range, RangeBounds};
+
+use bytes::{Buf, Bytes, BytesMut};
 
 /// A reference-counted byte buffer that supports zero-copy slicing.
 ///

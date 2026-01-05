@@ -5,8 +5,9 @@
 
 #![cfg(feature = "ssh")]
 
-use rust_expect::backend::ssh::{AuthMethod, HostKeyVerification, SshConfig, SshCredentials};
 use std::time::Duration;
+
+use rust_expect::backend::ssh::{AuthMethod, HostKeyVerification, SshConfig, SshCredentials};
 
 #[test]
 fn ssh_credentials_with_password() {
@@ -77,7 +78,7 @@ fn ssh_config_with_username() {
 #[test]
 fn ssh_config_display() {
     let config = SshConfig::new("example.com");
-    let display = format!("{:?}", config);
+    let display = format!("{config:?}");
 
     assert!(!display.is_empty());
     assert!(display.contains("example.com"));
@@ -86,13 +87,14 @@ fn ssh_config_display() {
 #[test]
 fn ssh_credentials_display() {
     let creds = SshCredentials::new("testuser").with_password("secret");
-    let display = format!("{:?}", creds);
+    let display = format!("{creds:?}");
 
     // Should show username
     assert!(display.contains("testuser"));
 }
 
 #[test]
+#[allow(clippy::redundant_clone)] // Clone is intentional - we're testing the Clone trait
 fn ssh_config_clone() {
     let config1 = SshConfig::new("example.com").port(2222);
     let config2 = config1.clone();

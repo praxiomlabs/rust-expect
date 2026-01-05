@@ -23,6 +23,7 @@ fn block_on_async_operation() {
 
 #[test]
 fn block_on_nested_async() {
+    #[allow(clippy::unused_async)]
     async fn inner() -> i32 {
         100
     }

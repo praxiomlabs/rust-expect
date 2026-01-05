@@ -129,7 +129,7 @@ impl ExitStatus {
     pub const fn signal(&self) -> Option<i32> {
         match self {
             Self::Signaled(sig) => Some(*sig),
-            _ => None,
+            Self::Exited(_) => None,
         }
     }
 }

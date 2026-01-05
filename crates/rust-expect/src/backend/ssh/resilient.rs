@@ -1,9 +1,10 @@
 //! Resilient SSH session wrapper.
 
+use std::time::{Duration, Instant};
+
 use super::keepalive::{KeepaliveConfig, KeepaliveManager};
 use super::retry::{RetryPolicy, RetryState, RetryStrategy};
 use super::session::{SshConfig, SshSession};
-use std::time::{Duration, Instant};
 
 /// Resilient session configuration.
 #[derive(Debug, Clone)]
@@ -202,11 +203,12 @@ impl ResilientSession {
     /// Tick the keepalive manager.
     /// Returns `true` if the session is still considered alive.
     pub fn keepalive_tick(&mut self) -> bool {
+        use super::keepalive::KeepaliveAction;
+
         if !self.is_connected() {
             return false;
         }
 
-        use super::keepalive::KeepaliveAction;
         match self.keepalive.tick() {
             KeepaliveAction::None | KeepaliveAction::SendKeepalive => true,
             KeepaliveAction::Timeout | KeepaliveAction::Disconnect => false,

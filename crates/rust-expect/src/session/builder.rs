@@ -3,11 +3,12 @@
 //! This module provides a builder pattern for creating sessions with
 //! customized configuration options.
 
+use std::path::PathBuf;
+use std::time::Duration;
+
 use crate::config::{
     BufferConfig, EncodingConfig, LineEnding, LoggingConfig, SessionConfig, TimeoutConfig,
 };
-use std::path::PathBuf;
-use std::time::Duration;
 
 /// Builder for creating session configurations.
 #[derive(Debug, Clone)]
@@ -1069,7 +1070,7 @@ mod tests {
         assert!(config.args.contains(&"-D".to_string()));
         assert!(config.args.contains(&"/dev/ttyUSB0".to_string()));
 
-        let config = QuickSession::screen_serial("/dev/ttyACM0", 115200);
+        let config = QuickSession::screen_serial("/dev/ttyACM0", 115_200);
         assert_eq!(config.command, "screen");
         assert!(config.args.contains(&"/dev/ttyACM0".to_string()));
         assert!(config.args.contains(&"115200".to_string()));

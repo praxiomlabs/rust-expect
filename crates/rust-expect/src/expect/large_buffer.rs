@@ -169,6 +169,9 @@ impl LargeBuffer {
     ///
     /// Returns an error if reading fails.
     pub fn find(&mut self, needle: &[u8]) -> io::Result<Option<usize>> {
+        // Read in chunks for efficiency
+        const CHUNK_SIZE: usize = 64 * 1024;
+
         if needle.is_empty() {
             return Ok(Some(0));
         }
@@ -176,8 +179,6 @@ impl LargeBuffer {
             return Ok(None);
         }
 
-        // Read in chunks for efficiency
-        const CHUNK_SIZE: usize = 64 * 1024;
         let mut pos = 0;
         let mut overlap = Vec::new();
 

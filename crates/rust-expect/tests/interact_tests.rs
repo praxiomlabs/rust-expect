@@ -1,9 +1,10 @@
 //! Integration tests for interactive mode.
 
+use std::time::Duration;
+
 use rust_expect::{
     InteractAction, InteractEndReason, InteractResult, InteractionMode, TerminalMode, TerminalState,
 };
-use std::time::Duration;
 
 #[test]
 fn interaction_mode_new() {
@@ -53,25 +54,25 @@ fn interaction_mode_escape_char() {
 #[test]
 fn interaction_mode_display() {
     let mode = InteractionMode::new();
-    assert!(!format!("{:?}", mode).is_empty());
+    assert!(!format!("{mode:?}").is_empty());
 }
 
 #[test]
 fn terminal_mode_raw() {
     let mode = TerminalMode::Raw;
-    assert!(!format!("{:?}", mode).is_empty());
+    assert!(!format!("{mode:?}").is_empty());
 }
 
 #[test]
 fn terminal_mode_cooked() {
     let mode = TerminalMode::Cooked;
-    assert!(!format!("{:?}", mode).is_empty());
+    assert!(!format!("{mode:?}").is_empty());
 }
 
 #[test]
 fn terminal_mode_cbreak() {
     let mode = TerminalMode::Cbreak;
-    assert!(!format!("{:?}", mode).is_empty());
+    assert!(!format!("{mode:?}").is_empty());
 }
 
 #[test]
@@ -89,10 +90,11 @@ fn terminal_state_default() {
 }
 
 #[test]
+#[allow(clippy::redundant_clone)]
 fn terminal_state_clone() {
     let state1 = TerminalState::default();
     let state2 = state1.clone();
-    assert_eq!(format!("{:?}", state1), format!("{:?}", state2));
+    assert_eq!(format!("{state1:?}"), format!("{state2:?}"));
 }
 
 // Tests for new pattern hook types
@@ -100,7 +102,7 @@ fn terminal_state_clone() {
 #[test]
 fn interact_action_continue() {
     let action = InteractAction::Continue;
-    assert!(!format!("{:?}", action).is_empty());
+    assert!(!format!("{action:?}").is_empty());
 }
 
 #[test]
@@ -124,7 +126,7 @@ fn interact_action_send_bytes() {
 #[test]
 fn interact_action_stop() {
     let action = InteractAction::Stop;
-    assert!(!format!("{:?}", action).is_empty());
+    assert!(!format!("{action:?}").is_empty());
 }
 
 #[test]
@@ -148,19 +150,19 @@ fn interact_end_reason_pattern_stop() {
 #[test]
 fn interact_end_reason_escape() {
     let reason = InteractEndReason::Escape;
-    assert!(!format!("{:?}", reason).is_empty());
+    assert!(!format!("{reason:?}").is_empty());
 }
 
 #[test]
 fn interact_end_reason_timeout() {
     let reason = InteractEndReason::Timeout;
-    assert!(!format!("{:?}", reason).is_empty());
+    assert!(!format!("{reason:?}").is_empty());
 }
 
 #[test]
 fn interact_end_reason_eof() {
     let reason = InteractEndReason::Eof;
-    assert!(!format!("{:?}", reason).is_empty());
+    assert!(!format!("{reason:?}").is_empty());
 }
 
 #[test]

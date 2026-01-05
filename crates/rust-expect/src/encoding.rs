@@ -77,6 +77,7 @@ pub fn decode_utf8_strict(bytes: &[u8]) -> Result<EncodedText, std::str::Utf8Err
 ///
 /// Invalid bytes are replaced with `\xHH` escape sequences.
 #[must_use]
+#[allow(unsafe_code)]
 pub fn decode_utf8_escape(bytes: &[u8]) -> EncodedText {
     let mut result = String::with_capacity(bytes.len());
     let mut replacements = 0;
@@ -117,6 +118,7 @@ pub fn decode_utf8_escape(bytes: &[u8]) -> EncodedText {
 ///
 /// Invalid bytes are simply removed from the output.
 #[must_use]
+#[allow(unsafe_code)]
 pub fn decode_utf8_skip(bytes: &[u8]) -> EncodedText {
     let mut result = String::with_capacity(bytes.len());
     let mut replacements = 0;

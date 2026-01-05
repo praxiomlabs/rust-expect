@@ -19,39 +19,30 @@
 //! ```
 
 // Core types
+// Backend types
+pub use crate::backend::{BackendType, PtyConfig, PtySpawner};
 pub use crate::config::{
     BufferConfig, EncodingConfig, HumanTypingConfig, InteractConfig, LineEnding, LogFormat,
     LoggingConfig, SessionConfig, TimeoutConfig,
 };
-
-// Error handling
-pub use crate::error::{ExpectError, Result, SpawnError};
-
-// Common types
-pub use crate::types::{
-    ControlChar, Dimensions, ExpectResult, Match, ProcessExitStatus, SessionId, SessionState,
-};
-
 // Encoding utilities
 pub use crate::encoding::{
     DetectedEncoding, EncodedText, LineEndingStyle, decode_utf8_lossy, detect_encoding_from_env,
     detect_line_ending, normalize_line_endings, strip_ansi,
 };
-
-// Macros (re-exported from rust-expect-macros)
-pub use crate::{dialog, patterns, regex, timeout};
-
-// Session types
-pub use crate::session::{QuickSession, Session, SessionBuilder};
-
+// Error handling
+pub use crate::error::{ExpectError, Result, SpawnError};
 // Pattern types
 pub use crate::expect::{Matcher, Pattern, PatternManager, PatternSet, RingBuffer};
-
 // Send traits
 pub use crate::send::{AnsiSend, BasicSend, HumanTyper, Sender};
-
-// Backend types
-pub use crate::backend::{BackendType, PtyConfig, PtySpawner};
-
+// Session types
+pub use crate::session::{QuickSession, Session, SessionBuilder};
 // Sync wrapper
 pub use crate::sync::{SyncSession, block_on};
+// Common types
+pub use crate::types::{
+    ControlChar, Dimensions, ExpectResult, Match, ProcessExitStatus, SessionId, SessionState,
+};
+// Macros (re-exported from rust-expect-macros)
+pub use crate::{dialog, patterns, regex, timeout};

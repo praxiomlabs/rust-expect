@@ -16,7 +16,6 @@ fn main() {
     {
         println!("This example requires the 'ssh' feature.");
         println!("Run with: cargo run --example ssh --features ssh");
-        return;
     }
 
     #[cfg(feature = "ssh")]
@@ -29,6 +28,7 @@ fn main() {
 }
 
 #[cfg(feature = "ssh")]
+#[allow(clippy::too_many_lines)] // Example code demonstrating multiple SSH usage patterns
 fn print_ssh_examples() {
     // Example 1: SSH connection concepts
     println!("1. SSH Connection Configuration...");

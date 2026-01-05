@@ -1,9 +1,10 @@
 //! Asciinema asciicast v2 format support.
 
-use super::format::{EventType, Transcript, TranscriptEvent, TranscriptMetadata};
-use crate::error::{ExpectError, Result};
 use std::io::{BufRead, Write};
 use std::time::Duration;
+
+use super::format::{EventType, Transcript, TranscriptEvent, TranscriptMetadata};
+use crate::error::{ExpectError, Result};
 
 /// Asciicast v2 header.
 #[derive(Debug, Clone)]
@@ -142,7 +143,7 @@ pub fn read_asciicast<R: BufRead>(reader: R) -> Result<Transcript> {
         .ok_or_else(|| ExpectError::config("Empty asciicast file"))?
         .map_err(|e| ExpectError::io_context("reading asciicast header line", e))?;
 
-    let header = parse_header(&header_line)?;
+    let header = parse_header(&header_line);
 
     let metadata = TranscriptMetadata {
         width: header.width,
@@ -170,13 +171,14 @@ pub fn read_asciicast<R: BufRead>(reader: R) -> Result<Transcript> {
     Ok(transcript)
 }
 
-fn parse_header(line: &str) -> Result<AsciicastHeader> {
-    let mut header = AsciicastHeader::default();
-
+fn parse_header(line: &str) -> AsciicastHeader {
     // Parse numeric fields
-    header.width = parse_json_number(line, "width").unwrap_or(80) as u16;
-    header.height = parse_json_number(line, "height").unwrap_or(24) as u16;
-    header.version = parse_json_number(line, "version").unwrap_or(2) as u8;
+    let mut header = AsciicastHeader {
+        width: parse_json_number(line, "width").unwrap_or(80) as u16,
+        height: parse_json_number(line, "height").unwrap_or(24) as u16,
+        version: parse_json_number(line, "version").unwrap_or(2) as u8,
+        ..Default::default()
+    };
 
     if let Some(ts) = parse_json_number(line, "timestamp") {
         header.timestamp = Some(ts as u64);
@@ -199,7 +201,7 @@ fn parse_header(line: &str) -> Result<AsciicastHeader> {
         header.env = env;
     }
 
-    Ok(header)
+    header
 }
 
 /// Parse a numeric JSON field.
@@ -481,8 +483,8 @@ mod tests {
     #[test]
     fn parse_json_float_basic() {
         let json = r#"{"duration": 123.456789, "idle_time_limit": 2.5}"#;
-        assert!((parse_json_float(json, "duration").unwrap() - 123.456789).abs() < 0.000001);
-        assert!((parse_json_float(json, "idle_time_limit").unwrap() - 2.5).abs() < 0.000001);
+        assert!((parse_json_float(json, "duration").unwrap() - 123.456_789).abs() < 0.000_001);
+        assert!((parse_json_float(json, "idle_time_limit").unwrap() - 2.5).abs() < 0.000_001);
         assert_eq!(parse_json_float(json, "nonexistent"), None);
     }
 
@@ -537,12 +539,12 @@ mod tests {
     #[test]
     fn parse_header_full() {
         let header_json = r#"{"version": 2, "width": 120, "height": 40, "timestamp": 1704067200, "duration": 60.5, "idle_time_limit": 2.0, "command": "/bin/zsh", "title": "Demo", "env": {"SHELL": "/bin/zsh"}}"#;
-        let header = parse_header(header_json).unwrap();
+        let header = parse_header(header_json);
 
         assert_eq!(header.version, 2);
         assert_eq!(header.width, 120);
         assert_eq!(header.height, 40);
-        assert_eq!(header.timestamp, Some(1704067200));
+        assert_eq!(header.timestamp, Some(1_704_067_200));
         assert!((header.duration.unwrap() - 60.5).abs() < 0.001);
         assert!((header.idle_time_limit.unwrap() - 2.0).abs() < 0.001);
         assert_eq!(header.command, Some("/bin/zsh".to_string()));
@@ -553,7 +555,7 @@ mod tests {
     #[test]
     fn parse_header_minimal() {
         let header_json = r#"{"version": 2, "width": 80, "height": 24}"#;
-        let header = parse_header(header_json).unwrap();
+        let header = parse_header(header_json);
 
         assert_eq!(header.version, 2);
         assert_eq!(header.width, 80);
@@ -641,7 +643,7 @@ mod tests {
         let mut metadata = TranscriptMetadata::new(120, 40);
         metadata.command = Some("/bin/bash".to_string());
         metadata.title = Some("Test Recording".to_string());
-        metadata.timestamp = Some(1704067200);
+        metadata.timestamp = Some(1_704_067_200);
         metadata.duration = Some(Duration::from_secs_f64(30.5));
         metadata
             .env
@@ -664,7 +666,7 @@ mod tests {
         assert_eq!(parsed.metadata.height, 40);
         assert_eq!(parsed.metadata.command, Some("/bin/bash".to_string()));
         assert_eq!(parsed.metadata.title, Some("Test Recording".to_string()));
-        assert_eq!(parsed.metadata.timestamp, Some(1704067200));
+        assert_eq!(parsed.metadata.timestamp, Some(1_704_067_200));
         assert_eq!(parsed.events.len(), 3);
     }
 }

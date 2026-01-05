@@ -23,10 +23,9 @@ pub mod query;
 pub use buffer::{
     Attributes, Cell, CellChange, ChangeType, Color, Cursor, ScreenBuffer, ScreenDiff,
 };
+use parser::apply_sgr;
 pub use parser::{AnsiParser, AnsiSequence, EraseMode, ParseResult};
 pub use query::{Region, ScreenQuery, ScreenQueryExt};
-
-use parser::apply_sgr;
 
 /// A virtual terminal screen.
 #[derive(Clone)]
@@ -162,6 +161,7 @@ impl Screen {
     }
 
     /// Apply an ANSI sequence.
+    #[allow(clippy::too_many_lines)] // Large match over AnsiSequence variants - structure is clear
     fn apply_sequence(&mut self, seq: AnsiSequence) {
         match seq {
             AnsiSequence::CursorUp(n) => {

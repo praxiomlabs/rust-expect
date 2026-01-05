@@ -33,12 +33,11 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
-use crate::error::{ExpectError, Result};
-use crate::expect::Pattern;
-
 use super::hooks::{HookManager, InteractionEvent};
 use super::mode::InteractionMode;
 use super::terminal::TerminalSize;
+use crate::error::{ExpectError, Result};
+use crate::expect::Pattern;
 
 /// Action to take after a pattern match in interactive mode.
 #[derive(Debug, Clone)]
@@ -178,6 +177,7 @@ where
     ///     .start()
     ///     .await?;
     /// ```
+    #[must_use]
     pub fn on_output<F>(mut self, pattern: impl Into<Pattern>, callback: F) -> Self
     where
         F: Fn(&InteractContext<'_>) -> InteractAction + Send + Sync + 'static,
@@ -192,6 +192,7 @@ where
     /// Register a pattern hook for input.
     ///
     /// When the input matches the pattern, the callback is invoked.
+    #[must_use]
     pub fn on_input<F>(mut self, pattern: impl Into<Pattern>, callback: F) -> Self
     where
         F: Fn(&InteractContext<'_>) -> InteractAction + Send + Sync + 'static,
@@ -225,6 +226,7 @@ where
     /// - **Unix**: Resize events are detected via SIGWINCH signal handling.
     /// - **Windows**: Resize detection is not currently supported; the callback
     ///   will not be invoked.
+    #[must_use]
     pub fn on_resize<F>(mut self, callback: F) -> Self
     where
         F: Fn(&ResizeContext) -> InteractAction + Send + Sync + 'static,
@@ -243,6 +245,7 @@ where
     /// Set the escape sequence to exit interact mode.
     ///
     /// Default is Ctrl+] (0x1d).
+    #[must_use]
     pub fn with_escape(mut self, escape: impl Into<Vec<u8>>) -> Self {
         self.escape_sequence = Some(escape.into());
         self
@@ -270,6 +273,7 @@ where
     }
 
     /// Add a byte-level input hook.
+    #[must_use]
     pub fn with_input_hook<F>(mut self, hook: F) -> Self
     where
         F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
@@ -279,6 +283,7 @@ where
     }
 
     /// Add a byte-level output hook.
+    #[must_use]
     pub fn with_output_hook<F>(mut self, hook: F) -> Self
     where
         F: Fn(&[u8]) -> Vec<u8> + Send + Sync + 'static,
@@ -372,6 +377,7 @@ impl<T> InteractRunner<T>
 where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         transport: Arc<Mutex<T>>,
         output_hooks: Vec<OutputPatternHook>,
@@ -414,10 +420,11 @@ where
 
     /// Run the interaction loop with Unix signal handling (SIGWINCH).
     #[cfg(unix)]
+    #[allow(clippy::significant_drop_tightening)]
     async fn run_with_signals(&mut self) -> Result<InteractResult> {
         use tokio::io::{BufReader, stdin, stdout};
 
-        self.hook_manager.notify(InteractionEvent::Started);
+        self.hook_manager.notify(&InteractionEvent::Started);
 
         let mut stdin = BufReader::new(stdin());
         let mut input_buf = [0u8; 1024];
@@ -435,7 +442,7 @@ where
             // Check timeout
             if let Some(deadline) = deadline {
                 if std::time::Instant::now() >= deadline {
-                    self.hook_manager.notify(InteractionEvent::Ended);
+                    self.hook_manager.notify(&InteractionEvent::Ended);
                     return Ok(InteractResult {
                         reason: InteractEndReason::Timeout,
                         buffer: self.buffer.clone(),
@@ -461,7 +468,7 @@ where
                     drop(transport); // Release lock before processing
                     match result {
                         Ok(0) => {
-                            self.hook_manager.notify(InteractionEvent::Ended);
+                            self.hook_manager.notify(&InteractionEvent::Ended);
                             return Ok(InteractResult {
                                 reason: InteractEndReason::Eof,
                                 buffer: self.buffer.clone(),
@@ -471,7 +478,7 @@ where
                             let data = &output_buf[..n];
                             let processed = self.hook_manager.process_output(data.to_vec());
 
-                            self.hook_manager.notify(InteractionEvent::Output(processed.clone()));
+                            self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));
 
                             // Write to stdout
                             let mut stdout = stdout();
@@ -494,7 +501,7 @@ where
                             }
                         }
                         Err(e) => {
-                            self.hook_manager.notify(InteractionEvent::Ended);
+                            self.hook_manager.notify(&InteractionEvent::Ended);
                             return Err(ExpectError::Io(e));
                         }
                     }
@@ -515,8 +522,8 @@ where
                         if let Some(ref esc) = self.escape_sequence {
                             escape_buf.extend_from_slice(data);
                             if escape_buf.ends_with(esc) {
-                                self.hook_manager.notify(InteractionEvent::ExitRequested);
-                                self.hook_manager.notify(InteractionEvent::Ended);
+                                self.hook_manager.notify(&InteractionEvent::ExitRequested);
+                                self.hook_manager.notify(&InteractionEvent::Ended);
                                 return Ok(InteractResult {
                                     reason: InteractEndReason::Escape,
                                     buffer: self.buffer.clone(),
@@ -531,7 +538,7 @@ where
                         // Process through input hooks
                         let processed = self.hook_manager.process_input(data.to_vec());
 
-                        self.hook_manager.notify(InteractionEvent::Input(processed.clone()));
+                        self.hook_manager.notify(&InteractionEvent::Input(processed.clone()));
 
                         // Check input patterns
                         if let Some(result) = self.check_input_patterns(&processed).await? {
@@ -550,10 +557,11 @@ where
 
     /// Run the interaction loop without signal handling (non-Unix platforms).
     #[cfg(not(unix))]
+    #[allow(clippy::significant_drop_tightening)]
     async fn run_without_signals(&mut self) -> Result<InteractResult> {
         use tokio::io::{BufReader, stdin, stdout};
 
-        self.hook_manager.notify(InteractionEvent::Started);
+        self.hook_manager.notify(&InteractionEvent::Started);
 
         let mut stdin = BufReader::new(stdin());
         let mut input_buf = [0u8; 1024];
@@ -566,7 +574,7 @@ where
             // Check timeout
             if let Some(deadline) = deadline {
                 if std::time::Instant::now() >= deadline {
-                    self.hook_manager.notify(InteractionEvent::Ended);
+                    self.hook_manager.notify(&InteractionEvent::Ended);
                     return Ok(InteractResult {
                         reason: InteractEndReason::Timeout,
                         buffer: self.buffer.clone(),
@@ -583,7 +591,7 @@ where
                     drop(transport); // Release lock before processing
                     match result {
                         Ok(0) => {
-                            self.hook_manager.notify(InteractionEvent::Ended);
+                            self.hook_manager.notify(&InteractionEvent::Ended);
                             return Ok(InteractResult {
                                 reason: InteractEndReason::Eof,
                                 buffer: self.buffer.clone(),
@@ -593,7 +601,7 @@ where
                             let data = &output_buf[..n];
                             let processed = self.hook_manager.process_output(data.to_vec());
 
-                            self.hook_manager.notify(InteractionEvent::Output(processed.clone()));
+                            self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));
 
                             // Write to stdout
                             let mut stdout = stdout();
@@ -616,7 +624,7 @@ where
                             }
                         }
                         Err(e) => {
-                            self.hook_manager.notify(InteractionEvent::Ended);
+                            self.hook_manager.notify(&InteractionEvent::Ended);
                             return Err(ExpectError::Io(e));
                         }
                     }
@@ -637,8 +645,8 @@ where
                         if let Some(ref esc) = self.escape_sequence {
                             escape_buf.extend_from_slice(data);
                             if escape_buf.ends_with(esc) {
-                                self.hook_manager.notify(InteractionEvent::ExitRequested);
-                                self.hook_manager.notify(InteractionEvent::Ended);
+                                self.hook_manager.notify(&InteractionEvent::ExitRequested);
+                                self.hook_manager.notify(&InteractionEvent::Ended);
                                 return Ok(InteractResult {
                                     reason: InteractEndReason::Escape,
                                     buffer: self.buffer.clone(),
@@ -653,7 +661,7 @@ where
                         // Process through input hooks
                         let processed = self.hook_manager.process_input(data.to_vec());
 
-                        self.hook_manager.notify(InteractionEvent::Input(processed.clone()));
+                        self.hook_manager.notify(&InteractionEvent::Input(processed.clone()));
 
                         // Check input patterns
                         if let Some(result) = self.check_input_patterns(&processed).await? {
@@ -670,6 +678,7 @@ where
         }
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     async fn check_output_patterns(&mut self) -> Result<Option<InteractResult>> {
         for (index, hook) in self.output_hooks.iter().enumerate() {
             if let Some(m) = hook.pattern.matches(&self.buffer) {
@@ -698,7 +707,7 @@ where
                         self.buffer = after.to_string();
                     }
                     InteractAction::Stop => {
-                        self.hook_manager.notify(InteractionEvent::Ended);
+                        self.hook_manager.notify(&InteractionEvent::Ended);
                         return Ok(Some(InteractResult {
                             reason: InteractEndReason::PatternStop {
                                 pattern_index: index,
@@ -707,7 +716,7 @@ where
                         }));
                     }
                     InteractAction::Error(msg) => {
-                        self.hook_manager.notify(InteractionEvent::Ended);
+                        self.hook_manager.notify(&InteractionEvent::Ended);
                         return Ok(Some(InteractResult {
                             reason: InteractEndReason::Error(msg),
                             buffer: self.buffer.clone(),
@@ -719,6 +728,7 @@ where
         Ok(None)
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     async fn check_input_patterns(&self, input: &[u8]) -> Result<Option<InteractResult>> {
         let input_str = String::from_utf8_lossy(input);
 
@@ -768,11 +778,11 @@ where
     /// This is called on Unix when SIGWINCH is received. On Windows, terminal
     /// resize events aren't currently supported via signals.
     #[cfg_attr(windows, allow(dead_code))]
+    #[allow(clippy::significant_drop_tightening)]
     async fn handle_resize(&mut self) -> Result<Option<InteractResult>> {
         // Get the new terminal size
-        let new_size = match super::terminal::Terminal::size() {
-            Ok(size) => size,
-            Err(_) => return Ok(None), // Ignore if we can't get size
+        let Ok(new_size) = super::terminal::Terminal::size() else {
+            return Ok(None); // Ignore if we can't get size
         };
 
         // Build the context with previous size
@@ -782,7 +792,7 @@ where
         };
 
         // Notify via hook manager
-        self.hook_manager.notify(InteractionEvent::Resize {
+        self.hook_manager.notify(&InteractionEvent::Resize {
             cols: new_size.cols,
             rows: new_size.rows,
         });
@@ -800,14 +810,14 @@ where
                     transport.flush().await.map_err(ExpectError::Io)?;
                 }
                 InteractAction::Stop => {
-                    self.hook_manager.notify(InteractionEvent::Ended);
+                    self.hook_manager.notify(&InteractionEvent::Ended);
                     return Ok(Some(InteractResult {
                         reason: InteractEndReason::PatternStop { pattern_index: 0 },
                         buffer: self.buffer.clone(),
                     }));
                 }
                 InteractAction::Error(msg) => {
-                    self.hook_manager.notify(InteractionEvent::Ended);
+                    self.hook_manager.notify(&InteractionEvent::Ended);
                     return Ok(Some(InteractResult {
                         reason: InteractEndReason::Error(msg),
                         buffer: self.buffer.clone(),

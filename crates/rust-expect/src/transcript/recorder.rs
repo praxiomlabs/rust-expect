@@ -1,8 +1,9 @@
 //! Session recording.
 
-use super::format::{Transcript, TranscriptEvent, TranscriptMetadata};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+use super::format::{Transcript, TranscriptEvent, TranscriptMetadata};
 
 /// A session recorder.
 #[derive(Debug)]

@@ -17,8 +17,9 @@
 //! let detector = registry.apply(PiiDetector::new());
 //! ```
 
-use super::detector::{CustomPattern, PiiDetector};
 use std::collections::HashMap;
+
+use super::detector::{CustomPattern, PiiDetector};
 
 /// A pattern set name for common compliance scenarios.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -112,6 +113,7 @@ impl PatternRegistry {
 
     /// Add a custom pattern.
     #[must_use]
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, entry: PatternEntry) -> Self {
         self.patterns.push(entry);
         self

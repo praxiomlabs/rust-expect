@@ -5,13 +5,12 @@
 
 use std::ffi::OsStr;
 use std::future::Future;
-use std::io;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::pin::Pin;
-use std::ptr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::{io, ptr};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::Console::HPCON;
@@ -21,10 +20,9 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CreateProcessW, GetExitCodeProcess, InitializeProcThreadAttributeList,
-    UpdateProcThreadAttribute, WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT,
-    EXTENDED_STARTUPINFO_PRESENT, INFINITE, PROCESS_INFORMATION,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, STARTUPINFOEXW,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
+    INFINITE, InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+    PROCESS_INFORMATION, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 /// Windows BOOL type (i32 in windows-sys 0.61+)

@@ -6,6 +6,7 @@
 
 use std::process::ExitStatus;
 use std::time::Duration;
+
 use thiserror::Error;
 
 /// Maximum length of buffer content to display in error messages.
@@ -92,6 +93,7 @@ fn format_pattern_not_found_error(pattern: &str, buffer: &str) -> String {
 }
 
 /// Format a process exited error message.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn format_process_exited_error(exit_status: &ExitStatus, buffer: &str) -> String {
     let buffer_snippet = format_buffer_snippet(buffer);
 
@@ -589,9 +591,11 @@ mod tests {
     #[test]
     fn error_display_large_buffer_truncation() {
         // Create a large buffer (> 500 bytes, > 6 lines)
-        let large_buffer: String = (0..50)
-            .map(|i| format!("Line {i}: Some content here\n"))
-            .collect();
+        let large_buffer: String = (0..50).fold(String::new(), |mut acc, i| {
+            use std::fmt::Write;
+            let _ = writeln!(acc, "Line {i}: Some content here");
+            acc
+        });
 
         let err = ExpectError::timeout(Duration::from_secs(1), "pattern", &large_buffer);
         let msg = err.to_string();

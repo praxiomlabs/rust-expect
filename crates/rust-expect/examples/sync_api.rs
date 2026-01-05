@@ -6,9 +6,10 @@
 //!
 //! Run with: `cargo run --example sync_api`
 
+use std::time::Duration;
+
 use rust_expect::prelude::*;
 use rust_expect::sync::SyncSession;
-use std::time::Duration;
 
 fn main() -> Result<()> {
     println!("rust-expect Synchronous API Example");

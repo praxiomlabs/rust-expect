@@ -1,9 +1,10 @@
 //! SSH session builder.
 
-use super::auth::{AuthMethod, HostKeyVerification, SshCredentials};
-use super::session::{SshConfig, SshSession};
 use std::path::PathBuf;
 use std::time::Duration;
+
+use super::auth::{AuthMethod, HostKeyVerification, SshCredentials};
+use super::session::{SshConfig, SshSession};
 
 /// Builder for SSH sessions.
 #[derive(Debug, Default)]

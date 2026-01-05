@@ -473,6 +473,7 @@ pub fn allocate_page_aligned(size: usize) -> Vec<u8> {
 /// Get the system page size.
 #[cfg(unix)]
 #[must_use]
+#[allow(unsafe_code)]
 pub fn page_size() -> usize {
     // SAFETY: sysconf is safe to call
     let size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };

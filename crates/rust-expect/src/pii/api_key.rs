@@ -1,7 +1,8 @@
 //! API key and token detection.
 
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
 
 /// Common API key patterns.
 static API_KEY_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {

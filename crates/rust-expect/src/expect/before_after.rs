@@ -4,8 +4,9 @@
 //! checked during every expect operation. These are useful for handling
 //! common patterns like error messages or prompts that can appear at any time.
 
-use super::pattern::{Pattern, PatternSet};
 use std::collections::HashMap;
+
+use super::pattern::{Pattern, PatternSet};
 
 /// Handler function type for before/after patterns.
 pub type PatternHandler = Box<dyn Fn(&str) -> HandlerAction + Send + Sync>;
@@ -223,6 +224,7 @@ impl PatternManager {
         id
     }
 
+    #[allow(clippy::unused_self)]
     fn check_patterns(
         &self,
         patterns: &HashMap<String, PersistentPattern>,
@@ -243,6 +245,7 @@ impl PatternManager {
         None
     }
 
+    #[allow(clippy::unused_self)]
     fn patterns_to_set(&self, patterns: &HashMap<String, PersistentPattern>) -> PatternSet {
         let mut sorted: Vec<_> = patterns.iter().filter(|(_, p)| p.enabled).collect();
         sorted.sort_by_key(|(_, p)| p.priority);

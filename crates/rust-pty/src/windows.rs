@@ -26,14 +26,14 @@ mod child;
 mod conpty;
 mod pipes;
 
+use std::ffi::OsStr;
+use std::future::Future;
+use std::sync::Arc;
+
 pub use async_adapter::WindowsPtyMaster;
 pub use child::{WindowsPtyChild, spawn_child};
 pub use conpty::{ConPty, is_conpty_available};
 pub use pipes::{PipePair, create_input_pipe, create_output_pipe, set_inheritable};
-
-use std::ffi::OsStr;
-use std::future::Future;
-use std::sync::Arc;
 
 use crate::config::{PtyConfig, WindowSize};
 use crate::error::{PtyError, Result};

@@ -19,7 +19,6 @@ fn main() {
     {
         println!("This example requires the 'pii-redaction' feature.");
         println!("Run with: cargo run --example pii_redaction --features pii-redaction");
-        return;
     }
 
     #[cfg(feature = "pii-redaction")]

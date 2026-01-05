@@ -1,7 +1,8 @@
 //! SSN-specific detection and validation.
 
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
 
 static SSN_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b(\d{3})-(\d{2})-(\d{4})\b").expect("SSN pattern is a valid regex")

@@ -1,4 +1,5 @@
 //! Integration tests for multi-session management.
+#![allow(clippy::similar_names)]
 
 use rust_expect::multi::{MultiSessionManager, PatternSelector, ReadyType};
 use rust_expect::{GroupBuilder, GroupManager, GroupResult, SessionGroup};

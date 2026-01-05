@@ -108,7 +108,7 @@ impl UnixPtyChild {
     }
 
     /// Wait using waitpid system call.
-    async fn wait_pid(&mut self) -> Result<ExitStatus> {
+    async fn wait_pid(&self) -> Result<ExitStatus> {
         use rustix::process::{WaitOptions, waitpid};
 
         let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| {
@@ -275,6 +275,7 @@ fn convert_exit_status(status: StdExitStatus) -> ExitStatus {
 ///
 /// This sets up the child's stdin/stdout/stderr to use the slave PTY
 /// and executes the specified program.
+#[allow(unsafe_code)]
 pub async fn spawn_child<S, I>(
     slave_fd: OwnedFd,
     program: S,
@@ -287,6 +288,7 @@ where
     I::Item: AsRef<OsStr>,
 {
     use std::process::Stdio;
+
     use tokio::process::Command;
 
     // Convert to raw fd for dup2

@@ -1,8 +1,9 @@
 //! Integration tests for health checking.
 
+use std::time::Duration;
+
 use rust_expect::HealthStatus;
 use rust_expect::health::{HealthCheckConfig, HealthCheckResult, HealthChecker};
-use std::time::Duration;
 
 #[test]
 const fn health_status_variants() {

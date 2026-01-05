@@ -205,8 +205,9 @@ pub fn expand(input: DialogInput) -> TokenStream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::parse_quote;
+
+    use super::*;
 
     #[test]
     fn parse_simple_dialog() {

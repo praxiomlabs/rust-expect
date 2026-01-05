@@ -1,10 +1,11 @@
 //! Integration tests for configuration handling.
 
+use std::time::Duration;
+
 use rust_expect::{
     BufferConfig, HumanTypingConfig, LineEnding, LogFormat, LoggingConfig, SessionConfig,
     TimeoutConfig,
 };
-use std::time::Duration;
 
 #[test]
 fn session_config_default() {

@@ -117,8 +117,9 @@ pub fn expand(input: TimeoutInput) -> TokenStream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::parse_quote;
+
+    use super::*;
 
     #[test]
     fn parse_simple_timeout() {

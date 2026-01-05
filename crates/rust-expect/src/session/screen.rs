@@ -76,6 +76,7 @@ impl Region {
 
 /// Text attributes for a cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct CellAttributes {
     /// Bold text.
     pub bold: bool,

@@ -3,8 +3,9 @@
 //! Scenarios define a sequence of expected patterns and responses
 //! for simulating interactive sessions.
 
-use super::event::{EventTimeline, MockEvent};
 use std::time::Duration;
+
+use super::event::{EventTimeline, MockEvent};
 
 /// A step in a mock scenario.
 #[derive(Debug, Clone)]

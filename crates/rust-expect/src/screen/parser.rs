@@ -247,7 +247,7 @@ impl AnsiParser {
                 self.state = ParserState::CsiIntermediate;
                 None
             }
-            b'@'..=b'~' => self.finalize_csi(byte),
+            b'@'..=b'~' => Some(self.finalize_csi(byte)),
             _ => {
                 self.reset();
                 None
@@ -284,7 +284,7 @@ impl AnsiParser {
                 if let Some(p) = self.current_param.take() {
                     self.params.push(p);
                 }
-                self.finalize_csi(byte)
+                Some(self.finalize_csi(byte))
             }
             _ => {
                 self.reset();
@@ -299,7 +299,7 @@ impl AnsiParser {
                 self.intermediate.push(byte as char);
                 None
             }
-            b'@'..=b'~' => self.finalize_csi(byte),
+            b'@'..=b'~' => Some(self.finalize_csi(byte)),
             _ => {
                 self.reset();
                 None
@@ -318,7 +318,7 @@ impl AnsiParser {
         }
     }
 
-    fn finalize_csi(&mut self, final_byte: u8) -> Option<ParseResult> {
+    fn finalize_csi(&mut self, final_byte: u8) -> ParseResult {
         let params = std::mem::take(&mut self.params);
         let intermediate = std::mem::take(&mut self.intermediate);
         self.reset();
@@ -377,7 +377,7 @@ impl AnsiParser {
             )),
         };
 
-        Some(ParseResult::Sequence(seq))
+        ParseResult::Sequence(seq)
     }
 }
 

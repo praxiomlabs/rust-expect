@@ -3,11 +3,6 @@
 //! This module provides SSH channel handling with I/O support for
 //! interactive sessions when the `ssh` feature is enabled.
 
-use crate::types::Dimensions;
-use std::time::Duration;
-
-#[cfg(feature = "ssh")]
-use crate::error::SshError;
 #[cfg(feature = "ssh")]
 use std::collections::VecDeque;
 #[cfg(feature = "ssh")]
@@ -16,8 +11,14 @@ use std::io;
 use std::pin::Pin;
 #[cfg(feature = "ssh")]
 use std::task::{Context, Poll};
+use std::time::Duration;
+
 #[cfg(feature = "ssh")]
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+#[cfg(feature = "ssh")]
+use crate::error::SshError;
+use crate::types::Dimensions;
 
 /// SSH channel type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

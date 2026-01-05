@@ -7,9 +7,10 @@
 
 #![cfg(feature = "mock")]
 
+use std::time::Duration;
+
 use rust_expect::mock::{MockBuilder, MockTransport, Scenario, simple_mock};
 use rust_expect::{ControlChar, Pattern, PatternSet, Session, SessionConfig};
-use std::time::Duration;
 
 fn config_with_timeout(timeout: Duration) -> SessionConfig {
     let mut config = SessionConfig::default();

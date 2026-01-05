@@ -41,16 +41,15 @@
 //! let _guard = send_span("ls -la");
 //! ```
 
-use opentelemetry::KeyValue;
-use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{
-    Resource,
-    trace::{RandomIdGenerator, Sampler, SdkTracerProvider},
-};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
+
+use opentelemetry::KeyValue;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler, SdkTracerProvider};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -151,7 +150,7 @@ pub enum TracingError {
 /// Returns an error if initialization fails or tracing is already initialized.
 pub fn init_tracing(service_name: &str, endpoint: &str) -> Result<(), TracingError> {
     let config = TracingConfig::new(service_name).with_endpoint(endpoint);
-    init_tracing_with_config(config)
+    init_tracing_with_config(&config)
 }
 
 /// Initialize OpenTelemetry tracing with custom configuration.
@@ -159,7 +158,7 @@ pub fn init_tracing(service_name: &str, endpoint: &str) -> Result<(), TracingErr
 /// # Errors
 ///
 /// Returns an error if initialization fails or tracing is already initialized.
-pub fn init_tracing_with_config(config: TracingConfig) -> Result<(), TracingError> {
+pub fn init_tracing_with_config(config: &TracingConfig) -> Result<(), TracingError> {
     // Build resource attributes
     let mut attributes = vec![KeyValue::new("service.name", config.service_name.clone())];
     for (key, value) in &config.resource_attributes {
@@ -237,7 +236,6 @@ pub fn shutdown_tracing() {
 /// // Session operations...
 /// // Span ends when _span is dropped
 /// ```
-#[must_use]
 pub fn session_span(session_id: &str, command: &str, pid: u32) -> tracing::span::EnteredSpan {
     tracing::info_span!(
         "session",
@@ -260,7 +258,6 @@ pub fn session_span(session_id: &str, command: &str, pid: u32) -> tracing::span:
 /// // Expect operation...
 /// // Span ends when _span is dropped
 /// ```
-#[must_use]
 pub fn expect_span(description: &str, pattern: &str) -> tracing::span::EnteredSpan {
     tracing::info_span!(
         "expect",
@@ -282,7 +279,6 @@ pub fn expect_span(description: &str, pattern: &str) -> tracing::span::EnteredSp
 /// // Send operation...
 /// // Span ends when _span is dropped
 /// ```
-#[must_use]
 pub fn send_span(data: &str) -> tracing::span::EnteredSpan {
     // Truncate long data for span name
     let display_data = if data.len() > 50 {
@@ -303,7 +299,6 @@ pub fn send_span(data: &str) -> tracing::span::EnteredSpan {
 /// Create a span for a dialog execution.
 ///
 /// Returns a span guard that will end the span when dropped.
-#[must_use]
 pub fn dialog_span(dialog_name: &str, step_count: usize) -> tracing::span::EnteredSpan {
     tracing::info_span!(
         "dialog",
@@ -317,7 +312,6 @@ pub fn dialog_span(dialog_name: &str, step_count: usize) -> tracing::span::Enter
 /// Create a span for a transcript recording.
 ///
 /// Returns a span guard that will end the span when dropped.
-#[must_use]
 pub fn transcript_span(session_id: &str, format: &str) -> tracing::span::EnteredSpan {
     tracing::info_span!(
         "transcript",

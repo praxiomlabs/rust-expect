@@ -135,6 +135,7 @@ impl Default for FakePty {
     }
 }
 
+#[allow(clippy::significant_drop_tightening)]
 impl Read for FakePty {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut shared = self
@@ -158,6 +159,7 @@ impl Read for FakePty {
     }
 }
 
+#[allow(clippy::significant_drop_tightening)]
 impl Write for FakePty {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut shared = self

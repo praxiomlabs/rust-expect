@@ -1,8 +1,9 @@
 //! Builder patterns for test setup.
 
-use crate::config::SessionConfig;
 use std::collections::HashMap;
 use std::time::Duration;
+
+use crate::config::SessionConfig;
 
 /// Builder for creating test expect configurations.
 #[derive(Debug, Clone, Default)]

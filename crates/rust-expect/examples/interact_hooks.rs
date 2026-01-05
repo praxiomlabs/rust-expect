@@ -8,11 +8,12 @@
 //!
 //! Run with: `cargo run --example interact_hooks`
 
-use rust_expect::interact::{InteractAction, ResizeContext, TerminalSize};
-use rust_expect::prelude::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+
+use rust_expect::interact::{InteractAction, ResizeContext, TerminalSize};
+use rust_expect::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -124,7 +125,7 @@ fn demonstrate_resize_context() {
     let action = example_resize_handler(&ctx);
     match action {
         InteractAction::Continue => {
-            println!("   Handler action: Continue (resize handled silently)")
+            println!("   Handler action: Continue (resize handled silently)");
         }
         InteractAction::Send(ref data) => println!("   Handler action: Send {} bytes", data.len()),
         InteractAction::Stop => println!("   Handler action: Stop interaction"),

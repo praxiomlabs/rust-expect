@@ -3,14 +3,16 @@
 //! This module provides a mock session that can be used for testing
 //! expect scripts without spawning real processes.
 
-use super::event::{EventTimeline, MockEvent};
-use super::scenario::Scenario;
 use std::collections::VecDeque;
 use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+use super::event::{EventTimeline, MockEvent};
+use super::scenario::Scenario;
 
 /// Shared state for the mock transport.
 #[derive(Debug)]
@@ -247,12 +249,13 @@ impl AsyncWrite for MockTransport {
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        let mut state = self
-            .state
+        let len = buf.len();
+        self.state
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.input.extend(buf);
-        Poll::Ready(Ok(buf.len()))
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .input
+            .extend(buf);
+        Poll::Ready(Ok(len))
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -328,8 +331,9 @@ impl Default for MockSession {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::*;
 
     #[tokio::test]
     async fn mock_transport_read_write() {

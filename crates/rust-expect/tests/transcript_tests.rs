@@ -1,10 +1,11 @@
 //! Integration tests for transcript recording and playback.
 
+use std::time::Duration;
+
 use rust_expect::transcript::{
     EventType, PlaybackOptions, PlaybackSpeed, PlayerState, TranscriptMetadata,
 };
 use rust_expect::{Player, Recorder, Transcript, TranscriptEvent};
-use std::time::Duration;
 
 #[test]
 fn transcript_metadata_new() {

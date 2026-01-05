@@ -147,6 +147,7 @@ impl EventTimeline {
     }
 
     /// Get the next event.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&MockEvent> {
         if self.position < self.events.len() {
             let event = &self.events[self.position];

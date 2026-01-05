@@ -96,7 +96,7 @@ impl HookManager {
     }
 
     /// Notify all event hooks.
-    pub fn notify(&self, event: InteractionEvent) {
+    pub fn notify(&self, event: &InteractionEvent) {
         for hook in &self.event_hooks {
             hook(event.clone());
         }

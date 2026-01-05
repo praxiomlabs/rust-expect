@@ -63,29 +63,23 @@ impl LocaleInfo {
             c == "utf8"
         })
     }
+}
 
-    /// Format as locale string.
-    #[must_use]
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
-
+impl std::fmt::Display for LocaleInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(ref lang) = self.language {
-            result.push_str(lang);
+            write!(f, "{lang}")?;
         }
         if let Some(ref territory) = self.territory {
-            result.push('_');
-            result.push_str(territory);
+            write!(f, "_{territory}")?;
         }
         if let Some(ref codeset) = self.codeset {
-            result.push('.');
-            result.push_str(codeset);
+            write!(f, ".{codeset}")?;
         }
         if let Some(ref modifier) = self.modifier {
-            result.push('@');
-            result.push_str(modifier);
+            write!(f, "@{modifier}")?;
         }
-
-        result
+        Ok(())
     }
 }
 

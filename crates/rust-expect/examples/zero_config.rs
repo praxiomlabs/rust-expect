@@ -5,12 +5,13 @@
 //!
 //! Run with: `cargo run --example zero_config`
 
+use std::time::Duration;
+
 use rust_expect::auto_config::{
     PromptConfig, ShellConfig, ShellType, default_shell, detect_from_path, detect_locale,
     detect_shell, is_utf8_environment,
 };
 use rust_expect::prelude::*;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -47,7 +48,7 @@ async fn main() -> Result<()> {
     println!("\n4. Detecting locale...");
 
     let locale = detect_locale();
-    println!("   Detected locale: {}", locale.to_string());
+    println!("   Detected locale: {locale}");
     println!("   UTF-8 environment: {}", is_utf8_environment());
 
     // Show relevant environment variables
@@ -137,7 +138,7 @@ async fn main() -> Result<()> {
 
     // This demonstrates the ideal zero-config experience
     println!("   1. Detect shell: {}", default_shell());
-    println!("   2. Detect locale: {}", detect_locale().to_string());
+    println!("   2. Detect locale: {}", detect_locale());
     println!("   3. Detect UTF-8: {}", is_utf8_environment());
     println!("   4. Configure session automatically");
     println!("   5. Start automation with sensible defaults");

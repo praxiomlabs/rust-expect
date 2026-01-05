@@ -1,12 +1,14 @@
 //! Dialog execution engine.
 
+use std::time::Duration;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
 use super::definition::{Dialog, DialogStep};
 use crate::Pattern;
 use crate::error::{ExpectError, Result};
 use crate::expect::PatternSet;
 use crate::session::Session;
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Result of executing a dialog step.
 #[derive(Debug, Clone)]
@@ -223,9 +225,8 @@ impl DialogExecutor {
             }
 
             // Get current step
-            let step = match dialog.steps.get(current_step_idx) {
-                Some(s) => s,
-                None => break, // No more steps
+            let Some(step) = dialog.steps.get(current_step_idx) else {
+                break; // No more steps
             };
 
             // Execute the step
@@ -299,7 +300,7 @@ impl DialogExecutor {
 
             match session.expect_any(&patterns).await {
                 Ok(m) => {
-                    output = m.before.clone();
+                    output.clone_from(&m.before);
                     matched_text = Some(m.matched);
                 }
                 Err(ExpectError::Timeout { buffer, .. }) => {
@@ -341,7 +342,7 @@ impl DialogExecutor {
             Some(substituted)
         } else if let Some(ctrl) = step.send_control {
             session.send_control(ctrl).await?;
-            Some(format!("<{:?}>", ctrl))
+            Some(format!("<{ctrl:?}>"))
         } else {
             None
         };

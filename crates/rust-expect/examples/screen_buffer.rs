@@ -6,7 +6,7 @@
 //! Run with: `cargo run --example screen_buffer --features screen`
 
 #[cfg(feature = "screen")]
-use rust_expect::screen::{Screen, ScreenBuffer, ScreenQueryExt};
+use rust_expect::screen::{Screen, ScreenBuffer};
 
 fn main() {
     println!("rust-expect Screen Buffer Example");
@@ -16,7 +16,6 @@ fn main() {
     {
         println!("This example requires the 'screen' feature.");
         println!("Run with: cargo run --example screen_buffer --features screen");
-        return;
     }
 
     #[cfg(feature = "screen")]

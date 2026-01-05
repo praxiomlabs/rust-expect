@@ -1,7 +1,8 @@
 //! Integration tests for send utilities.
 
-use rust_expect::{ControlChar, HumanTypingConfig};
 use std::time::Duration;
+
+use rust_expect::{ControlChar, HumanTypingConfig};
 
 #[test]
 fn control_char_ctrl_c() {

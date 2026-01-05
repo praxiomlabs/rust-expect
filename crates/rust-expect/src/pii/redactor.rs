@@ -124,6 +124,7 @@ impl PiiRedactor {
     }
 
     /// Create a partial mask (show first 2 and last 2 characters).
+    #[allow(clippy::unused_self)]
     fn partial_mask(&self, text: &str) -> String {
         let chars: Vec<char> = text.chars().collect();
         if chars.len() <= 4 {

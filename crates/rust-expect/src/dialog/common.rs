@@ -1,7 +1,8 @@
 //! Common dialog patterns.
 
-use super::definition::{Dialog, DialogBuilder, DialogStep};
 use std::time::Duration;
+
+use super::definition::{Dialog, DialogBuilder, DialogStep};
 
 /// Create a login dialog.
 #[must_use]

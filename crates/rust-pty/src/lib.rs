@@ -54,11 +54,9 @@ pub mod windows;
 pub use config::{PtyConfig, PtyConfigBuilder, PtySignal, WindowSize};
 pub use error::{PtyError, Result};
 pub use traits::{ExitStatus, PtyChild, PtyMaster, PtySystem};
-
 // Platform-specific re-exports
 #[cfg(unix)]
 pub use unix::{NativePtySystem, UnixPtyChild, UnixPtyMaster, UnixPtySystem};
-
 #[cfg(windows)]
 pub use windows::{NativePtySystem, WindowsPtyChild, WindowsPtyMaster, WindowsPtySystem};
 

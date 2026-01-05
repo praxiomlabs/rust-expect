@@ -656,6 +656,7 @@ impl CellChange {
     }
 
     /// Compute the type of change between two cells.
+    #[allow(clippy::useless_let_if_seq)] // Multiple conditions require mutable tracking
     fn compute_change_type(old: &Cell, new: &Cell) -> ChangeType {
         let mut changes = 0;
         let mut last_type = ChangeType::None;

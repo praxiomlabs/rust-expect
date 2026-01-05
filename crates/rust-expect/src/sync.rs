@@ -3,19 +3,19 @@
 //! This module provides a blocking API for users who prefer or require
 //! synchronous operations instead of async/await.
 
+use std::time::Duration;
+
+use tokio::runtime::{Builder, Runtime};
+
+#[cfg(unix)]
+use crate::backend::AsyncPty;
+#[cfg(windows)]
+use crate::backend::WindowsAsyncPty;
 use crate::config::SessionConfig;
 use crate::error::Result;
 use crate::expect::Pattern;
 use crate::session::Session;
 use crate::types::{ControlChar, Match};
-use std::time::Duration;
-use tokio::runtime::{Builder, Runtime};
-
-#[cfg(unix)]
-use crate::backend::AsyncPty;
-
-#[cfg(windows)]
-use crate::backend::WindowsAsyncPty;
 
 /// A synchronous session wrapper.
 ///

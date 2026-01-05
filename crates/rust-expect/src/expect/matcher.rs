@@ -3,12 +3,13 @@
 //! This module provides the core matching engine that combines
 //! patterns, buffers, and timeouts into a cohesive expect operation.
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use super::buffer::RingBuffer;
 use super::cache::RegexCache;
 use super::pattern::{Pattern, PatternSet};
 use crate::types::Match;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 /// The pattern matching engine.
 pub struct Matcher {
@@ -187,22 +188,26 @@ impl Matcher {
     }
 
     /// Simple glob matching.
+    #[allow(clippy::unused_self)]
     fn try_glob_match(&self, pattern: &str, text: &str) -> Option<(usize, usize)> {
         // Convert glob to a simple search
         // For now, just handle * as prefix/suffix
-        if pattern.starts_with('*') && pattern.ends_with('*') {
-            let inner = &pattern[1..pattern.len() - 1];
-            text.find(inner).map(|pos| (pos, pos + inner.len()))
-        } else if pattern.starts_with('*') {
-            let suffix = &pattern[1..];
-            if text.ends_with(suffix) {
-                let start = text.len() - suffix.len();
-                Some((start, text.len()))
+        if let Some(rest) = pattern.strip_prefix('*') {
+            if let Some(inner) = rest.strip_suffix('*') {
+                // Pattern like *inner*
+                text.find(inner).map(|pos| (pos, pos + inner.len()))
             } else {
-                None
+                // Pattern like *suffix
+                let suffix = rest;
+                if text.ends_with(suffix) {
+                    let start = text.len() - suffix.len();
+                    Some((start, text.len()))
+                } else {
+                    None
+                }
             }
-        } else if pattern.ends_with('*') {
-            let prefix = &pattern[..pattern.len() - 1];
+        } else if let Some(prefix) = pattern.strip_suffix('*') {
+            // Pattern like prefix*
             if text.starts_with(prefix) {
                 Some((0, prefix.len()))
             } else {

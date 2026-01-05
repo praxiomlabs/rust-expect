@@ -125,7 +125,6 @@ impl Terminal {
     }
 
     /// Get terminal size.
-    #[must_use]
     pub fn size() -> io::Result<TerminalSize> {
         // Use environment variables or defaults
         let cols = std::env::var("COLUMNS")
@@ -141,6 +140,7 @@ impl Terminal {
 
     /// Check if stdin is a TTY.
     #[must_use]
+    #[allow(unsafe_code)]
     pub fn is_tty() -> bool {
         #[cfg(unix)]
         {

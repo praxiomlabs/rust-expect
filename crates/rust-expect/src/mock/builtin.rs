@@ -3,9 +3,10 @@
 //! This module provides pre-configured scenarios for common
 //! terminal interactions like login prompts, shell sessions, etc.
 
+use std::time::Duration;
+
 use super::event::{EventTimeline, MockEvent};
 use super::scenario::{Scenario, ScenarioBuilder, ScenarioStep};
-use std::time::Duration;
 
 /// Create a login scenario.
 ///

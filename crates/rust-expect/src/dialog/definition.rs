@@ -70,7 +70,7 @@ impl DialogStep {
 
     /// Chain: set a control character to send (e.g., Ctrl+C).
     #[must_use]
-    pub fn with_send_control(mut self, ctrl: ControlChar) -> Self {
+    pub const fn with_send_control(mut self, ctrl: ControlChar) -> Self {
         self.send_control = Some(ctrl);
         self
     }
@@ -86,7 +86,7 @@ impl DialogStep {
     /// Chain: set a control character to send after expecting.
     /// Alias for `with_send_control`, for fluent API.
     #[must_use]
-    pub fn then_send_control(mut self, ctrl: ControlChar) -> Self {
+    pub const fn then_send_control(mut self, ctrl: ControlChar) -> Self {
         self.send_control = Some(ctrl);
         self
     }

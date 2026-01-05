@@ -32,11 +32,12 @@
 //! }
 //! ```
 
+use std::sync::OnceLock;
+
 use prometheus::{
     Counter, CounterVec, Encoder, Gauge, Histogram, HistogramOpts, HistogramVec, Opts, Registry,
     TextEncoder,
 };
-use std::sync::OnceLock;
 
 /// Global metrics registry.
 static REGISTRY: OnceLock<Registry> = OnceLock::new();

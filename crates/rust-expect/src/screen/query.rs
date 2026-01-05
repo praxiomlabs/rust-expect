@@ -3,8 +3,9 @@
 //! This module provides utilities for querying screen buffer contents,
 //! including text extraction, pattern matching, and region selection.
 
-use super::buffer::{Cell, ScreenBuffer};
 use regex::Regex;
+
+use super::buffer::{Cell, ScreenBuffer};
 
 /// A rectangular region on the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,10 +3,12 @@
 //! This module provides functionality for simulating human typing patterns,
 //! including variable delays, typos, and corrections.
 
+use std::time::Duration;
+
+use rand::Rng;
+
 use crate::config::HumanTypingConfig;
 use crate::error::Result;
-use rand::Rng;
-use std::time::Duration;
 
 /// A human-like typing simulator.
 pub struct HumanTyper {

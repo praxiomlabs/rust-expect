@@ -639,7 +639,7 @@ mod tests {
         assert_eq!(stats.total_sent, 1);
         assert_eq!(stats.total_received, 1);
         assert!(stats.is_alive);
-        assert_eq!(stats.success_rate(), 1.0);
+        assert!((stats.success_rate() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -651,7 +651,7 @@ mod tests {
             is_alive: true,
             time_since_activity: Duration::ZERO,
         };
-        assert_eq!(stats.success_rate(), 0.8);
+        assert!((stats.success_rate() - 0.8).abs() < f64::EPSILON);
 
         let empty_stats = KeepaliveStats {
             total_sent: 0,
@@ -660,7 +660,7 @@ mod tests {
             is_alive: true,
             time_since_activity: Duration::ZERO,
         };
-        assert_eq!(empty_stats.success_rate(), 1.0);
+        assert!((empty_stats.success_rate() - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

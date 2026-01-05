@@ -5,14 +5,16 @@
 //!
 //! Run with: `cargo run --example transcript`
 
+use std::time::Duration;
+
 use rust_expect::prelude::*;
 use rust_expect::transcript::{
     EventType, PlaybackOptions, PlaybackSpeed, Player, PlayerState, RecorderBuilder, Transcript,
     TranscriptEvent, TranscriptMetadata,
 };
-use std::time::Duration;
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     println!("rust-expect Session Transcript Example");
     println!("======================================\n");

@@ -266,8 +266,9 @@ impl PtyMaster for UnixPtyMaster {
 ///
 /// The caller must ensure the path is a valid PTY slave path.
 pub fn open_slave(path: &str) -> Result<OwnedFd> {
-    use rustix::fs::{Mode, OFlags, open};
     use std::path::Path;
+
+    use rustix::fs::{Mode, OFlags, open};
 
     let fd = open(
         Path::new(path),

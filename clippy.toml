@@ -1,26 +1,7 @@
-# Clippy configuration for rust-expect
-# https://doc.rust-lang.org/clippy/configuration.html
-
-# MSRV for lint suggestions
 msrv = "1.85"
-
-# Cognitive complexity threshold
 cognitive-complexity-threshold = 25
-
-# Maximum number of lines in a function body
 too-many-lines-threshold = 100
-
-# Allowed names that would otherwise trigger lint warnings
 allowed-idents-below-min-chars = ["x", "y", "i", "j", "k", "n", "fd", "tx", "rx", "id"]
-
-# Type complexity threshold
 type-complexity-threshold = 250
-
-# Maximum number of arguments a function can have
 too-many-arguments-threshold = 7
-
-# Allow certain macros that would otherwise trigger lints
-# allow-expect-in-tests = true
-
-# Disable documentation requirements for private items
 missing-docs-in-crate-items = false

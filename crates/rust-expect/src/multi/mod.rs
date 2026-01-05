@@ -32,8 +32,7 @@ mod group;
 mod select;
 
 pub use group::{GroupBuilder, GroupManager, GroupResult, SessionGroup};
-pub use select::{MultiSessionManager, PatternSelector, ReadyType, SelectResult, SendResult};
-
 /// Session identifier type for multi-session operations.
 /// This is distinct from `types::SessionId` which is a UUID-based identifier.
 pub use select::SessionId as MultiSessionId;
+pub use select::{MultiSessionManager, PatternSelector, ReadyType, SelectResult, SendResult};

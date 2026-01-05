@@ -18,8 +18,9 @@
 //! assert_eq!(matches.len(), 2);
 //! ```
 
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
 
 /// Type of PII detected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -531,6 +532,7 @@ impl PiiDetector {
     }
 
     /// Calculate confidence for a match.
+    #[allow(clippy::unused_self)]
     fn calculate_confidence(&self, pii_type: PiiType, text: &str) -> f32 {
         match pii_type {
             PiiType::Ssn => {

@@ -1,7 +1,8 @@
 //! Prompt detection and configuration.
 
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
 
 /// Common prompt patterns.
 /// Order matters: more specific patterns must come before generic ones.

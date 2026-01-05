@@ -3,11 +3,13 @@
 //! This module provides fundamental send operations for writing data
 //! to a session, including raw bytes, strings, lines, and control characters.
 
+use std::time::Duration;
+
+use tokio::io::AsyncWriteExt;
+
 use crate::config::LineEnding;
 use crate::error::Result;
 use crate::types::ControlChar;
-use std::time::Duration;
-use tokio::io::AsyncWriteExt;
 
 /// Trait for basic send operations.
 pub trait BasicSend: Send {
@@ -15,10 +17,7 @@ pub trait BasicSend: Send {
     fn send_bytes(&mut self, data: &[u8]) -> impl std::future::Future<Output = Result<()>> + Send;
 
     /// Send a string.
-    fn send_str(&mut self, s: &str) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_str(&mut self, s: &str) -> impl std::future::Future<Output = Result<()>> + Send {
         async move { self.send_bytes(s.as_bytes()).await }
     }
 
@@ -27,10 +26,7 @@ pub trait BasicSend: Send {
         &mut self,
         line: &str,
         ending: LineEnding,
-    ) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
         async move {
             self.send_str(line).await?;
             self.send_str(ending.as_str()).await
@@ -38,10 +34,7 @@ pub trait BasicSend: Send {
     }
 
     /// Send a line with LF ending.
-    fn send_line(&mut self, line: &str) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_line(&mut self, line: &str) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_line_with(line, LineEnding::Lf)
     }
 
@@ -49,58 +42,37 @@ pub trait BasicSend: Send {
     fn send_control(
         &mut self,
         ctrl: ControlChar,
-    ) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
         async move { self.send_bytes(&[ctrl.as_byte()]).await }
     }
 
     /// Send Ctrl+C (interrupt).
-    fn send_interrupt(&mut self) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_interrupt(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_control(ControlChar::CtrlC)
     }
 
     /// Send Ctrl+D (EOF).
-    fn send_eof(&mut self) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_eof(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_control(ControlChar::CtrlD)
     }
 
     /// Send Ctrl+Z (suspend).
-    fn send_suspend(&mut self) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_suspend(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_control(ControlChar::CtrlZ)
     }
 
     /// Send Escape.
-    fn send_escape(&mut self) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_escape(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_control(ControlChar::Escape)
     }
 
     /// Send Tab (Ctrl+I).
-    fn send_tab(&mut self) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_tab(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_control(ControlChar::CtrlI)
     }
 
     /// Send Backspace (Ctrl+H).
-    fn send_backspace(&mut self) -> impl std::future::Future<Output = Result<()>> + Send
-    where
-        Self: Send,
-    {
+    fn send_backspace(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_control(ControlChar::CtrlH)
     }
 }

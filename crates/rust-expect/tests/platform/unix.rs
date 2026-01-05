@@ -6,9 +6,10 @@
 //! - Unix path handling in patterns
 //! - PTY operations
 
+use std::time::Duration;
+
 use rust_expect::prelude::*;
 use rust_expect::{Dialog, DialogStep};
-use std::time::Duration;
 
 /// Test Unix line ending detection.
 #[test]

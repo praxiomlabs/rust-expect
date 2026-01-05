@@ -3,12 +3,14 @@
 //! This module provides the PTY backend that uses the rust-pty crate
 //! to spawn local processes with pseudo-terminal support.
 
-use crate::config::SessionConfig;
-use crate::error::{ExpectError, Result, SpawnError};
 use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+use crate::config::SessionConfig;
+use crate::error::{ExpectError, Result, SpawnError};
 
 /// A PTY-based transport for local process communication.
 pub struct PtyTransport {
@@ -155,6 +157,8 @@ impl PtySpawner {
     /// - Fork fails
     /// - Exec fails (child exits with code 1)
     #[cfg(unix)]
+    #[allow(unsafe_code)]
+    #[allow(clippy::unused_async)]
     pub async fn spawn(&self, command: &str, args: &[String]) -> Result<PtyHandle> {
         use std::ffi::CString;
 
@@ -373,6 +377,7 @@ impl PtyHandle {
     }
 
     /// Resize the terminal.
+    #[allow(unsafe_code)]
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         let winsize = libc::winsize {
             ws_row: rows,
@@ -395,6 +400,7 @@ impl PtyHandle {
     }
 
     /// Wait for the process to exit.
+    #[allow(unsafe_code)]
     pub fn wait(&self) -> Result<i32> {
         let mut status: libc::c_int = 0;
         // SAFETY: self.pid is a valid process ID from fork().
@@ -414,6 +420,7 @@ impl PtyHandle {
     }
 
     /// Send a signal to the process.
+    #[allow(unsafe_code)]
     pub fn signal(&self, signal: i32) -> Result<()> {
         // SAFETY: self.pid is a valid process ID from fork().
         // The signal is passed from the caller and must be a valid signal number.
@@ -479,6 +486,7 @@ impl WindowsPtyHandle {
 
 #[cfg(unix)]
 impl Drop for PtyHandle {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // Close the master fd
         // SAFETY: master_fd is a valid file descriptor obtained from openpty()
@@ -542,6 +550,7 @@ impl AsyncPty {
     }
 
     /// Resize the terminal.
+    #[allow(unsafe_code)]
     pub fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
         let winsize = libc::winsize {
             ws_row: rows,
@@ -562,6 +571,7 @@ impl AsyncPty {
     }
 
     /// Send a signal to the child process.
+    #[allow(unsafe_code)]
     pub fn signal(&self, signal: i32) -> Result<()> {
         // SAFETY: pid is a valid process ID from fork().
         let result = unsafe { libc::kill(self.pid as i32, signal) };
@@ -580,6 +590,7 @@ impl AsyncPty {
 
 #[cfg(unix)]
 impl AsyncRead for AsyncPty {
+    #[allow(unsafe_code)]
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -621,6 +632,7 @@ impl AsyncRead for AsyncPty {
 
 #[cfg(unix)]
 impl AsyncWrite for AsyncPty {
+    #[allow(unsafe_code)]
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -664,6 +676,7 @@ impl AsyncWrite for AsyncPty {
 
 #[cfg(unix)]
 impl Drop for AsyncPty {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // SAFETY: The fd is valid and owned by us.
         unsafe {
@@ -813,8 +826,10 @@ mod tests {
 
     #[test]
     fn pty_config_from_session() {
-        let mut session_config = SessionConfig::default();
-        session_config.dimensions = (120, 40);
+        let session_config = SessionConfig {
+            dimensions: (120, 40),
+            ..Default::default()
+        };
 
         let pty_config = PtyConfig::from(&session_config);
         assert_eq!(pty_config.dimensions.0, 120);

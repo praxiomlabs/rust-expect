@@ -5,13 +5,15 @@
 //!
 //! Run with: `cargo run --example multi_session`
 
+use std::time::Duration;
+
 use rust_expect::multi::{
     GroupBuilder, GroupManager, MultiSessionManager, PatternSelector, SessionGroup,
 };
 use rust_expect::prelude::*;
-use std::time::Duration;
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     println!("rust-expect Multi-Session Example");
     println!("==================================\n");

@@ -1,8 +1,9 @@
 //! Transcript playback.
 
-use super::format::{EventType, Transcript, TranscriptEvent};
 use std::io::Write;
 use std::time::{Duration, Instant};
+
+use super::format::{EventType, Transcript, TranscriptEvent};
 
 /// Playback speed.
 #[derive(Debug, Clone, Copy, PartialEq)]

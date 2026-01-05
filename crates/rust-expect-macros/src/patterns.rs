@@ -160,8 +160,9 @@ pub fn expand(input: PatternsInput) -> TokenStream {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use syn::parse_quote;
+
+    use super::*;
 
     #[test]
     fn parse_simple_pattern() {

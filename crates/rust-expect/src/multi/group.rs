@@ -196,6 +196,7 @@ impl GroupBuilder {
 
     /// Add a session by label.
     #[must_use]
+    #[allow(clippy::should_implement_trait)]
     pub fn add(mut self, label: impl Into<String>) -> Self {
         self.labels.push(label.into());
         self

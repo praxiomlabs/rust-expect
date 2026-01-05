@@ -7,8 +7,9 @@
 
 #[cfg(feature = "ssh")]
 fn main() {
-    use rust_expect::backend::ssh::{SshCredentials, SshSessionBuilder};
     use std::time::Duration;
+
+    use rust_expect::backend::ssh::{SshCredentials, SshSessionBuilder};
 
     println!("SSH Session Examples\n");
 

@@ -118,7 +118,7 @@ impl UnixPtyChild {
         // Use blocking waitpid in a spawn_blocking context
         let result = tokio::task::spawn_blocking(move || waitpid(Some(pid), WaitOptions::empty()))
             .await
-            .map_err(|e| PtyError::Wait(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| PtyError::Wait(io::Error::other(e)))?;
 
         match result {
             Ok(Some((_pid, wait_status))) => {
@@ -333,7 +333,7 @@ where
 
                 // Set controlling terminal
                 // Cast TIOCSCTTY to c_ulong for macOS compatibility (u32 -> u64)
-                if libc::ioctl(slave_raw, libc::TIOCSCTTY as libc::c_ulong, 0) == -1 {
+                if libc::ioctl(slave_raw, libc::c_ulong::from(libc::TIOCSCTTY), 0) == -1 {
                     return Err(io::Error::last_os_error());
                 }
 

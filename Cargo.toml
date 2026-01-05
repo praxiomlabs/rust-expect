@@ -26,7 +26,7 @@ categories = ["command-line-utilities", "development-tools::testing", "asynchron
 
 [workspace.dependencies]
 # Async runtime - Tokio 1.43 LTS (supported until March 2026)
-tokio = { version = "~1.43", features = ["full"] }
+tokio = { version = "~1.49", features = ["full"] }
 
 # PTY operations - Unix syscalls via rustix
 rustix = { version = "1.1", features = ["termios", "process", "pty", "fs"] }
@@ -42,10 +42,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # OpenTelemetry for distributed tracing
-opentelemetry = "0.28"
-opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.28", features = ["tonic", "grpc-tonic"] }
-tracing-opentelemetry = "0.29"
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.31", features = ["tonic", "grpc-tonic"] }
+tracing-opentelemetry = "0.32"
 
 # Prometheus metrics export
 prometheus = "0.14"
@@ -63,13 +63,13 @@ vte = "0.15"
 bitflags = "2.9"
 
 # SSH support (optional)
-russh = "0.54"
+russh = "0.56"
 russh-keys = "0.49"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
+toml = "0.9"
 
 # Proc-macro support
 syn = { version = "2.0", features = ["full", "parsing", "printing"] }
@@ -80,10 +80,10 @@ proc-macro2 = "1.0"
 proptest = "1.9"
 
 # Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.7", features = ["html_reports"] }
 
 # Comparative benchmarking (expectrl alternative)
-expectrl = "0.7"
+expectrl = "0.8"
 
 # Random number generation (for human typing simulation)
 rand = "0.9"
@@ -117,10 +117,10 @@ features = [
 
 # Unix signal handling
 [workspace.dependencies.signal-hook]
-version = "0.3"
+version = "0.4"
 
 [workspace.dependencies.signal-hook-tokio]
-version = "0.3"
+version = "0.4"
 features = ["futures-v0_3"]
 
 # Workspace-wide lint configuration

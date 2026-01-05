@@ -20,7 +20,13 @@ version = 2
 # How to handle yanked crates
 yanked = "warn"
 # Ignore advisories (with reason)
-ignore = []
+ignore = [
+    # Transitive dependency via russh -> rsa. No fix available upstream.
+    # The Marvin Attack requires local timing measurements and is mitigated
+    # in practice by network latency for SSH use cases.
+    # Tracking: https://github.com/RustCrypto/RSA/issues/19
+    { id = "RUSTSEC-2023-0071", reason = "No fix available; timing attack mitigated by network latency in SSH" },
+]
 
 [licenses]
 version = 2

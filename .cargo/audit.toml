@@ -1,0 +1,13 @@
+# cargo-audit configuration
+# https://rustsec.org/
+
+[advisories]
+# Advisories to ignore
+ignore = [
+    # Transitive dependency via russh -> rsa. No fix available upstream.
+    # The Marvin Attack (timing sidechannel for RSA key recovery) requires
+    # local timing measurements and is mitigated in practice by network
+    # latency for SSH use cases.
+    # Tracking: https://github.com/RustCrypto/RSA/issues/19
+    "RUSTSEC-2023-0071",
+]

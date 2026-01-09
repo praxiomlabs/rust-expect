@@ -79,7 +79,7 @@ proc-macro2 = "1.0"
 proptest = "1.9"
 
 # Benchmarking
-criterion = { version = "0.7", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 # Comparative benchmarking (expectrl alternative)
 expectrl = "0.8"

@@ -26,7 +26,7 @@ categories = ["command-line-utilities", "development-tools::testing", "asynchron
 
 [workspace.dependencies]
 # Async runtime - Tokio 1.49
-tokio = { version = "~1.49", features = ["full"] }
+tokio = { version = "~1.50", features = ["full"] }
 
 # PTY operations - Unix syscalls via rustix
 rustix = { version = "1.1", features = ["termios", "process", "pty", "fs"] }
@@ -60,15 +60,15 @@ crossterm = { version = "0.29", features = ["event-stream"] }
 vte = "0.15"
 
 # Bitflags for terminal attributes
-bitflags = "2.9"
+bitflags = "2.11"
 
 # SSH support (optional)
-russh = "0.56"
+russh = "0.57"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.9"
+toml = "1.0"
 
 # Proc-macro support
 syn = { version = "2.0", features = ["full", "parsing", "printing"] }
@@ -76,10 +76,10 @@ quote = "1.0"
 proc-macro2 = "1.0"
 
 # Testing
-proptest = "1.9"
+proptest = "1.10"
 
 # Benchmarking
-criterion = { version = "0.7", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 # Comparative benchmarking (expectrl alternative)
 expectrl = "0.8"
@@ -92,7 +92,7 @@ futures = "0.3"
 tokio-stream = "0.1"
 
 # Zero-copy byte buffers
-bytes = "1.10"
+bytes = "1.11"
 
 # Workspace crates (internal)
 rust-pty = { version = "0.1.0", path = "crates/rust-pty" }

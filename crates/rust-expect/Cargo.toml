@@ -81,6 +81,7 @@ windows-sys.workspace = true
 proptest.workspace = true
 criterion.workspace = true
 expectrl.workspace = true
+tempfile = "3"
 
 [[bench]]
 name = "pattern_matching"

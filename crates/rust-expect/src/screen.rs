@@ -527,6 +527,52 @@ mod tests {
     }
 
     #[test]
+    fn screen_utf8_box_drawing() {
+        // ╭─╮  (U+256D, U+2500, U+256E)  — UTF-8: e2 95 ad, e2 94 80, e2 95 ae
+        let mut screen = Screen::new(2, 10);
+        screen.process("╭─╮".as_bytes());
+        let row = screen.buffer().row_text(0);
+        assert!(row.starts_with("╭─╮"), "expected '╭─╮' got {row:?}");
+    }
+
+    #[test]
+    fn screen_utf8_split_across_calls() {
+        // The 3-byte sequence for ╭ delivered one byte at a time should still
+        // resolve to a single ╭, not three Latin-1 garbage chars.
+        let mut screen = Screen::new(1, 4);
+        let bytes = "╭".as_bytes();
+        assert_eq!(bytes.len(), 3);
+        for b in bytes {
+            screen.process(&[*b]);
+        }
+        let row = screen.buffer().row_text(0);
+        assert!(row.starts_with('╭'), "expected '╭' got {row:?}");
+        // Should be exactly one cell occupied, not three.
+        assert!(!row.starts_with("╭â"), "leftover Latin-1 bytes present: {row:?}");
+    }
+
+    #[test]
+    fn screen_utf8_four_byte_emoji() {
+        // 🚀  U+1F680  — UTF-8: f0 9f 9a 80
+        let mut screen = Screen::new(1, 4);
+        screen.process("🚀".as_bytes());
+        let row = screen.buffer().row_text(0);
+        assert!(row.starts_with('🚀'), "expected '🚀' got {row:?}");
+    }
+
+    #[test]
+    fn screen_utf8_invalid_lead_byte() {
+        // 0xFF is never a valid UTF-8 byte; should become U+FFFD.
+        let mut screen = Screen::new(1, 4);
+        screen.process(&[0xFF]);
+        let row = screen.buffer().row_text(0);
+        assert!(
+            row.starts_with(std::char::REPLACEMENT_CHARACTER),
+            "expected replacement, got {row:?}"
+        );
+    }
+
+    #[test]
     fn screen_vertical_tab() {
         let mut screen = Screen::new(10, 20);
         screen.process_str("Line 1\x0b"); // Vertical tab acts like line feed

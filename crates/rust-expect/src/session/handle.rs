@@ -271,6 +271,25 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         self.send(&[ctrl.as_byte()]).await
     }
 
+    /// Send text using bracketed paste mode (DECSET 2004).
+    ///
+    /// Wraps the content in `\x1b[200~` and `\x1b[201~` markers. Applications
+    /// that have enabled bracketed paste treat the enclosed content as
+    /// pasted input rather than typed input — this suppresses autocomplete,
+    /// command-history scanning, and per-character interpretation such as a
+    /// leading `/` triggering a slash-command popup. Safe to call even when
+    /// the receiver hasn't enabled bracketed paste: most terminals ignore
+    /// the markers and deliver the inner text as-is.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub async fn send_paste(&mut self, text: &str) -> Result<()> {
+        self.send(b"\x1b[200~").await?;
+        self.send(text.as_bytes()).await?;
+        self.send(b"\x1b[201~").await
+    }
+
     /// Expect a pattern in the output.
     ///
     /// Blocks until the pattern is matched, EOF is detected, or timeout occurs.

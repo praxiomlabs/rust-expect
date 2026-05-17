@@ -183,6 +183,38 @@ async fn wait_screen_stable_returns_after_quiet_period() {
     }
 }
 
+/// A panic in one tap does not kill subsequent taps and does not propagate
+/// out of the read loop.
+#[tokio::test]
+async fn panicking_tap_does_not_break_other_taps() {
+    let (cmd, args, config) = build("printf 'observed\\n'; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+
+    let saw_after: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
+
+    // First tap panics on every chunk.
+    session.add_output_tap(|_| panic!("intentional tap panic"));
+    // Second tap should still receive chunks.
+    let sa = saw_after.clone();
+    session.add_output_tap(move |chunk| {
+        if std::str::from_utf8(chunk).unwrap_or("").contains("observed") {
+            *sa.lock().unwrap() = true;
+        }
+    });
+
+    session
+        .expect_timeout("observed", Duration::from_secs(3))
+        .await
+        .expect("matcher should still see the bytes after the tap panic");
+    assert!(
+        *saw_after.lock().unwrap(),
+        "second tap must still observe chunks despite first tap panicking"
+    );
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
 /// `remove_output_tap` returns `true` for a known id and stops firing the
 /// callback; `false` for an unknown id.
 #[tokio::test]

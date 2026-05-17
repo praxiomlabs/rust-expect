@@ -659,8 +659,21 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             }
             Ok(Ok(n)) => {
                 self.matcher.append(&buf[..n]);
-                for (_, tap) in &self.output_taps {
-                    tap(&buf[..n]);
+                // Run taps in catch_unwind so a panicking user callback can't
+                // unwind across our await boundary or poison subsequent taps.
+                // We log and continue rather than propagate — taps are
+                // observers, not error sources.
+                for (id, tap) in &self.output_taps {
+                    let tap_clone = tap.clone();
+                    let chunk = &buf[..n];
+                    let result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap_clone(chunk)));
+                    if result.is_err() {
+                        tracing::warn!(
+                            tap_id = id.0,
+                            "output tap panicked; the panic was caught and other taps continue"
+                        );
+                    }
                 }
                 Ok(n)
             }

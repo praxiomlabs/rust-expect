@@ -85,6 +85,9 @@ pub struct PtyConfig {
     pub login_shell: bool,
     /// Environment variable handling.
     pub env_mode: EnvMode,
+    /// Environment variables to apply per `env_mode` (overlay for `Extend`,
+    /// the full set for `Clear`, ignored for `Inherit`).
+    pub env: std::collections::HashMap<String, String>,
 }
 
 impl Default for PtyConfig {
@@ -93,6 +96,7 @@ impl Default for PtyConfig {
             dimensions: (80, 24),
             login_shell: false,
             env_mode: EnvMode::Inherit,
+            env: std::collections::HashMap::new(),
         }
     }
 }
@@ -107,6 +111,7 @@ impl From<&SessionConfig> for PtyConfig {
             } else {
                 EnvMode::Extend
             },
+            env: config.env.clone(),
         }
     }
 }
@@ -185,6 +190,38 @@ impl PtySpawner {
             argv_cstrings.push(arg_cstring);
         }
 
+        // Validate env entries and pre-build CStrings so we can apply them
+        // in the child without allocating (allocations between fork and exec
+        // are technically unsafe in multi-threaded programs; this codebase
+        // forks pre-thread-start). We pair (key, value) so the child can
+        // call setenv() for each.
+        let mut env_pairs: Vec<(CString, CString)> = Vec::with_capacity(self.config.env.len());
+        for (k, v) in &self.config.env {
+            let key = CString::new(k.as_str()).map_err(|_| {
+                ExpectError::Spawn(SpawnError::InvalidArgument {
+                    kind: "env key".to_string(),
+                    value: k.clone(),
+                    reason: "env key contains null byte".to_string(),
+                })
+            })?;
+            if k.contains('=') {
+                return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
+                    kind: "env key".to_string(),
+                    value: k.clone(),
+                    reason: "env key contains '='".to_string(),
+                }));
+            }
+            let val = CString::new(v.as_str()).map_err(|_| {
+                ExpectError::Spawn(SpawnError::InvalidArgument {
+                    kind: "env value".to_string(),
+                    value: v.clone(),
+                    reason: "env value contains null byte".to_string(),
+                })
+            })?;
+            env_pairs.push((key, val));
+        }
+        let env_mode = self.config.env_mode;
+
         // Create PTY pair
         // SAFETY: openpty() is called with valid pointers to stack-allocated integers.
         // The null pointers for name, termp, and winp are explicitly allowed per POSIX.
@@ -247,6 +284,58 @@ impl PtySpawner {
                         libc::close(slave_fd);
                     }
 
+                    // Apply environment variable mode + overrides before exec.
+                    //
+                    // - Inherit: nothing to do; child already has parent env.
+                    // - Clear:   wipe environ then apply our pairs.
+                    // - Extend:  keep parent env, overlay (overwrite) our pairs.
+                    //
+                    // `clearenv` is Linux-only. On macOS we set `*environ` to
+                    // a sentinel empty array; setenv then rebuilds environ
+                    // from scratch.
+                    match env_mode {
+                        EnvMode::Inherit => {}
+                        EnvMode::Clear => {
+                            #[cfg(target_os = "linux")]
+                            {
+                                libc::clearenv();
+                            }
+                            #[cfg(not(target_os = "linux"))]
+                            {
+                                // Best effort: walk environ and unsetenv each
+                                // key. setenv() may realloc environ but that's
+                                // OK between fork and exec.
+                                extern "C" {
+                                    static mut environ: *mut *mut libc::c_char;
+                                }
+                                while !environ.is_null() && !(*environ).is_null() {
+                                    // Read first entry's "KEY=..."
+                                    let entry = *environ;
+                                    let mut len = 0usize;
+                                    while *entry.add(len) != 0 && *entry.add(len) != b'=' as libc::c_char {
+                                        len += 1;
+                                    }
+                                    if len == 0 {
+                                        break;
+                                    }
+                                    // Copy the key onto a small stack buffer
+                                    // bounded by typical env-name length.
+                                    let mut name_buf = [0u8; 256];
+                                    let n = len.min(name_buf.len() - 1);
+                                    for i in 0..n {
+                                        name_buf[i] = *entry.add(i) as u8;
+                                    }
+                                    name_buf[n] = 0;
+                                    libc::unsetenv(name_buf.as_ptr().cast::<libc::c_char>());
+                                }
+                            }
+                        }
+                        EnvMode::Extend => {}
+                    }
+                    for (k, v) in &env_pairs {
+                        libc::setenv(k.as_ptr(), v.as_ptr(), 1);
+                    }
+
                     // Use pre-validated CStrings (validated before fork)
                     let argv_ptrs: Vec<*const libc::c_char> = argv_cstrings
                         .iter()
@@ -296,13 +385,41 @@ impl PtySpawner {
     pub async fn spawn(&self, command: &str, args: &[String]) -> Result<WindowsPtyHandle> {
         use rust_pty::{PtySystem, WindowsPtySystem};
 
+        // Build env per env_mode:
+        // - Inherit: env: None (rust-pty inherits parent env), but if we also
+        //   have overrides, we need to inherit + overlay → build a full map.
+        // - Clear:   env: Some(our overrides) — parent env discarded.
+        // - Extend:  env: Some(parent + our overrides), parent first so ours win.
+        let built_env: Option<std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>> =
+            match self.config.env_mode {
+                EnvMode::Inherit if self.config.env.is_empty() => None,
+                EnvMode::Inherit | EnvMode::Extend => {
+                    let mut m: std::collections::HashMap<_, _> = std::env::vars_os().collect();
+                    for (k, v) in &self.config.env {
+                        m.insert(
+                            std::ffi::OsString::from(k),
+                            std::ffi::OsString::from(v),
+                        );
+                    }
+                    Some(m)
+                }
+                EnvMode::Clear => Some(
+                    self.config
+                        .env
+                        .iter()
+                        .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+                        .collect(),
+                ),
+            };
+
         // Create configuration for rust-pty
         let pty_config = rust_pty::PtyConfig {
             window_size: self.config.dimensions,
-            // If env_mode is Clear, use empty env; otherwise inherit (env: None)
             env: match self.config.env_mode {
-                EnvMode::Clear => Some(std::collections::HashMap::new()),
-                _ => None,
+                EnvMode::Clear if self.config.env.is_empty() => {
+                    Some(std::collections::HashMap::new())
+                }
+                _ => built_env,
             },
             ..Default::default()
         };

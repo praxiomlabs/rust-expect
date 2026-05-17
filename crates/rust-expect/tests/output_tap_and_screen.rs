@@ -183,6 +183,97 @@ async fn wait_screen_stable_returns_after_quiet_period() {
     }
 }
 
+/// `wait_screen_not_contains` returns once the substring disappears from the
+/// screen — exercised here by waiting for an in-flight marker to clear after
+/// the child exits.
+#[tokio::test]
+async fn wait_screen_not_contains_clears_when_substring_gone() {
+    // Emit the marker, then a clear-screen sequence (ESC [ 2 J) that wipes it,
+    // then sleep briefly.
+    let (cmd, args, config) =
+        build("printf 'IN-FLIGHT\\n'; sleep 0.2; printf '\\x1b[2J\\x1b[H'; sleep 0.5; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    session.attach_screen();
+
+    // First confirm we saw the marker.
+    session
+        .expect_screen_contains("IN-FLIGHT", Duration::from_secs(2))
+        .await
+        .expect("marker should appear");
+
+    // Then wait for it to clear.
+    session
+        .wait_screen_not_contains("IN-FLIGHT", Duration::from_secs(3))
+        .await
+        .expect("marker should be cleared by ESC [ 2 J");
+}
+
+/// `wait_screen_not_contains` times out when the substring sticks around.
+#[tokio::test]
+async fn wait_screen_not_contains_times_out_when_substring_persists() {
+    let (cmd, args, config) = build("printf 'STICKY\\n'; sleep 2; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    session.attach_screen();
+
+    session
+        .expect_screen_contains("STICKY", Duration::from_secs(2))
+        .await
+        .unwrap();
+    let r = session
+        .wait_screen_not_contains("STICKY", Duration::from_millis(500))
+        .await;
+    assert!(r.is_err(), "expected timeout, got {r:?}");
+}
+
+/// `resize_pty` also resizes the attached screen.
+#[tokio::test]
+async fn resize_pty_resizes_attached_screen() {
+    let (cmd, args, config) = build("sleep 2; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    session.attach_screen();
+
+    {
+        let s = session.screen().unwrap().lock().unwrap();
+        assert_eq!(s.cols(), 80);
+        assert_eq!(s.rows(), 24);
+    }
+
+    session.resize_pty(132, 50).await.unwrap();
+
+    {
+        let s = session.screen().unwrap().lock().unwrap();
+        assert_eq!(s.cols(), 132, "screen cols should follow resize_pty");
+        assert_eq!(s.rows(), 50, "screen rows should follow resize_pty");
+    }
+
+    let _ = session.send_control(rust_expect::ControlChar::CtrlC).await;
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// `send_paste` rejects input containing the closing paste marker.
+#[tokio::test]
+async fn send_paste_rejects_embedded_end_marker() {
+    let cmd = "/bin/cat".to_string();
+    let args: Vec<String> = vec![];
+    let config = SessionBuilder::new()
+        .command(&cmd)
+        .timeout(Duration::from_secs(5))
+        .build();
+    let mut session = Session::spawn_with_config(&cmd, &[], config).await.unwrap();
+
+    let evil = "ok then \x1b[201~ → DROP OUT ← \x1b[200~";
+    let r = session.send_paste(evil).await;
+    assert!(r.is_err(), "should reject embedded \\x1b[201~");
+
+    // Clean text still works.
+    session.send_paste("hello").await.unwrap();
+    let _ = session.send_control(rust_expect::ControlChar::CtrlD).await;
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
 /// `send_paste` wraps text in bracketed-paste markers.
 #[tokio::test]
 async fn send_paste_emits_bracketed_paste_markers() {

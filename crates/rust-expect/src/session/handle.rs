@@ -283,8 +283,21 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the write fails.
+    /// Returns an error if the write fails or if `text` contains the
+    /// closing paste marker `\x1b[201~`, which would let the receiver drop
+    /// out of paste mode mid-payload. Callers that want to send such bytes
+    /// should write them through the regular [`send`](Self::send) path.
     pub async fn send_paste(&mut self, text: &str) -> Result<()> {
+        if text.as_bytes()
+            .windows(b"\x1b[201~".len())
+            .any(|w| w == b"\x1b[201~")
+        {
+            return Err(ExpectError::PatternNotFound {
+                pattern: "send_paste".to_string(),
+                buffer: "input contains the bracketed-paste end marker (\\x1b[201~); refusing to send"
+                    .to_string(),
+            });
+        }
         self.send(b"\x1b[200~").await?;
         self.send(text.as_bytes()).await?;
         self.send(b"\x1b[201~").await
@@ -444,6 +457,66 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 return Err(ExpectError::Timeout {
                     duration: timeout,
                     pattern: needle.to_string(),
+                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                });
+            }
+            let remaining = timeout - elapsed;
+            self.read_with_timeout(poll.min(remaining)).await?;
+        }
+    }
+
+    /// Wait until the attached screen no longer contains the given substring.
+    ///
+    /// The inverse of [`expect_screen_contains`](Self::expect_screen_contains).
+    /// Returns successfully as soon as `needle` is absent from the rendered
+    /// screen, or with [`ExpectError::Timeout`] when `timeout` elapses with
+    /// the substring still present. EOF is treated as "absent" (the screen
+    /// state is frozen at the final paint).
+    ///
+    /// Useful for anchoring on the *disappearance* of an indicator —
+    /// e.g. waiting for a "request in flight" status to clear, a spinner
+    /// glyph to stop, or a modal to close.
+    ///
+    /// Requires an attached screen.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no screen is attached, the timeout expires while
+    /// the substring is still visible, or an I/O error occurs.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub async fn wait_screen_not_contains(
+        &mut self,
+        needle: &str,
+        timeout: Duration,
+    ) -> Result<()> {
+        let Some(screen) = self.screen.clone() else {
+            return Err(ExpectError::PatternNotFound {
+                pattern: format!("!{needle}"),
+                buffer: "<no screen attached>".to_string(),
+            });
+        };
+
+        let start = tokio::time::Instant::now();
+        let poll = Duration::from_millis(50);
+
+        loop {
+            let present = screen
+                .lock()
+                .map(|s| s.query().contains(needle))
+                .unwrap_or(false);
+            if !present {
+                return Ok(());
+            }
+            if self.eof {
+                return Ok(());
+            }
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                return Err(ExpectError::Timeout {
+                    duration: timeout,
+                    pattern: format!("!{needle}"),
                     buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
                 });
             }
@@ -979,12 +1052,26 @@ impl Session<AsyncPty> {
 
     /// Resize the terminal.
     ///
+    /// Also resizes the attached screen (if any) so it stays consistent
+    /// with the PTY. Without this, screen-aware assertions would drift
+    /// after a resize.
+    ///
     /// # Errors
     ///
     /// Returns an error if the resize ioctl fails.
     pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
-        let mut transport = self.transport.lock().await;
-        transport.resize(cols, rows)
+        {
+            let mut transport = self.transport.lock().await;
+            transport.resize(cols, rows)?;
+        }
+        self.config.dimensions = (cols, rows);
+        #[cfg(feature = "screen")]
+        if let Some(screen) = self.screen.as_ref() {
+            if let Ok(mut s) = screen.lock() {
+                s.resize(rows as usize, cols as usize);
+            }
+        }
+        Ok(())
     }
 
     /// Send a signal to the child process.

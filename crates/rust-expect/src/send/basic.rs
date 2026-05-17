@@ -75,6 +75,26 @@ pub trait BasicSend: Send {
     fn send_backspace(&mut self) -> impl std::future::Future<Output = Result<()>> + Send {
         self.send_control(ControlChar::CtrlH)
     }
+
+    /// Send text using bracketed paste mode.
+    ///
+    /// Wraps the content in `\x1b[200~` and `\x1b[201~` markers. Terminal
+    /// applications that have enabled bracketed paste (DECSET 2004) treat
+    /// the enclosed content as pasted input rather than typed input — this
+    /// suppresses autocomplete, command-history scanning, and per-character
+    /// interpretation that can otherwise mangle multi-line or special-key
+    /// content (e.g. a leading `/` triggering a slash-command popup).
+    ///
+    /// The application must have requested bracketed paste; if it hasn't,
+    /// most terminals will ignore the markers and the inner text will be
+    /// delivered as-is, so the call is safe to use unconditionally.
+    fn send_paste(&mut self, text: &str) -> impl std::future::Future<Output = Result<()>> + Send {
+        async move {
+            self.send_bytes(b"\x1b[200~").await?;
+            self.send_str(text).await?;
+            self.send_bytes(b"\x1b[201~").await
+        }
+    }
 }
 
 /// A sender that wraps an async writer.

@@ -20,6 +20,14 @@ use crate::expect::{ExpectState, MatchResult, Matcher, Pattern, PatternManager, 
 use crate::interact::InteractBuilder;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
 
+/// Callback invoked for every chunk of bytes read from the transport.
+///
+/// Taps observe the raw byte stream as it arrives, after it is appended to the
+/// matcher buffer but before any pattern matching is performed. They are the
+/// foundation for screen emulation, transcript recording, and other features
+/// that need to see output as it happens.
+pub type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
+
 /// A session handle for interacting with a spawned process.
 ///
 /// The session provides methods to send input, expect patterns in output,
@@ -39,6 +47,11 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     id: SessionId,
     /// EOF flag.
     eof: bool,
+    /// Output taps invoked on every chunk of bytes read from the transport.
+    output_taps: Vec<OutputTap>,
+    /// Attached virtual terminal screen, fed from an output tap.
+    #[cfg(feature = "screen")]
+    screen: Option<Arc<std::sync::Mutex<crate::screen::Screen>>>,
 }
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
@@ -55,7 +68,104 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             state: SessionState::Starting,
             id: SessionId::new(),
             eof: false,
+            output_taps: Vec::new(),
+            #[cfg(feature = "screen")]
+            screen: None,
         }
+    }
+
+    /// Register a callback that will be invoked with every chunk of bytes
+    /// read from the transport.
+    ///
+    /// Taps observe the raw byte stream as it arrives — they receive bytes
+    /// in the same form the underlying process produced them, including any
+    /// ANSI escape sequences. Taps are invoked synchronously inside the read
+    /// loop after the bytes are appended to the matcher buffer; they should
+    /// be cheap and non-blocking. Use a channel if expensive work is required.
+    ///
+    /// Multiple taps may be registered; they are invoked in registration
+    /// order. Taps are dropped when the session is dropped.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use std::sync::Mutex;
+    /// let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    /// let buf = captured.clone();
+    /// session.add_output_tap(move |chunk| {
+    ///     buf.lock().unwrap().extend_from_slice(chunk);
+    /// });
+    /// ```
+    pub fn add_output_tap<F>(&mut self, f: F)
+    where
+        F: Fn(&[u8]) + Send + Sync + 'static,
+    {
+        self.output_taps.push(Arc::new(f));
+    }
+
+    /// Get a shared reference to the list of registered output taps.
+    ///
+    /// Primarily useful for the interact() path which runs its own read loop
+    /// and needs to invoke the same taps.
+    #[must_use]
+    pub fn output_taps(&self) -> &[OutputTap] {
+        &self.output_taps
+    }
+
+    /// Attach a virtual terminal screen to this session.
+    ///
+    /// Creates a [`Screen`](crate::screen::Screen) with the session's
+    /// configured dimensions and registers an output tap that feeds every
+    /// chunk of output into the screen's ANSI parser. The screen is then
+    /// accessible via [`screen()`](Self::screen) and is automatically updated
+    /// whenever output is read from the transport (i.e. inside `expect_*`,
+    /// `wait`, or `wait_screen_stable`).
+    ///
+    /// Repeated calls replace the previous screen.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn attach_screen(&mut self) {
+        let (cols, rows) = self.config.dimensions;
+        self.attach_screen_with_dims(rows, cols);
+    }
+
+    /// Attach a screen with custom dimensions.
+    ///
+    /// `rows` and `cols` are the screen size in cells. Note that this does
+    /// not resize the PTY itself — use [`resize_pty`](Self::resize_pty) for
+    /// that. The two should normally match, but it can be useful to set a
+    /// larger virtual screen for transcript capture.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn attach_screen_with_dims(&mut self, rows: u16, cols: u16) {
+        let screen = Arc::new(std::sync::Mutex::new(crate::screen::Screen::new(
+            rows as usize,
+            cols as usize,
+        )));
+        let screen_for_tap = screen.clone();
+        self.add_output_tap(move |chunk| {
+            if let Ok(mut s) = screen_for_tap.lock() {
+                s.process(chunk);
+            }
+        });
+        self.screen = Some(screen);
+    }
+
+    /// Get the attached virtual terminal screen, if any.
+    ///
+    /// Returns a shared handle protected by a [`std::sync::Mutex`]. Lock it
+    /// briefly to read screen state — the lock is also taken by the output
+    /// tap on every read, so holding it for long stretches blocks the read
+    /// loop.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    #[must_use]
+    pub fn screen(&self) -> Option<&Arc<std::sync::Mutex<crate::screen::Screen>>> {
+        self.screen.as_ref()
     }
 
     /// Get the session ID.
@@ -259,6 +369,135 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         self.expect_any(&patterns).await
     }
 
+    /// Wait until the attached screen contains the given substring.
+    ///
+    /// Drives reads from the transport in short increments, checking the
+    /// rendered screen text after each. Returns successfully as soon as
+    /// `needle` appears in the screen text, or with [`ExpectError::Timeout`]
+    /// when `timeout` elapses without a match. Returns [`ExpectError::Eof`]
+    /// if the process exits before the substring appears.
+    ///
+    /// This is the screen-aware counterpart to [`expect`](Self::expect): use
+    /// it when the byte stream is full of ANSI escape sequences (e.g. when
+    /// driving a TUI), where literal substring matching on the byte stream
+    /// would fail because of interleaved cursor positioning and SGR codes.
+    ///
+    /// Requires an attached screen — call [`attach_screen`](Self::attach_screen)
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no screen is attached, the timeout expires, EOF
+    /// is reached, or an I/O error occurs.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub async fn expect_screen_contains(
+        &mut self,
+        needle: &str,
+        timeout: Duration,
+    ) -> Result<()> {
+        let Some(screen) = self.screen.clone() else {
+            return Err(ExpectError::PatternNotFound {
+                pattern: needle.to_string(),
+                buffer: "<no screen attached>".to_string(),
+            });
+        };
+
+        let start = tokio::time::Instant::now();
+        let poll = Duration::from_millis(50);
+
+        loop {
+            if screen
+                .lock()
+                .map(|s| s.query().contains(needle))
+                .unwrap_or(false)
+            {
+                return Ok(());
+            }
+            if self.eof {
+                return Err(ExpectError::Eof {
+                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                });
+            }
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                return Err(ExpectError::Timeout {
+                    duration: timeout,
+                    pattern: needle.to_string(),
+                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                });
+            }
+            let remaining = timeout - elapsed;
+            self.read_with_timeout(poll.min(remaining)).await?;
+        }
+    }
+
+    /// Wait until the attached screen has been unchanged for `quiet_period`.
+    ///
+    /// Drives reads in short increments and tracks whether the rendered
+    /// screen text changes between reads. Returns successfully when the
+    /// screen has been quiescent for `quiet_period`, or with
+    /// [`ExpectError::Timeout`] if `max_wait` elapses first.
+    ///
+    /// Useful as a generic "wait for the TUI to finish drawing" primitive
+    /// when no specific anchor is available — for example, after submitting
+    /// a prompt and before reading the response.
+    ///
+    /// A small `quiet_period` (e.g. 100-300 ms) catches paint completion;
+    /// a larger one (1-2 s) waits out streaming responses with mid-stream
+    /// pauses. Tune to the specific application.
+    ///
+    /// Requires an attached screen.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no screen is attached, `max_wait` elapses, or an
+    /// I/O error occurs. EOF is **not** an error — if the process exits, the
+    /// final screen state is considered stable and the method returns Ok.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub async fn wait_screen_stable(
+        &mut self,
+        quiet_period: Duration,
+        max_wait: Duration,
+    ) -> Result<()> {
+        let Some(screen) = self.screen.clone() else {
+            return Err(ExpectError::PatternNotFound {
+                pattern: "<screen stability>".to_string(),
+                buffer: "<no screen attached>".to_string(),
+            });
+        };
+
+        let start = tokio::time::Instant::now();
+        let poll = Duration::from_millis(50);
+        let mut last_text = screen.lock().map(|s| s.text()).unwrap_or_default();
+        let mut last_change = tokio::time::Instant::now();
+
+        loop {
+            if last_change.elapsed() >= quiet_period {
+                return Ok(());
+            }
+            if self.eof {
+                return Ok(());
+            }
+            if start.elapsed() >= max_wait {
+                return Err(ExpectError::Timeout {
+                    duration: max_wait,
+                    pattern: "<screen stability>".to_string(),
+                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                });
+            }
+            self.read_with_timeout(poll).await?;
+            let current = screen.lock().map(|s| s.text()).unwrap_or_default();
+            if current != last_text {
+                last_text = current;
+                last_change = tokio::time::Instant::now();
+            }
+        }
+    }
+
     /// Read data from the transport with timeout.
     async fn read_with_timeout(&mut self, timeout: Duration) -> Result<usize> {
         let mut buf = [0u8; 4096];
@@ -271,6 +510,9 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             }
             Ok(Ok(n)) => {
                 self.matcher.append(&buf[..n]);
+                for tap in &self.output_taps {
+                    tap(&buf[..n]);
+                }
                 Ok(n)
             }
             Ok(Err(e)) => {

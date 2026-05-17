@@ -28,6 +28,12 @@ use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId,
 /// that need to see output as it happens.
 pub type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
 
+/// Opaque handle identifying a registered output tap. Returned by
+/// [`Session::add_output_tap`] and accepted by
+/// [`Session::remove_output_tap`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TapId(u64);
+
 /// A session handle for interacting with a spawned process.
 ///
 /// The session provides methods to send input, expect patterns in output,
@@ -47,11 +53,18 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     id: SessionId,
     /// EOF flag.
     eof: bool,
-    /// Output taps invoked on every chunk of bytes read from the transport.
-    output_taps: Vec<OutputTap>,
+    /// Output taps invoked on every chunk of bytes read from the transport,
+    /// stored as (id, callback) so they can be removed individually.
+    output_taps: Vec<(TapId, OutputTap)>,
+    /// Monotonic counter for assigning new `TapId`s.
+    next_tap_id: u64,
     /// Attached virtual terminal screen, fed from an output tap.
     #[cfg(feature = "screen")]
     screen: Option<Arc<std::sync::Mutex<crate::screen::Screen>>>,
+    /// Tap id used to feed the attached screen, so `detach_screen` can
+    /// remove only that tap and leave user-registered taps in place.
+    #[cfg(feature = "screen")]
+    screen_tap_id: Option<TapId>,
 }
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
@@ -69,8 +82,11 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             id: SessionId::new(),
             eof: false,
             output_taps: Vec::new(),
+            next_tap_id: 0,
             #[cfg(feature = "screen")]
             screen: None,
+            #[cfg(feature = "screen")]
+            screen_tap_id: None,
         }
     }
 
@@ -97,20 +113,31 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///     buf.lock().unwrap().extend_from_slice(chunk);
     /// });
     /// ```
-    pub fn add_output_tap<F>(&mut self, f: F)
+    pub fn add_output_tap<F>(&mut self, f: F) -> TapId
     where
         F: Fn(&[u8]) + Send + Sync + 'static,
     {
-        self.output_taps.push(Arc::new(f));
+        let id = TapId(self.next_tap_id);
+        self.next_tap_id = self.next_tap_id.wrapping_add(1);
+        self.output_taps.push((id, Arc::new(f)));
+        id
     }
 
-    /// Get a shared reference to the list of registered output taps.
+    /// Remove a previously registered output tap by its [`TapId`]. Returns
+    /// `true` if a tap was removed, `false` if the id was not registered
+    /// (already removed, or never existed).
+    pub fn remove_output_tap(&mut self, id: TapId) -> bool {
+        let len_before = self.output_taps.len();
+        self.output_taps.retain(|(existing, _)| *existing != id);
+        self.output_taps.len() != len_before
+    }
+
+    /// Iterate the callbacks for all currently registered output taps.
     ///
     /// Primarily useful for the interact() path which runs its own read loop
     /// and needs to invoke the same taps.
-    #[must_use]
-    pub fn output_taps(&self) -> &[OutputTap] {
-        &self.output_taps
+    pub fn output_tap_callbacks(&self) -> impl Iterator<Item = &OutputTap> {
+        self.output_taps.iter().map(|(_, cb)| cb)
     }
 
     /// Attach a virtual terminal screen to this session.
@@ -141,17 +168,33 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Available with the `screen` feature.
     #[cfg(feature = "screen")]
     pub fn attach_screen_with_dims(&mut self, rows: u16, cols: u16) {
+        // Replace any previous screen + its tap so we don't leak callbacks.
+        self.detach_screen();
         let screen = Arc::new(std::sync::Mutex::new(crate::screen::Screen::new(
             rows as usize,
             cols as usize,
         )));
         let screen_for_tap = screen.clone();
-        self.add_output_tap(move |chunk| {
+        let id = self.add_output_tap(move |chunk| {
             if let Ok(mut s) = screen_for_tap.lock() {
                 s.process(chunk);
             }
         });
         self.screen = Some(screen);
+        self.screen_tap_id = Some(id);
+    }
+
+    /// Detach the currently attached screen, also removing its output tap.
+    /// No-op if no screen is attached. Returns `true` if a screen was
+    /// detached.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn detach_screen(&mut self) -> bool {
+        if let Some(id) = self.screen_tap_id.take() {
+            self.remove_output_tap(id);
+        }
+        self.screen.take().is_some()
     }
 
     /// Get the attached virtual terminal screen, if any.
@@ -269,6 +312,20 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Returns an error if the write fails.
     pub async fn send_control(&mut self, ctrl: ControlChar) -> Result<()> {
         self.send(&[ctrl.as_byte()]).await
+    }
+
+    /// Send a Shift+Tab keystroke.
+    ///
+    /// Sends the xterm "back tab" sequence `\x1b[Z` (CSI Z). Most TUIs use
+    /// this to cycle a focused-element ring backwards or, in Claude Code's
+    /// case, to cycle permission modes. Compatible with both plain xterm
+    /// and the kitty keyboard protocol's CSI-u fallback mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub async fn send_shift_tab(&mut self) -> Result<()> {
+        self.send(b"\x1b[Z").await
     }
 
     /// Send text using bracketed paste mode (DECSET 2004).
@@ -602,7 +659,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             }
             Ok(Ok(n)) => {
                 self.matcher.append(&buf[..n]);
-                for tap in &self.output_taps {
+                for (_, tap) in &self.output_taps {
                     tap(&buf[..n]);
                 }
                 Ok(n)

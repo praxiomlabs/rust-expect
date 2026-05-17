@@ -183,15 +183,74 @@ async fn wait_screen_stable_returns_after_quiet_period() {
     }
 }
 
+/// `remove_output_tap` returns `true` for a known id and stops firing the
+/// callback; `false` for an unknown id.
+#[tokio::test]
+async fn remove_output_tap_stops_invocations() {
+    let (cmd, args, config) = build("printf 'before\\n'; sleep 0.5; printf 'after\\n'; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+
+    let count: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    let cc = count.clone();
+    let id = session.add_output_tap(move |_| *cc.lock().unwrap() += 1);
+
+    session
+        .expect_timeout("before", Duration::from_secs(3))
+        .await
+        .unwrap();
+    let after_first = *count.lock().unwrap();
+    assert!(after_first >= 1);
+
+    assert!(session.remove_output_tap(id), "remove should succeed for known id");
+    assert!(!session.remove_output_tap(id), "remove should be idempotent");
+
+    session
+        .expect_timeout("after", Duration::from_secs(3))
+        .await
+        .unwrap();
+    let after_second = *count.lock().unwrap();
+    assert_eq!(
+        after_first, after_second,
+        "tap count must not advance after removal (before={after_first}, after={after_second})"
+    );
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// `detach_screen` removes its tap and `screen()` returns None.
+#[tokio::test]
+async fn detach_screen_removes_internal_tap() {
+    let (cmd, args, config) = build("sleep 2; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    session.attach_screen();
+    assert!(session.screen().is_some());
+    assert_eq!(session.output_tap_callbacks().count(), 1);
+
+    assert!(session.detach_screen());
+    assert!(session.screen().is_none());
+    assert_eq!(
+        session.output_tap_callbacks().count(),
+        0,
+        "screen's internal tap should be removed"
+    );
+    // Idempotent.
+    assert!(!session.detach_screen());
+
+    let _ = session.send_control(rust_expect::ControlChar::CtrlC).await;
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
 /// `wait_screen_not_contains` returns once the substring disappears from the
 /// screen — exercised here by waiting for an in-flight marker to clear after
 /// the child exits.
 #[tokio::test]
 async fn wait_screen_not_contains_clears_when_substring_gone() {
-    // Emit the marker, then a clear-screen sequence (ESC [ 2 J) that wipes it,
-    // then sleep briefly.
+    // Emit the marker, then a clear-screen sequence (ESC [ 2 J) that wipes it.
+    // Using octal escapes for portability across /bin/sh implementations.
     let (cmd, args, config) =
-        build("printf 'IN-FLIGHT\\n'; sleep 0.2; printf '\\x1b[2J\\x1b[H'; sleep 0.5; exit 0");
+        build("printf 'IN-FLIGHT\\n'; sleep 0.2; printf '\\033[2J\\033[H'; sleep 0.5; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
     session.attach_screen();

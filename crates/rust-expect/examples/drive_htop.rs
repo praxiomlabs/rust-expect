@@ -2,13 +2,13 @@
 //!
 //! This is a tougher generalization test than `drive_less.rs`:
 //!   - htop uses the alternate screen buffer
-//!   - htop redraws ~2x/second forever; wait_screen_stable will NEVER return
+//!   - htop redraws ~2x/second forever; `wait_screen_stable` will NEVER return
 //!     spontaneously while it's running. We instead anchor on a stable text
 //!     element (the "CPU" / "Mem" labels) and use a fixed dwell time.
 //!   - htop responds to single keystrokes (F-keys, q to quit).
 //!
 //! Run with:
-//!   cargo run --example drive_htop --features screen
+//!   `cargo run --example drive_htop --features screen`
 
 #![cfg(feature = "screen")]
 
@@ -27,8 +27,7 @@ async fn main() -> rust_expect::Result<()> {
         .build();
 
     eprintln!("[drive_htop] spawning htop --no-color");
-    let mut session =
-        Session::spawn_with_config("/usr/bin/htop", &["--no-color"], config).await?;
+    let mut session = Session::spawn_with_config("/usr/bin/htop", &["--no-color"], config).await?;
     session.attach_screen();
 
     // Anchor on a control that htop renders once it's drawn. htop's footer

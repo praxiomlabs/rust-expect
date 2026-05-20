@@ -7,12 +7,12 @@
 //! Code uses does *not* exercise.
 //!
 //! Run with:
-//!   cargo run --example drive_less --features screen
+//!   `cargo run --example drive_less --features screen`
 //!
 //! It demonstrates:
-//!   - Session::attach_screen + Session::screen() against an alt-screen TUI
-//!   - Session::expect_screen_contains anchored on rendered content
-//!   - Session::wait_screen_stable as the "TUI finished drawing" signal
+//!   - `Session::attach_screen` + `Session::screen()` against an alt-screen TUI
+//!   - `Session::expect_screen_contains` anchored on rendered content
+//!   - `Session::wait_screen_stable` as the "TUI finished drawing" signal
 //!   - Pagination via the `Space` keystroke
 //!   - Clean exit via `q`
 
@@ -28,7 +28,11 @@ async fn main() -> rust_expect::Result<()> {
     // Generate a fixture file with predictable content.
     let mut tmp = tempfile::NamedTempFile::new().expect("tempfile");
     for i in 1..=200 {
-        writeln!(tmp, "line {i:03}: the quick brown fox jumps over the lazy dog").unwrap();
+        writeln!(
+            tmp,
+            "line {i:03}: the quick brown fox jumps over the lazy dog"
+        )
+        .unwrap();
     }
     let path = tmp.path().to_path_buf();
     tmp.as_file_mut().flush().ok();
@@ -40,7 +44,7 @@ async fn main() -> rust_expect::Result<()> {
     // exercises that path in the screen emulator.
     let config = SessionBuilder::new()
         .command("/usr/bin/less")
-        .arg("-R")  // -R: pass raw ANSI through (harmless for plain text)
+        .arg("-R") // -R: pass raw ANSI through (harmless for plain text)
         .arg(path_str)
         .env("TERM", "xterm-256color")
         .env("LESS", "")
@@ -48,12 +52,8 @@ async fn main() -> rust_expect::Result<()> {
         .timeout(Duration::from_secs(10))
         .build();
 
-    let mut session = Session::spawn_with_config(
-        "/usr/bin/less",
-        &["-R", path_str],
-        config,
-    )
-    .await?;
+    let mut session =
+        Session::spawn_with_config("/usr/bin/less", &["-R", path_str], config).await?;
     session.attach_screen();
 
     // First page should contain the first lines we wrote.

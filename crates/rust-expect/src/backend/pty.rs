@@ -127,6 +127,108 @@ pub enum EnvMode {
     Extend,
 }
 
+/// Apply `env_mode` plus the user-supplied overrides to the calling
+/// process's environment.
+///
+/// **Must only be called in a child process after `fork`** — it mutates
+/// global `environ` state via `setenv`/`clearenv`/`unsetenv`, which is
+/// safe only because the child is single-threaded at this point (between
+/// fork and exec).
+///
+/// - `Inherit`: leave the inherited parent env in place; just apply overrides.
+/// - `Clear`:   wipe environ (Linux: `clearenv`; elsewhere: walk + `unsetenv`)
+///   then apply overrides.
+/// - `Extend`:  same as Inherit semantically; overrides overwrite existing.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+unsafe fn apply_env_in_child(
+    env_mode: EnvMode,
+    env_pairs: &[(std::ffi::CString, std::ffi::CString)],
+) {
+    unsafe {
+        match env_mode {
+            EnvMode::Inherit | EnvMode::Extend => {}
+            EnvMode::Clear => {
+                #[cfg(target_os = "linux")]
+                {
+                    libc::clearenv();
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    // Walk environ and unsetenv each key. setenv() may realloc
+                    // environ but that's OK between fork and exec.
+                    extern "C" {
+                        static mut environ: *mut *mut libc::c_char;
+                    }
+                    while !environ.is_null() && !(*environ).is_null() {
+                        let entry = *environ;
+                        let mut len = 0usize;
+                        while *entry.add(len) != 0 && *entry.add(len) != b'=' as libc::c_char {
+                            len += 1;
+                        }
+                        if len == 0 {
+                            break;
+                        }
+                        let mut name_buf = [0u8; 256];
+                        let n = len.min(name_buf.len() - 1);
+                        for i in 0..n {
+                            name_buf[i] = *entry.add(i) as u8;
+                        }
+                        name_buf[n] = 0;
+                        libc::unsetenv(name_buf.as_ptr().cast::<libc::c_char>());
+                    }
+                }
+            }
+        }
+        for (k, v) in env_pairs {
+            libc::setenv(k.as_ptr(), v.as_ptr(), 1);
+        }
+    }
+}
+
+/// Validate environment-variable overrides and convert them to pairs of
+/// `CString` that can be safely applied between fork and exec on Unix.
+///
+/// `setenv` allocates, so the canonical safety model after `fork` is to
+/// only use async-signal-safe functions. We do still call `setenv` in the
+/// child — this codebase forks before any tokio worker threads exist, so
+/// allocator state is single-threaded and the call is sound in practice.
+/// Pre-building these `CString`s here means we don't have to allocate in
+/// the child on the keys or values themselves.
+#[cfg(unix)]
+fn build_env_cstrings(
+    env: &std::collections::HashMap<String, String>,
+) -> Result<Vec<(std::ffi::CString, std::ffi::CString)>> {
+    use std::ffi::CString;
+
+    let mut pairs: Vec<(CString, CString)> = Vec::with_capacity(env.len());
+    for (k, v) in env {
+        if k.contains('=') {
+            return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
+                kind: "env key".to_string(),
+                value: k.clone(),
+                reason: "env key contains '='".to_string(),
+            }));
+        }
+        let key = CString::new(k.as_str()).map_err(|_| {
+            ExpectError::Spawn(SpawnError::InvalidArgument {
+                kind: "env key".to_string(),
+                value: k.clone(),
+                reason: "env key contains null byte".to_string(),
+            })
+        })?;
+        let val = CString::new(v.as_str()).map_err(|_| {
+            ExpectError::Spawn(SpawnError::InvalidArgument {
+                kind: "env value".to_string(),
+                value: v.clone(),
+                reason: "env value contains null byte".to_string(),
+            })
+        })?;
+        pairs.push((key, val));
+    }
+    Ok(pairs)
+}
+
 /// Spawner for PTY sessions.
 pub struct PtySpawner {
     config: PtyConfig,
@@ -190,36 +292,8 @@ impl PtySpawner {
             argv_cstrings.push(arg_cstring);
         }
 
-        // Validate env entries and pre-build CStrings so we can apply them
-        // in the child without allocating (allocations between fork and exec
-        // are technically unsafe in multi-threaded programs; this codebase
-        // forks pre-thread-start). We pair (key, value) so the child can
-        // call setenv() for each.
-        let mut env_pairs: Vec<(CString, CString)> = Vec::with_capacity(self.config.env.len());
-        for (k, v) in &self.config.env {
-            let key = CString::new(k.as_str()).map_err(|_| {
-                ExpectError::Spawn(SpawnError::InvalidArgument {
-                    kind: "env key".to_string(),
-                    value: k.clone(),
-                    reason: "env key contains null byte".to_string(),
-                })
-            })?;
-            if k.contains('=') {
-                return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
-                    kind: "env key".to_string(),
-                    value: k.clone(),
-                    reason: "env key contains '='".to_string(),
-                }));
-            }
-            let val = CString::new(v.as_str()).map_err(|_| {
-                ExpectError::Spawn(SpawnError::InvalidArgument {
-                    kind: "env value".to_string(),
-                    value: v.clone(),
-                    reason: "env value contains null byte".to_string(),
-                })
-            })?;
-            env_pairs.push((key, val));
-        }
+        // Validate env entries before fork so we can return a clean error.
+        let env_pairs = build_env_cstrings(&self.config.env)?;
         let env_mode = self.config.env_mode;
 
         // Create PTY pair
@@ -284,57 +358,8 @@ impl PtySpawner {
                         libc::close(slave_fd);
                     }
 
-                    // Apply environment variable mode + overrides before exec.
-                    //
-                    // - Inherit: nothing to do; child already has parent env.
-                    // - Clear:   wipe environ then apply our pairs.
-                    // - Extend:  keep parent env, overlay (overwrite) our pairs.
-                    //
-                    // `clearenv` is Linux-only. On macOS we set `*environ` to
-                    // a sentinel empty array; setenv then rebuilds environ
-                    // from scratch.
-                    match env_mode {
-                        EnvMode::Inherit => {}
-                        EnvMode::Clear => {
-                            #[cfg(target_os = "linux")]
-                            {
-                                libc::clearenv();
-                            }
-                            #[cfg(not(target_os = "linux"))]
-                            {
-                                // Best effort: walk environ and unsetenv each
-                                // key. setenv() may realloc environ but that's
-                                // OK between fork and exec.
-                                extern "C" {
-                                    static mut environ: *mut *mut libc::c_char;
-                                }
-                                while !environ.is_null() && !(*environ).is_null() {
-                                    // Read first entry's "KEY=..."
-                                    let entry = *environ;
-                                    let mut len = 0usize;
-                                    while *entry.add(len) != 0 && *entry.add(len) != b'=' as libc::c_char {
-                                        len += 1;
-                                    }
-                                    if len == 0 {
-                                        break;
-                                    }
-                                    // Copy the key onto a small stack buffer
-                                    // bounded by typical env-name length.
-                                    let mut name_buf = [0u8; 256];
-                                    let n = len.min(name_buf.len() - 1);
-                                    for i in 0..n {
-                                        name_buf[i] = *entry.add(i) as u8;
-                                    }
-                                    name_buf[n] = 0;
-                                    libc::unsetenv(name_buf.as_ptr().cast::<libc::c_char>());
-                                }
-                            }
-                        }
-                        EnvMode::Extend => {}
-                    }
-                    for (k, v) in &env_pairs {
-                        libc::setenv(k.as_ptr(), v.as_ptr(), 1);
-                    }
+                    // Apply env_mode + overrides before exec.
+                    apply_env_in_child(env_mode, &env_pairs);
 
                     // Use pre-validated CStrings (validated before fork)
                     let argv_ptrs: Vec<*const libc::c_char> = argv_cstrings
@@ -396,10 +421,7 @@ impl PtySpawner {
                 EnvMode::Inherit | EnvMode::Extend => {
                     let mut m: std::collections::HashMap<_, _> = std::env::vars_os().collect();
                     for (k, v) in &self.config.env {
-                        m.insert(
-                            std::ffi::OsString::from(k),
-                            std::ffi::OsString::from(v),
-                        );
+                        m.insert(std::ffi::OsString::from(k), std::ffi::OsString::from(v));
                     }
                     Some(m)
                 }

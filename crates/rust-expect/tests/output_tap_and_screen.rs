@@ -29,7 +29,9 @@ fn build(script: &str) -> (String, Vec<String>, rust_expect::config::SessionConf
 async fn output_tap_observes_all_bytes() {
     let (cmd, args, config) = build("printf 'tap-saw-this\\n'; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
 
     let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
     let buf = captured.clone();
@@ -43,12 +45,12 @@ async fn output_tap_observes_all_bytes() {
         .unwrap();
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 
-    let bytes = captured.lock().unwrap();
+    let bytes_snapshot = captured.lock().unwrap().clone();
     assert!(
-        std::str::from_utf8(&bytes)
+        std::str::from_utf8(&bytes_snapshot)
             .map(|s| s.contains("tap-saw-this"))
             .unwrap_or(false),
-        "tap should have captured the literal output; got {bytes:?}"
+        "tap should have captured the literal output; got {bytes_snapshot:?}"
     );
 }
 
@@ -57,7 +59,9 @@ async fn output_tap_observes_all_bytes() {
 async fn multiple_taps_each_receive_chunks() {
     let (cmd, args, config) = build("printf 'fan-out\\n'; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
 
     let counters: Vec<Arc<Mutex<u32>>> = (0..3).map(|_| Arc::new(Mutex::new(0))).collect();
     for c in &counters {
@@ -74,7 +78,10 @@ async fn multiple_taps_each_receive_chunks() {
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 
     let counts: Vec<u32> = counters.iter().map(|c| *c.lock().unwrap()).collect();
-    assert!(counts.iter().all(|&n| n >= 1), "every tap should have fired; got {counts:?}");
+    assert!(
+        counts.iter().all(|&n| n >= 1),
+        "every tap should have fired; got {counts:?}"
+    );
     assert!(
         counts.windows(2).all(|w| w[0] == w[1]),
         "taps should have fired the same number of times; got {counts:?}"
@@ -86,7 +93,9 @@ async fn multiple_taps_each_receive_chunks() {
 async fn attach_screen_renders_emitted_text() {
     let (cmd, args, config) = build("printf 'rendered-via-screen\\n'; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
 
     session.attach_screen();
 
@@ -114,7 +123,9 @@ async fn attach_screen_renders_emitted_text() {
 async fn attach_screen_preserves_utf8() {
     let (cmd, args, config) = build("printf 'box ╭─╮ rocket 🚀\\n'; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
 
     session.attach_screen();
     session
@@ -124,7 +135,10 @@ async fn attach_screen_preserves_utf8() {
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 
     let text = session.screen().unwrap().lock().unwrap().text();
-    assert!(text.contains("╭─╮"), "box-drawing should round-trip; got {text:?}");
+    assert!(
+        text.contains("╭─╮"),
+        "box-drawing should round-trip; got {text:?}"
+    );
     assert!(text.contains('🚀'), "emoji should round-trip; got {text:?}");
 }
 
@@ -133,7 +147,9 @@ async fn attach_screen_preserves_utf8() {
 async fn expect_screen_contains_succeeds_on_match() {
     let (cmd, args, config) = build("printf 'go-no-go\\n'; sleep 0.5; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
     session.attach_screen();
 
     session
@@ -147,7 +163,9 @@ async fn expect_screen_contains_succeeds_on_match() {
 async fn expect_screen_contains_times_out_when_absent() {
     let (cmd, args, config) = build("printf 'something\\n'; sleep 0.5; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
     session.attach_screen();
 
     let r = session
@@ -163,7 +181,9 @@ async fn wait_screen_stable_returns_after_quiet_period() {
     let (cmd, args, config) =
         build("printf 'one\\n'; printf 'two\\n'; printf 'three\\n'; sleep 1; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
     session.attach_screen();
 
     let start = std::time::Instant::now();
@@ -189,7 +209,9 @@ async fn wait_screen_stable_returns_after_quiet_period() {
 async fn panicking_tap_does_not_break_other_taps() {
     let (cmd, args, config) = build("printf 'observed\\n'; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
 
     let saw_after: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
 
@@ -198,7 +220,10 @@ async fn panicking_tap_does_not_break_other_taps() {
     // Second tap should still receive chunks.
     let sa = saw_after.clone();
     session.add_output_tap(move |chunk| {
-        if std::str::from_utf8(chunk).unwrap_or("").contains("observed") {
+        if std::str::from_utf8(chunk)
+            .unwrap_or("")
+            .contains("observed")
+        {
             *sa.lock().unwrap() = true;
         }
     });
@@ -221,7 +246,9 @@ async fn panicking_tap_does_not_break_other_taps() {
 async fn remove_output_tap_stops_invocations() {
     let (cmd, args, config) = build("printf 'before\\n'; sleep 0.5; printf 'after\\n'; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
 
     let count: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let cc = count.clone();
@@ -234,8 +261,14 @@ async fn remove_output_tap_stops_invocations() {
     let after_first = *count.lock().unwrap();
     assert!(after_first >= 1);
 
-    assert!(session.remove_output_tap(id), "remove should succeed for known id");
-    assert!(!session.remove_output_tap(id), "remove should be idempotent");
+    assert!(
+        session.remove_output_tap(id),
+        "remove should succeed for known id"
+    );
+    assert!(
+        !session.remove_output_tap(id),
+        "remove should be idempotent"
+    );
 
     session
         .expect_timeout("after", Duration::from_secs(3))
@@ -255,7 +288,9 @@ async fn remove_output_tap_stops_invocations() {
 async fn detach_screen_removes_internal_tap() {
     let (cmd, args, config) = build("sleep 2; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
     session.attach_screen();
     assert!(session.screen().is_some());
     assert_eq!(session.output_tap_callbacks().count(), 1);
@@ -284,7 +319,9 @@ async fn wait_screen_not_contains_clears_when_substring_gone() {
     let (cmd, args, config) =
         build("printf 'IN-FLIGHT\\n'; sleep 0.2; printf '\\033[2J\\033[H'; sleep 0.5; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
     session.attach_screen();
 
     // First confirm we saw the marker.
@@ -305,7 +342,9 @@ async fn wait_screen_not_contains_clears_when_substring_gone() {
 async fn wait_screen_not_contains_times_out_when_substring_persists() {
     let (cmd, args, config) = build("printf 'STICKY\\n'; sleep 2; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
     session.attach_screen();
 
     session
@@ -323,22 +362,26 @@ async fn wait_screen_not_contains_times_out_when_substring_persists() {
 async fn resize_pty_resizes_attached_screen() {
     let (cmd, args, config) = build("sleep 2; exit 0");
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
     session.attach_screen();
 
-    {
+    let (c0, r0) = {
         let s = session.screen().unwrap().lock().unwrap();
-        assert_eq!(s.cols(), 80);
-        assert_eq!(s.rows(), 24);
-    }
+        (s.cols(), s.rows())
+    };
+    assert_eq!(c0, 80);
+    assert_eq!(r0, 24);
 
     session.resize_pty(132, 50).await.unwrap();
 
-    {
+    let (c1, r1) = {
         let s = session.screen().unwrap().lock().unwrap();
-        assert_eq!(s.cols(), 132, "screen cols should follow resize_pty");
-        assert_eq!(s.rows(), 50, "screen rows should follow resize_pty");
-    }
+        (s.cols(), s.rows())
+    };
+    assert_eq!(c1, 132, "screen cols should follow resize_pty");
+    assert_eq!(r1, 50, "screen rows should follow resize_pty");
 
     let _ = session.send_control(rust_expect::ControlChar::CtrlC).await;
     session.wait_timeout(Duration::from_secs(2)).await.ok();
@@ -348,7 +391,6 @@ async fn resize_pty_resizes_attached_screen() {
 #[tokio::test]
 async fn send_paste_rejects_embedded_end_marker() {
     let cmd = "/bin/cat".to_string();
-    let args: Vec<String> = vec![];
     let config = SessionBuilder::new()
         .command(&cmd)
         .timeout(Duration::from_secs(5))
@@ -378,7 +420,9 @@ async fn send_paste_emits_bracketed_paste_markers() {
         .timeout(Duration::from_secs(5))
         .build();
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config).await.unwrap();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
 
     session.send_paste("hello-paste").await.unwrap();
     // Bracketed paste wraps as ESC [ 200 ~ ... ESC [ 201 ~.

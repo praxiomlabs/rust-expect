@@ -134,8 +134,8 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
     /// Iterate the callbacks for all currently registered output taps.
     ///
-    /// Primarily useful for the interact() path which runs its own read loop
-    /// and needs to invoke the same taps.
+    /// Primarily useful for the [`interact()`](Self::interact) path which runs
+    /// its own read loop and needs to invoke the same taps.
     pub fn output_tap_callbacks(&self) -> impl Iterator<Item = &OutputTap> {
         self.output_taps.iter().map(|(_, cb)| cb)
     }
@@ -207,7 +207,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Available with the `screen` feature.
     #[cfg(feature = "screen")]
     #[must_use]
-    pub fn screen(&self) -> Option<&Arc<std::sync::Mutex<crate::screen::Screen>>> {
+    pub const fn screen(&self) -> Option<&Arc<std::sync::Mutex<crate::screen::Screen>>> {
         self.screen.as_ref()
     }
 
@@ -345,14 +345,16 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// out of paste mode mid-payload. Callers that want to send such bytes
     /// should write them through the regular [`send`](Self::send) path.
     pub async fn send_paste(&mut self, text: &str) -> Result<()> {
-        if text.as_bytes()
+        if text
+            .as_bytes()
             .windows(b"\x1b[201~".len())
             .any(|w| w == b"\x1b[201~")
         {
             return Err(ExpectError::PatternNotFound {
                 pattern: "send_paste".to_string(),
-                buffer: "input contains the bracketed-paste end marker (\\x1b[201~); refusing to send"
-                    .to_string(),
+                buffer:
+                    "input contains the bracketed-paste end marker (\\x1b[201~); refusing to send"
+                        .to_string(),
             });
         }
         self.send(b"\x1b[200~").await?;
@@ -481,11 +483,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// Available with the `screen` feature.
     #[cfg(feature = "screen")]
-    pub async fn expect_screen_contains(
-        &mut self,
-        needle: &str,
-        timeout: Duration,
-    ) -> Result<()> {
+    pub async fn expect_screen_contains(&mut self, needle: &str, timeout: Duration) -> Result<()> {
         let Some(screen) = self.screen.clone() else {
             return Err(ExpectError::PatternNotFound {
                 pattern: needle.to_string(),
@@ -517,7 +515,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                     buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
                 });
             }
-            let remaining = timeout - elapsed;
+            let remaining = timeout.saturating_sub(elapsed);
             self.read_with_timeout(poll.min(remaining)).await?;
         }
     }
@@ -577,7 +575,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                     buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
                 });
             }
-            let remaining = timeout - elapsed;
+            let remaining = timeout.saturating_sub(elapsed);
             self.read_with_timeout(poll.min(remaining)).await?;
         }
     }
@@ -1136,10 +1134,10 @@ impl Session<AsyncPty> {
         }
         self.config.dimensions = (cols, rows);
         #[cfg(feature = "screen")]
-        if let Some(screen) = self.screen.as_ref() {
-            if let Ok(mut s) = screen.lock() {
-                s.resize(rows as usize, cols as usize);
-            }
+        if let Some(screen) = self.screen.as_ref()
+            && let Ok(mut s) = screen.lock()
+        {
+            s.resize(rows as usize, cols as usize);
         }
         Ok(())
     }

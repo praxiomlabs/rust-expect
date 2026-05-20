@@ -548,7 +548,10 @@ mod tests {
         let row = screen.buffer().row_text(0);
         assert!(row.starts_with('╭'), "expected '╭' got {row:?}");
         // Should be exactly one cell occupied, not three.
-        assert!(!row.starts_with("╭â"), "leftover Latin-1 bytes present: {row:?}");
+        assert!(
+            !row.starts_with("╭â"),
+            "leftover Latin-1 bytes present: {row:?}"
+        );
     }
 
     #[test]

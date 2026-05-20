@@ -36,8 +36,8 @@ fn session_builder_with_env() {
     assert_eq!(config.env.get("TEST_VAR"), Some(&"test_value".to_string()));
 }
 
-/// Regression test: env vars set via SessionBuilder::env() must actually reach
-/// the spawned child process. Before the env-plumbing fix in backend/pty.rs,
+/// Regression test: env vars set via `SessionBuilder::env()` must actually reach
+/// the spawned child process. Before the env-plumbing fix in `backend/pty.rs`,
 /// this would fail — the value was dropped between `PtyConfig::from` and
 /// `execvp` on Unix.
 #[tokio::test]
@@ -54,7 +54,10 @@ async fn env_vars_reach_child_process() {
 
     let mut session = Session::spawn_with_config(
         "/bin/sh",
-        &["-c", "printf 'value=%s\\n' \"$RUST_EXPECT_TEST_VAR\"; exit 0"],
+        &[
+            "-c",
+            "printf 'value=%s\\n' \"$RUST_EXPECT_TEST_VAR\"; exit 0",
+        ],
         config,
     )
     .await
@@ -92,7 +95,10 @@ async fn parent_env_inherited_when_no_overrides() {
 
     let mut session = Session::spawn_with_config(
         "/bin/sh",
-        &["-c", "printf 'probe=%s\\n' \"$RUST_EXPECT_PARENT_PROBE\"; exit 0"],
+        &[
+            "-c",
+            "printf 'probe=%s\\n' \"$RUST_EXPECT_PARENT_PROBE\"; exit 0",
+        ],
         config,
     )
     .await

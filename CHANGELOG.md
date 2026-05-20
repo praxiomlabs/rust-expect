@@ -103,6 +103,32 @@ integration coverage.
   breaks — callers must either re-introduce a single-threaded fork
   helper or switch to `posix_spawn`/`execve(envp)`.
 
+### API changes within this release
+
+These changes happened entirely within the unreleased `[Unreleased]` cycle
+and therefore do not affect any published version. They are documented
+here for archaeology and for anyone tracking the development branch.
+
+- `ExpectError` is now `#[non_exhaustive]`. Exhaustive `match` arms over
+  it without a wildcard will no longer compile; add `_ => {}` (or handle
+  the new variants explicitly).
+- New `ExpectError` variants: `ScreenNotAttached` (screen-aware methods
+  called without `attach_screen`) and `InvalidInput { api, reason }`
+  (caller-supplied input rejected before any I/O).
+- `screen::AnsiParser::parse(byte)` signature changed from
+  `Option<ParseResult>` to `[Option<ParseResult>; 2]`. The second slot
+  is populated only on UTF-8 malformed-sequence recovery so both the
+  `U+FFFD` replacement and the recovery byte's own effect are emitted in
+  the correct visual order. Callers iterate via `.into_iter().flatten()`.
+  `Screen::process` already does this; direct `AnsiParser` consumers
+  need a one-line change.
+- `Session::add_output_tap` now returns a `TapId` (was `()`). Existing
+  call sites that ignore the return value continue to compile; sites
+  that want to deregister later capture the id.
+- `Screen` has a new `revision()` accessor. Screen-state polling that
+  used `text()` comparison should switch to revision comparison for
+  O(1) "did anything come in?" checks.
+
 ## [0.1.0] - 2025-01-03
 
 ### Added

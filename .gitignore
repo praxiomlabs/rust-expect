@@ -17,6 +17,9 @@
 # Backup files from rustfmt
 **/*.rs.bk
 
+# Claude Code session state — local-only, not project content
+.claude/
+
 # MSVC Windows builds
 *.pdb
 

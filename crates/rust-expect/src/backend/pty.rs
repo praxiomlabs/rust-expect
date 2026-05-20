@@ -85,6 +85,9 @@ pub struct PtyConfig {
     pub login_shell: bool,
     /// Environment variable handling.
     pub env_mode: EnvMode,
+    /// Environment variables to apply per `env_mode` (overlay for `Extend`,
+    /// the full set for `Clear`, ignored for `Inherit`).
+    pub env: std::collections::HashMap<String, String>,
 }
 
 impl Default for PtyConfig {
@@ -93,6 +96,7 @@ impl Default for PtyConfig {
             dimensions: (80, 24),
             login_shell: false,
             env_mode: EnvMode::Inherit,
+            env: std::collections::HashMap::new(),
         }
     }
 }
@@ -107,6 +111,7 @@ impl From<&SessionConfig> for PtyConfig {
             } else {
                 EnvMode::Extend
             },
+            env: config.env.clone(),
         }
     }
 }
@@ -120,6 +125,120 @@ pub enum EnvMode {
     Clear,
     /// Inherit and extend with specified variables.
     Extend,
+}
+
+/// Apply `env_mode` plus the user-supplied overrides to the calling
+/// process's environment.
+///
+/// **Must only be called in a child process after `fork`** — it mutates
+/// global `environ` state via `setenv`/`clearenv`/`unsetenv`, which is
+/// safe only because the child is single-threaded at this point (between
+/// fork and exec).
+///
+/// - `Inherit`: leave the inherited parent env in place; just apply overrides.
+/// - `Clear`:   wipe environ (Linux: `clearenv`; elsewhere: walk + `unsetenv`)
+///   then apply overrides.
+/// - `Extend`:  same as Inherit semantically; overrides overwrite existing.
+#[cfg(unix)]
+#[allow(unsafe_code)]
+unsafe fn apply_env_in_child(
+    env_mode: EnvMode,
+    env_pairs: &[(std::ffi::CString, std::ffi::CString)],
+) {
+    unsafe {
+        match env_mode {
+            EnvMode::Inherit | EnvMode::Extend => {}
+            EnvMode::Clear => {
+                #[cfg(target_os = "linux")]
+                {
+                    libc::clearenv();
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    // Collect every existing key into owned CStrings BEFORE we
+                    // start calling unsetenv. unsetenv mutates the global
+                    // `environ` array — entries shift, the array can be
+                    // reallocated — so iterating it concurrently with
+                    // mutation is fragile and libc-dependent. Snapshotting
+                    // first sidesteps the issue entirely, and the keys can
+                    // be of arbitrary length without truncation.
+                    // Edition 2024 requires extern blocks declaring foreign
+                    // statics to be wrapped in `unsafe extern`.
+                    unsafe extern "C" {
+                        static mut environ: *mut *mut libc::c_char;
+                    }
+                    let mut names: Vec<std::ffi::CString> = Vec::new();
+                    if !environ.is_null() {
+                        let mut p = environ;
+                        while !(*p).is_null() {
+                            let entry = *p;
+                            // Find the '=' separator (or NUL if malformed).
+                            let mut len = 0usize;
+                            while *entry.add(len) != 0 && *entry.add(len) != b'=' as libc::c_char {
+                                len += 1;
+                            }
+                            if len > 0 {
+                                let bytes = std::slice::from_raw_parts(entry.cast::<u8>(), len);
+                                if let Ok(c) = std::ffi::CString::new(bytes) {
+                                    names.push(c);
+                                }
+                            }
+                            p = p.add(1);
+                        }
+                    }
+                    for name in &names {
+                        libc::unsetenv(name.as_ptr());
+                    }
+                }
+            }
+        }
+        for (k, v) in env_pairs {
+            libc::setenv(k.as_ptr(), v.as_ptr(), 1);
+        }
+    }
+}
+
+/// Validate environment-variable overrides and convert them to pairs of
+/// `CString` that can be safely applied between fork and exec on Unix.
+///
+/// `setenv` allocates, so the canonical safety model after `fork` is to
+/// only use async-signal-safe functions. We do still call `setenv` in the
+/// child — this codebase forks before any tokio worker threads exist, so
+/// allocator state is single-threaded and the call is sound in practice.
+/// Pre-building these `CString`s here means we don't have to allocate in
+/// the child on the keys or values themselves.
+#[cfg(unix)]
+fn build_env_cstrings(
+    env: &std::collections::HashMap<String, String>,
+) -> Result<Vec<(std::ffi::CString, std::ffi::CString)>> {
+    use std::ffi::CString;
+
+    let mut pairs: Vec<(CString, CString)> = Vec::with_capacity(env.len());
+    for (k, v) in env {
+        if k.contains('=') {
+            return Err(ExpectError::Spawn(SpawnError::InvalidArgument {
+                kind: "env key".to_string(),
+                value: k.clone(),
+                reason: "env key contains '='".to_string(),
+            }));
+        }
+        let key = CString::new(k.as_str()).map_err(|_| {
+            ExpectError::Spawn(SpawnError::InvalidArgument {
+                kind: "env key".to_string(),
+                value: k.clone(),
+                reason: "env key contains null byte".to_string(),
+            })
+        })?;
+        let val = CString::new(v.as_str()).map_err(|_| {
+            ExpectError::Spawn(SpawnError::InvalidArgument {
+                kind: "env value".to_string(),
+                value: v.clone(),
+                reason: "env value contains null byte".to_string(),
+            })
+        })?;
+        pairs.push((key, val));
+    }
+    Ok(pairs)
 }
 
 /// Spawner for PTY sessions.
@@ -148,6 +267,25 @@ impl PtySpawner {
     }
 
     /// Spawn a command.
+    ///
+    /// # Runtime requirement (Unix)
+    ///
+    /// The Unix implementation forks and then calls `setenv` / `unsetenv` /
+    /// `clearenv` between fork and exec to apply the configured env mode.
+    /// Those libc functions are **not** async-signal-safe — they allocate
+    /// — so the post-fork window in the child must run on a single thread
+    /// for the call to be sound. In this crate that is true because
+    /// callers reach `spawn` directly from a fresh `tokio::main` or
+    /// equivalent before any background thread has captured the
+    /// allocator lock at the fork point.
+    ///
+    /// **If you embed this crate in a host that pre-spawns worker
+    /// threads (for example, a multi-threaded scheduler that's already
+    /// running by the time you call `Session::spawn`)**, the assumption
+    /// breaks: another thread may hold the allocator lock at the moment
+    /// of `fork`, and the child can deadlock or corrupt heap state on
+    /// the first `setenv` call. In that environment, prefer a
+    /// `posix_spawn`-based spawner or a pre-fork sentinel-pipe helper.
     ///
     /// # Errors
     ///
@@ -184,6 +322,10 @@ impl PtySpawner {
             })?;
             argv_cstrings.push(arg_cstring);
         }
+
+        // Validate env entries before fork so we can return a clean error.
+        let env_pairs = build_env_cstrings(&self.config.env)?;
+        let env_mode = self.config.env_mode;
 
         // Create PTY pair
         // SAFETY: openpty() is called with valid pointers to stack-allocated integers.
@@ -247,6 +389,9 @@ impl PtySpawner {
                         libc::close(slave_fd);
                     }
 
+                    // Apply env_mode + overrides before exec.
+                    apply_env_in_child(env_mode, &env_pairs);
+
                     // Use pre-validated CStrings (validated before fork)
                     let argv_ptrs: Vec<*const libc::c_char> = argv_cstrings
                         .iter()
@@ -296,13 +441,38 @@ impl PtySpawner {
     pub async fn spawn(&self, command: &str, args: &[String]) -> Result<WindowsPtyHandle> {
         use rust_pty::{PtySystem, WindowsPtySystem};
 
+        // Build env per env_mode:
+        // - Inherit: env: None (rust-pty inherits parent env), but if we also
+        //   have overrides, we need to inherit + overlay → build a full map.
+        // - Clear:   env: Some(our overrides) — parent env discarded.
+        // - Extend:  env: Some(parent + our overrides), parent first so ours win.
+        let built_env: Option<std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>> =
+            match self.config.env_mode {
+                EnvMode::Inherit if self.config.env.is_empty() => None,
+                EnvMode::Inherit | EnvMode::Extend => {
+                    let mut m: std::collections::HashMap<_, _> = std::env::vars_os().collect();
+                    for (k, v) in &self.config.env {
+                        m.insert(std::ffi::OsString::from(k), std::ffi::OsString::from(v));
+                    }
+                    Some(m)
+                }
+                EnvMode::Clear => Some(
+                    self.config
+                        .env
+                        .iter()
+                        .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v)))
+                        .collect(),
+                ),
+            };
+
         // Create configuration for rust-pty
         let pty_config = rust_pty::PtyConfig {
             window_size: self.config.dimensions,
-            // If env_mode is Clear, use empty env; otherwise inherit (env: None)
             env: match self.config.env_mode {
-                EnvMode::Clear => Some(std::collections::HashMap::new()),
-                _ => None,
+                EnvMode::Clear if self.config.env.is_empty() => {
+                    Some(std::collections::HashMap::new())
+                }
+                _ => built_env,
             },
             ..Default::default()
         };

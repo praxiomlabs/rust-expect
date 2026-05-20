@@ -142,6 +142,11 @@ where
     escape_sequence: Option<Vec<u8>>,
     /// Default timeout for the interaction.
     timeout: Option<Duration>,
+    /// Session-registered output taps to fire on every chunk read during
+    /// the interact loop, in addition to the expect-driven taps. Required
+    /// so attached screens and transcript recorders don't go stale while
+    /// `interact()` is the active read-driver.
+    output_taps: Vec<crate::session::OutputTap>,
 }
 
 impl<'a, T> InteractBuilder<'a, T>
@@ -149,7 +154,10 @@ where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
     /// Create a new interact builder.
-    pub(crate) fn new(transport: &'a Arc<Mutex<T>>) -> Self {
+    pub(crate) fn new(
+        transport: &'a Arc<Mutex<T>>,
+        output_taps: Vec<crate::session::OutputTap>,
+    ) -> Self {
         Self {
             transport,
             output_hooks: Vec::new(),
@@ -160,6 +168,7 @@ where
             buffer_size: 8192,
             escape_sequence: Some(vec![0x1d]), // Ctrl+] by default
             timeout: None,
+            output_taps,
         }
     }
 
@@ -317,6 +326,7 @@ where
             self.buffer_size,
             self.escape_sequence,
             self.timeout,
+            self.output_taps,
         );
         runner.run().await
     }
@@ -366,6 +376,9 @@ where
     buffer: String,
     buffer_size: usize,
     escape_sequence: Option<Vec<u8>>,
+    /// Session-registered output taps fired on every chunk so attached
+    /// screens and transcript recorders keep updating during `interact()`.
+    output_taps: Vec<crate::session::OutputTap>,
     timeout: Option<Duration>,
     /// Current terminal size - tracked for resize delta detection on Unix.
     /// On Windows, terminal resize events aren't currently supported.
@@ -388,6 +401,7 @@ where
         buffer_size: usize,
         escape_sequence: Option<Vec<u8>>,
         timeout: Option<Duration>,
+        output_taps: Vec<crate::session::OutputTap>,
     ) -> Self {
         // Get initial terminal size
         let current_size = super::terminal::Terminal::size().ok();
@@ -404,6 +418,22 @@ where
             escape_sequence,
             timeout,
             current_size,
+            output_taps,
+        }
+    }
+
+    /// Fire every registered session output tap on a chunk, wrapping each in
+    /// `catch_unwind` so a panicking observer can't take down the runner.
+    /// Matches the contract of `Session::read_with_timeout`.
+    fn fire_taps(&self, chunk: &[u8]) {
+        for tap in &self.output_taps {
+            let tap_clone = tap.clone();
+            let chunk_ref = chunk;
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap_clone(chunk_ref)));
+            if result.is_err() {
+                tracing::warn!("output tap panicked during interact; caught and continuing");
+            }
         }
     }
 
@@ -476,6 +506,10 @@ where
                         }
                         Ok(n) => {
                             let data = &output_buf[..n];
+                            // Fire session-registered output taps on the raw
+                            // chunk before any hook-manager rewriting, so
+                            // taps see exactly what the PTY emitted.
+                            self.fire_taps(data);
                             let processed = self.hook_manager.process_output(data.to_vec());
 
                             self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));
@@ -599,6 +633,7 @@ where
                         }
                         Ok(n) => {
                             let data = &output_buf[..n];
+                            self.fire_taps(data);
                             let processed = self.hook_manager.process_output(data.to_vec());
 
                             self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));

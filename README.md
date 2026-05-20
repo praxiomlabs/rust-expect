@@ -75,6 +75,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Driving TUI Applications
+
+Many automation targets are not line-oriented CLIs but full-screen TUIs
+(vim, lazygit, k9s, fzf, Claude Code, …) where the byte stream is dominated
+by ANSI escape sequences and literal substring matching on the raw buffer
+is impractical. The `screen` feature plus the screen-aware expect methods
+let you anchor on what the TUI actually *renders*:
+
+```rust
+use rust_expect::prelude::*;
+use std::time::Duration;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut session = Session::spawn("/usr/bin/htop", &["--no-color"]).await?;
+    session.attach_screen();                            // virtual terminal
+
+    // Anchor on rendered content, not the byte stream.
+    session.expect_screen_contains("CPU%", Duration::from_secs(5)).await?;
+
+    // Wait for the TUI to stop redrawing.
+    session.wait_screen_stable(
+        Duration::from_millis(500),
+        Duration::from_secs(5),
+    ).await?;
+
+    // Send a paste-mode-wrapped command so a leading `/` doesn't trigger
+    // an autocomplete popup or slash-command picker.
+    session.send_paste("/some-command").await?;
+    session.send(b"\r").await?;
+
+    // Inspect what's on screen.
+    let text = session.screen().unwrap().lock().unwrap().text();
+    assert!(text.contains("/some-command"));
+
+    session.send(b"q").await?;
+    session.wait().await?;
+    Ok(())
+}
+```
+
+Companion primitives:
+
+- `Session::add_output_tap` / `remove_output_tap` / `output_tap_callbacks`
+  register synchronous observers for every chunk of bytes read — the
+  foundation for transcript recording, asciinema export, and live-view
+  tees that don't interfere with `expect`.
+- `Session::expect_screen_contains` / `wait_screen_not_contains` /
+  `wait_screen_stable` poll the rendered screen rather than the raw
+  buffer. Polling interval is configurable via
+  `Session::set_screen_poll_interval`.
+- `Session::send_paste` wraps text in bracketed-paste markers
+  (DECSET 2004); `Session::send_shift_tab` emits CSI Z for TUIs that
+  use back-tab for reverse focus traversal.
+
+Both `examples/drive_less.rs` (alt-screen + paging) and
+`examples/drive_htop.rs` (continuous redraws) demonstrate end-to-end TUI
+driving against third-party applications.
+
 ### Pattern Matching
 
 ```rust

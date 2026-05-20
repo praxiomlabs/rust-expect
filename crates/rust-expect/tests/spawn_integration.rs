@@ -36,6 +36,83 @@ fn session_builder_with_env() {
     assert_eq!(config.env.get("TEST_VAR"), Some(&"test_value".to_string()));
 }
 
+/// Regression test: env vars set via `SessionBuilder::env()` must actually reach
+/// the spawned child process. Before the env-plumbing fix in `backend/pty.rs`,
+/// this would fail — the value was dropped between `PtyConfig::from` and
+/// `execvp` on Unix.
+#[tokio::test]
+async fn env_vars_reach_child_process() {
+    use rust_expect::Session;
+
+    let config = SessionBuilder::new()
+        .command("/bin/sh")
+        .arg("-c")
+        .arg("printf 'value=%s\\n' \"$RUST_EXPECT_TEST_VAR\"; exit 0")
+        .env("RUST_EXPECT_TEST_VAR", "smelt-pinecone-42")
+        .timeout(Duration::from_secs(5))
+        .build();
+
+    let mut session = Session::spawn_with_config(
+        "/bin/sh",
+        &[
+            "-c",
+            "printf 'value=%s\\n' \"$RUST_EXPECT_TEST_VAR\"; exit 0",
+        ],
+        config,
+    )
+    .await
+    .expect("spawn should succeed");
+
+    // Match the full string in one expect to avoid races on the split
+    // between `value=` and the rest of the line.
+    let m = session
+        .expect_timeout("value=smelt-pinecone-42", Duration::from_secs(3))
+        .await
+        .expect("expected child to receive RUST_EXPECT_TEST_VAR=smelt-pinecone-42");
+    assert!(m.matched.contains("smelt-pinecone-42"));
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// Env-var fix: when no explicit env is set, the child should still inherit
+/// the parent's environment (Inherit mode is the default and previously
+/// worked; this guards against regressing it).
+#[tokio::test]
+async fn parent_env_inherited_when_no_overrides() {
+    use rust_expect::Session;
+    // SAFETY: single-threaded test setup.
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::set_var("RUST_EXPECT_PARENT_PROBE", "from-parent");
+    }
+
+    let config = SessionBuilder::new()
+        .command("/bin/sh")
+        .arg("-c")
+        .arg("printf 'probe=%s\\n' \"$RUST_EXPECT_PARENT_PROBE\"; exit 0")
+        .timeout(Duration::from_secs(5))
+        .build();
+
+    let mut session = Session::spawn_with_config(
+        "/bin/sh",
+        &[
+            "-c",
+            "printf 'probe=%s\\n' \"$RUST_EXPECT_PARENT_PROBE\"; exit 0",
+        ],
+        config,
+    )
+    .await
+    .expect("spawn should succeed");
+
+    let m = session
+        .expect_timeout("probe=from-parent", Duration::from_secs(3))
+        .await
+        .expect("expected child to inherit RUST_EXPECT_PARENT_PROBE=from-parent");
+    assert!(m.matched.contains("from-parent"));
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
 /// Test `SessionBuilder` with custom dimensions.
 #[test]
 fn session_builder_with_dimensions() {

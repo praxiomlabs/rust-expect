@@ -4,6 +4,8 @@
 //! to control spawned processes, send input, and expect output.
 
 use std::sync::Arc;
+#[cfg(feature = "screen")]
+use std::sync::{Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -18,7 +20,53 @@ use crate::dialog::{Dialog, DialogExecutor, DialogResult};
 use crate::error::{ExpectError, Result};
 use crate::expect::{ExpectState, MatchResult, Matcher, Pattern, PatternManager, PatternSet};
 use crate::interact::InteractBuilder;
+#[cfg(feature = "screen")]
+use crate::screen::Screen;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
+
+/// Callback invoked for every chunk of bytes read from the transport.
+///
+/// Taps observe the raw byte stream as it arrives, after it is appended to the
+/// matcher buffer but before any pattern matching is performed. They are the
+/// foundation for screen emulation, transcript recording, and other features
+/// that need to see output as it happens.
+pub type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
+
+/// Opaque handle identifying a registered output tap. Returned by
+/// [`Session::add_output_tap`] and accepted by
+/// [`Session::remove_output_tap`].
+///
+/// Backed by `u64`. The id space is large enough that wraparound is not
+/// reachable in practice; the implementation uses a non-wrapping `+= 1`
+/// so a hypothetical exhaustion would surface as a loud panic instead of
+/// silently colliding with a still-registered tap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TapId(u64);
+
+impl std::fmt::Display for TapId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "tap#{}", self.0)
+    }
+}
+
+/// Lock the screen mutex, recovering from poisoning.
+///
+/// A user-supplied tap (or `Screen::process` panicking on a malformed parse
+/// path) can poison the screen mutex. Silently returning a default on
+/// poisoning makes screen-aware expects look like they always-miss, which
+/// is a confusing failure mode. Recovering via `into_inner` lets the call
+/// continue against the actual screen state — the screen contents are
+/// still valid; only the lock was tainted.
+#[cfg(feature = "screen")]
+fn lock_screen(screen: &Arc<StdMutex<Screen>>) -> MutexGuard<'_, Screen> {
+    match screen.lock() {
+        Ok(g) => g,
+        Err(poison) => {
+            tracing::warn!("screen mutex was poisoned; recovering inner state");
+            poison.into_inner()
+        }
+    }
+}
 
 /// A session handle for interacting with a spawned process.
 ///
@@ -39,6 +87,23 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     id: SessionId,
     /// EOF flag.
     eof: bool,
+    /// Output taps invoked on every chunk of bytes read from the transport,
+    /// stored as (id, callback) so they can be removed individually.
+    output_taps: Vec<(TapId, OutputTap)>,
+    /// Monotonic counter for assigning new `TapId`s.
+    next_tap_id: u64,
+    /// Attached virtual terminal screen, fed from an output tap.
+    #[cfg(feature = "screen")]
+    screen: Option<Arc<StdMutex<Screen>>>,
+    /// Tap id used to feed the attached screen, so `detach_screen` can
+    /// remove only that tap and leave user-registered taps in place.
+    #[cfg(feature = "screen")]
+    screen_tap_id: Option<TapId>,
+    /// Poll interval used by the screen-aware expect helpers
+    /// (`expect_screen_contains`, `wait_screen_not_contains`,
+    /// `wait_screen_stable`). 50 ms by default.
+    #[cfg(feature = "screen")]
+    screen_poll_interval: Duration,
 }
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
@@ -55,7 +120,161 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             state: SessionState::Starting,
             id: SessionId::new(),
             eof: false,
+            output_taps: Vec::new(),
+            next_tap_id: 0,
+            #[cfg(feature = "screen")]
+            screen: None,
+            #[cfg(feature = "screen")]
+            screen_tap_id: None,
+            #[cfg(feature = "screen")]
+            screen_poll_interval: Duration::from_millis(50),
         }
+    }
+
+    /// Set the polling interval used by the screen-aware expect helpers.
+    ///
+    /// Affects `expect_screen_contains`, `wait_screen_not_contains`, and
+    /// `wait_screen_stable`. Smaller values reduce match latency at the
+    /// cost of CPU; larger values do the opposite. Default is 50 ms.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub const fn set_screen_poll_interval(&mut self, interval: Duration) {
+        self.screen_poll_interval = interval;
+    }
+
+    /// Get the current screen-poll interval. Default 50 ms.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    #[must_use]
+    pub const fn screen_poll_interval(&self) -> Duration {
+        self.screen_poll_interval
+    }
+
+    /// Register a callback that will be invoked with every chunk of bytes
+    /// read from the transport.
+    ///
+    /// Taps observe the raw byte stream as it arrives — they receive bytes
+    /// in the same form the underlying process produced them, including any
+    /// ANSI escape sequences. Taps are invoked synchronously inside the read
+    /// loop after the bytes are appended to the matcher buffer; they should
+    /// be cheap and non-blocking. Use a channel if expensive work is required.
+    ///
+    /// Multiple taps may be registered; they are invoked in registration
+    /// order. Taps are dropped when the session is dropped.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use std::sync::Mutex;
+    /// let captured: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    /// let buf = captured.clone();
+    /// session.add_output_tap(move |chunk| {
+    ///     buf.lock().unwrap().extend_from_slice(chunk);
+    /// });
+    /// ```
+    pub fn add_output_tap<F>(&mut self, f: F) -> TapId
+    where
+        F: Fn(&[u8]) + Send + Sync + 'static,
+    {
+        let id = TapId(self.next_tap_id);
+        // Plain addition (not wrapping_add): on the astronomically unlikely
+        // event of u64 exhaustion on a single session, we'd rather panic
+        // loudly than silently issue a colliding id.
+        self.next_tap_id += 1;
+        self.output_taps.push((id, Arc::new(f)));
+        id
+    }
+
+    /// Remove a previously registered output tap by its [`TapId`]. Returns
+    /// `true` if a tap was removed, `false` if the id was not registered
+    /// (already removed, or never existed).
+    pub fn remove_output_tap(&mut self, id: TapId) -> bool {
+        let len_before = self.output_taps.len();
+        self.output_taps.retain(|(existing, _)| *existing != id);
+        self.output_taps.len() != len_before
+    }
+
+    /// Iterate the callbacks for all currently registered output taps.
+    ///
+    /// Exposed for instrumentation and inspection only — the read loops in
+    /// [`expect`](Self::expect) and [`interact`](Self::interact) invoke
+    /// these themselves. Returns the callback `Arc`s in registration
+    /// order; ids are intentionally omitted (use
+    /// [`add_output_tap`](Self::add_output_tap)'s return value if you
+    /// need the id).
+    pub fn output_tap_callbacks(&self) -> impl Iterator<Item = &OutputTap> {
+        self.output_taps.iter().map(|(_, cb)| cb)
+    }
+
+    /// Attach a virtual terminal screen to this session.
+    ///
+    /// Creates a [`Screen`](crate::screen::Screen) with the session's
+    /// configured dimensions and registers an output tap that feeds every
+    /// chunk of output into the screen's ANSI parser. The screen is then
+    /// accessible via [`screen()`](Self::screen) and is automatically updated
+    /// whenever output is read from the transport (i.e. inside `expect_*`,
+    /// `wait`, or `wait_screen_stable`).
+    ///
+    /// Repeated calls replace the previous screen.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn attach_screen(&mut self) {
+        let (cols, rows) = self.config.dimensions;
+        self.attach_screen_with_dims(rows, cols);
+    }
+
+    /// Attach a screen with custom dimensions.
+    ///
+    /// `rows` and `cols` are the screen size in cells. Note that this does
+    /// not resize the PTY itself — use [`resize_pty`](Self::resize_pty) for
+    /// that. The two should normally match, but it can be useful to set a
+    /// larger virtual screen for transcript capture.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn attach_screen_with_dims(&mut self, rows: u16, cols: u16) {
+        // Replace any previous screen + its tap so we don't leak callbacks.
+        self.detach_screen();
+        let screen = Arc::new(StdMutex::new(Screen::new(rows as usize, cols as usize)));
+        let screen_for_tap = screen.clone();
+        let id = self.add_output_tap(move |chunk| {
+            // Reuse the shared poison-recovery helper so the tap-side and
+            // read-side recovery logic stays in lockstep.
+            lock_screen(&screen_for_tap).process(chunk);
+        });
+        self.screen = Some(screen);
+        self.screen_tap_id = Some(id);
+    }
+
+    /// Detach the currently attached screen, also removing its output tap.
+    /// No-op if no screen is attached. Returns `true` if a screen was
+    /// detached.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn detach_screen(&mut self) -> bool {
+        if let Some(id) = self.screen_tap_id.take() {
+            self.remove_output_tap(id);
+        }
+        self.screen.take().is_some()
+    }
+
+    /// Get the attached virtual terminal screen, if any.
+    ///
+    /// Returns a shared handle protected by a [`std::sync::Mutex`]. Lock it
+    /// briefly to read screen state — the lock is also taken by the output
+    /// tap on every read, so holding it for long stretches blocks the read
+    /// loop.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    #[must_use]
+    pub const fn screen(&self) -> Option<&Arc<StdMutex<Screen>>> {
+        self.screen.as_ref()
     }
 
     /// Get the session ID.
@@ -161,6 +380,50 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         self.send(&[ctrl.as_byte()]).await
     }
 
+    /// Send a Shift+Tab keystroke.
+    ///
+    /// Sends the xterm "back tab" sequence `\x1b[Z` (CSI Z). Most TUIs use
+    /// this to cycle a focused-element ring backwards or, in Claude Code's
+    /// case, to cycle permission modes. Compatible with both plain xterm
+    /// and the kitty keyboard protocol's CSI-u fallback mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails.
+    pub async fn send_shift_tab(&mut self) -> Result<()> {
+        self.send(b"\x1b[Z").await
+    }
+
+    /// Send text using bracketed paste mode (DECSET 2004).
+    ///
+    /// Wraps the content in `\x1b[200~` and `\x1b[201~` markers. Applications
+    /// that have enabled bracketed paste treat the enclosed content as
+    /// pasted input rather than typed input — this suppresses autocomplete,
+    /// command-history scanning, and per-character interpretation such as a
+    /// leading `/` triggering a slash-command popup. Safe to call even when
+    /// the receiver hasn't enabled bracketed paste: most terminals ignore
+    /// the markers and deliver the inner text as-is.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the write fails or if `text` contains the
+    /// closing paste marker `\x1b[201~`, which would let the receiver drop
+    /// out of paste mode mid-payload. Callers that want to send such bytes
+    /// should write them through the regular [`send`](Self::send) path.
+    pub async fn send_paste(&mut self, text: &str) -> Result<()> {
+        if memchr::memmem::find(text.as_bytes(), b"\x1b[201~").is_some() {
+            return Err(ExpectError::InvalidInput {
+                api: "send_paste".to_string(),
+                reason:
+                    "input contains the bracketed-paste end marker (\\x1b[201~); use send() for raw bytes that include this sequence"
+                        .to_string(),
+            });
+        }
+        self.send(b"\x1b[200~").await?;
+        self.send(text.as_bytes()).await?;
+        self.send(b"\x1b[201~").await
+    }
+
     /// Expect a pattern in the output.
     ///
     /// Blocks until the pattern is matched, EOF is detected, or timeout occurs.
@@ -259,6 +522,174 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         self.expect_any(&patterns).await
     }
 
+    /// Wait until the attached screen contains the given substring.
+    ///
+    /// Drives reads from the transport in short increments, checking the
+    /// rendered screen text after each. Returns successfully as soon as
+    /// `needle` appears in the screen text, or with [`ExpectError::Timeout`]
+    /// when `timeout` elapses without a match. Returns [`ExpectError::Eof`]
+    /// if the process exits before the substring appears.
+    ///
+    /// This is the screen-aware counterpart to [`expect`](Self::expect): use
+    /// it when the byte stream is full of ANSI escape sequences (e.g. when
+    /// driving a TUI), where literal substring matching on the byte stream
+    /// would fail because of interleaved cursor positioning and SGR codes.
+    ///
+    /// Requires an attached screen — call [`attach_screen`](Self::attach_screen)
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no screen is attached, the timeout expires, EOF
+    /// is reached, or an I/O error occurs.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub async fn expect_screen_contains(&mut self, needle: &str, timeout: Duration) -> Result<()> {
+        let Some(screen) = self.screen.clone() else {
+            return Err(ExpectError::ScreenNotAttached);
+        };
+
+        let start = tokio::time::Instant::now();
+        let poll = self.screen_poll_interval;
+
+        loop {
+            if lock_screen(&screen).query().contains(needle) {
+                return Ok(());
+            }
+            if self.eof {
+                return Err(ExpectError::Eof {
+                    buffer: lock_screen(&screen).text(),
+                });
+            }
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                return Err(ExpectError::Timeout {
+                    duration: timeout,
+                    pattern: needle.to_string(),
+                    buffer: lock_screen(&screen).text(),
+                });
+            }
+            let remaining = timeout.saturating_sub(elapsed);
+            self.read_with_timeout(poll.min(remaining)).await?;
+        }
+    }
+
+    /// Wait until the attached screen no longer contains the given substring.
+    ///
+    /// The inverse of [`expect_screen_contains`](Self::expect_screen_contains).
+    /// Returns successfully as soon as `needle` is absent from the rendered
+    /// screen, or with [`ExpectError::Timeout`] when `timeout` elapses with
+    /// the substring still present. EOF is treated as "absent" (the screen
+    /// state is frozen at the final paint).
+    ///
+    /// Useful for anchoring on the *disappearance* of an indicator —
+    /// e.g. waiting for a "request in flight" status to clear, a spinner
+    /// glyph to stop, or a modal to close.
+    ///
+    /// Requires an attached screen.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no screen is attached, the timeout expires while
+    /// the substring is still visible, or an I/O error occurs.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub async fn wait_screen_not_contains(
+        &mut self,
+        needle: &str,
+        timeout: Duration,
+    ) -> Result<()> {
+        let Some(screen) = self.screen.clone() else {
+            return Err(ExpectError::ScreenNotAttached);
+        };
+
+        let start = tokio::time::Instant::now();
+        let poll = self.screen_poll_interval;
+
+        loop {
+            if !lock_screen(&screen).query().contains(needle) {
+                return Ok(());
+            }
+            if self.eof {
+                return Ok(());
+            }
+            let elapsed = start.elapsed();
+            if elapsed >= timeout {
+                return Err(ExpectError::Timeout {
+                    duration: timeout,
+                    pattern: format!("!{needle}"),
+                    buffer: lock_screen(&screen).text(),
+                });
+            }
+            let remaining = timeout.saturating_sub(elapsed);
+            self.read_with_timeout(poll.min(remaining)).await?;
+        }
+    }
+
+    /// Wait until the attached screen has been unchanged for `quiet_period`.
+    ///
+    /// Drives reads in short increments and tracks whether the rendered
+    /// screen text changes between reads. Returns successfully when the
+    /// screen has been quiescent for `quiet_period`, or with
+    /// [`ExpectError::Timeout`] if `max_wait` elapses first.
+    ///
+    /// Useful as a generic "wait for the TUI to finish drawing" primitive
+    /// when no specific anchor is available — for example, after submitting
+    /// a prompt and before reading the response.
+    ///
+    /// A small `quiet_period` (e.g. 100-300 ms) catches paint completion;
+    /// a larger one (1-2 s) waits out streaming responses with mid-stream
+    /// pauses. Tune to the specific application.
+    ///
+    /// Requires an attached screen.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no screen is attached, `max_wait` elapses, or an
+    /// I/O error occurs. EOF is **not** an error — if the process exits, the
+    /// final screen state is considered stable and the method returns Ok.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub async fn wait_screen_stable(
+        &mut self,
+        quiet_period: Duration,
+        max_wait: Duration,
+    ) -> Result<()> {
+        let Some(screen) = self.screen.clone() else {
+            return Err(ExpectError::ScreenNotAttached);
+        };
+
+        let start = tokio::time::Instant::now();
+        let poll = self.screen_poll_interval;
+        let mut last_revision = lock_screen(&screen).revision();
+        let mut last_change = tokio::time::Instant::now();
+
+        loop {
+            if last_change.elapsed() >= quiet_period {
+                return Ok(());
+            }
+            if self.eof {
+                return Ok(());
+            }
+            if start.elapsed() >= max_wait {
+                return Err(ExpectError::Timeout {
+                    duration: max_wait,
+                    pattern: "<screen stability>".to_string(),
+                    buffer: lock_screen(&screen).text(),
+                });
+            }
+            self.read_with_timeout(poll).await?;
+            let current_revision = lock_screen(&screen).revision();
+            if current_revision != last_revision {
+                last_revision = current_revision;
+                last_change = tokio::time::Instant::now();
+            }
+        }
+    }
+
     /// Read data from the transport with timeout.
     async fn read_with_timeout(&mut self, timeout: Duration) -> Result<usize> {
         let mut buf = [0u8; 4096];
@@ -271,6 +702,22 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             }
             Ok(Ok(n)) => {
                 self.matcher.append(&buf[..n]);
+                // Run taps in catch_unwind so a panicking user callback can't
+                // unwind across our await boundary or poison subsequent taps.
+                // We log and continue rather than propagate — taps are
+                // observers, not error sources.
+                for (id, tap) in &self.output_taps {
+                    let tap_clone = tap.clone();
+                    let chunk = &buf[..n];
+                    let result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap_clone(chunk)));
+                    if result.is_err() {
+                        tracing::warn!(
+                            %id,
+                            "output tap panicked; the panic was caught and other taps continue"
+                        );
+                    }
+                }
                 Ok(n)
             }
             Ok(Err(e)) => {
@@ -397,7 +844,16 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     where
         T: 'static,
     {
-        InteractBuilder::new(&self.transport)
+        // Snapshot the currently registered output taps so the interact
+        // read loop can fire them on every chunk. Without this, attached
+        // screens and transcript recorders would silently freeze for the
+        // duration of interact().
+        let taps: Vec<OutputTap> = self
+            .output_taps
+            .iter()
+            .map(|(_, tap)| tap.clone())
+            .collect();
+        InteractBuilder::new(&self.transport, taps)
     }
 
     /// Run a dialog on this session.
@@ -718,12 +1174,26 @@ impl Session<AsyncPty> {
 
     /// Resize the terminal.
     ///
+    /// Also resizes the attached screen (if any) so it stays consistent
+    /// with the PTY. Without this, screen-aware assertions would drift
+    /// after a resize.
+    ///
     /// # Errors
     ///
     /// Returns an error if the resize ioctl fails.
     pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
-        let mut transport = self.transport.lock().await;
-        transport.resize(cols, rows)
+        {
+            let mut transport = self.transport.lock().await;
+            transport.resize(cols, rows)?;
+        }
+        self.config.dimensions = (cols, rows);
+        #[cfg(feature = "screen")]
+        if let Some(screen) = self.screen.as_ref()
+            && let Ok(mut s) = screen.lock()
+        {
+            s.resize(rows as usize, cols as usize);
+        }
+        Ok(())
     }
 
     /// Send a signal to the child process.

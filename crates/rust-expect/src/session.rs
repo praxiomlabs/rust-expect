@@ -93,7 +93,7 @@ mod lifecycle;
 mod screen;
 
 pub use builder::{QuickSession, SessionBuilder};
-pub use handle::{Session, SessionExt};
+pub use handle::{OutputTap, Session, SessionExt, TapId};
 pub use lifecycle::{
     LifecycleCallback, LifecycleEvent, LifecycleManager, ShutdownConfig, ShutdownStrategy, Signal,
 };

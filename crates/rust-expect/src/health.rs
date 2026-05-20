@@ -248,7 +248,9 @@ pub fn liveness_check() -> HealthCheckResult {
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub fn process_alive(pid: i32) -> bool {
-    // Send signal 0 to check if process exists
+    // Send signal 0 to check if process exists.
+    // SAFETY: `libc::kill` is FFI-safe — it accepts any pid value and signal 0
+    // is the documented existence-probe (POSIX). No memory is read or written.
     unsafe { libc::kill(pid, 0) == 0 }
 }
 

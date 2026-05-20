@@ -145,6 +145,9 @@ unsafe fn apply_env_in_child(
     env_mode: EnvMode,
     env_pairs: &[(std::ffi::CString, std::ffi::CString)],
 ) {
+    // SAFETY: caller (this function's doc-comment contract) guarantees we are
+    // executing post-fork, pre-exec in a child process, which is single-threaded.
+    // Mutating `environ` via clearenv/setenv/unsetenv is therefore race-free.
     unsafe {
         match env_mode {
             EnvMode::Inherit | EnvMode::Extend => {}

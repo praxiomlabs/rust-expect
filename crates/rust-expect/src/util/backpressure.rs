@@ -279,7 +279,9 @@ impl RateLimiter {
         if elapsed >= interval {
             std::time::Duration::ZERO
         } else {
-            interval.checked_sub(elapsed).unwrap()
+            interval
+                .checked_sub(elapsed)
+                .expect("guarded by elapsed < interval above")
         }
     }
 }

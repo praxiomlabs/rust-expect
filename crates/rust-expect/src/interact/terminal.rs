@@ -145,6 +145,9 @@ impl Terminal {
         #[cfg(unix)]
         {
             use std::os::unix::io::AsRawFd;
+            // SAFETY: `libc::isatty` is FFI-safe; it accepts any file descriptor value
+            // and returns 0/1 without reading or writing memory. The fd from stdin is
+            // valid for the duration of the process.
             unsafe { libc::isatty(std::io::stdin().as_raw_fd()) != 0 }
         }
         #[cfg(not(unix))]

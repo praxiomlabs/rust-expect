@@ -326,7 +326,11 @@ impl VecWriter {
     pub fn freeze(self) -> Bytes {
         if self.chunks.len() == 1 {
             // Fast path: single chunk
-            return self.chunks.into_iter().next().unwrap();
+            return self
+                .chunks
+                .into_iter()
+                .next()
+                .expect("guarded by chunks.len() == 1 above");
         }
 
         let mut buffer = BytesMut::with_capacity(self.total_len);

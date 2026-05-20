@@ -283,6 +283,88 @@ async fn remove_output_tap_stops_invocations() {
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 }
 
+/// Re-attaching a screen replaces the previous one and does NOT leak the
+/// previous attach's internal tap.
+#[tokio::test]
+async fn attach_screen_replacement_does_not_leak_taps() {
+    let (cmd, args, config) = build("sleep 2; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
+
+    session.attach_screen();
+    assert_eq!(session.output_tap_callbacks().count(), 1);
+
+    // Add a user tap so we can verify the count reflects the user tap +
+    // exactly one screen tap (not two screen taps).
+    let count: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+    let cc = count.clone();
+    session.add_output_tap(move |_| *cc.lock().unwrap() += 1);
+    assert_eq!(session.output_tap_callbacks().count(), 2);
+
+    // Re-attach. The previous screen's tap must be removed.
+    session.attach_screen();
+    assert_eq!(
+        session.output_tap_callbacks().count(),
+        2,
+        "re-attach should replace, not stack, the screen tap (user tap + 1 screen tap)"
+    );
+
+    let _ = session.send_control(rust_expect::ControlChar::CtrlC).await;
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// If the screen mutex becomes poisoned after the screen has been
+/// populated, subsequent `expect_screen_contains` calls still succeed via
+/// the poison-recovery path in `lock_screen()` instead of silently
+/// always-missing on the poisoned lock.
+#[tokio::test]
+async fn screen_mutex_poison_recovers() {
+    let (cmd, args, config) =
+        build("printf 'POISON-MARKER\\n'; sleep 0.3; printf 'AFTER\\n'; sleep 0.3; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
+
+    session.attach_screen();
+
+    // Let the first marker render so the screen has real content.
+    session
+        .expect_screen_contains("POISON-MARKER", Duration::from_secs(2))
+        .await
+        .expect("baseline: marker should render before we poison the lock");
+
+    // Now poison the mutex by panicking while holding it on another thread.
+    let screen_handle = session.screen().unwrap().clone();
+    let _ = std::thread::spawn(move || {
+        let _guard = screen_handle.lock().unwrap();
+        panic!("intentional panic to poison the screen mutex");
+    })
+    .join();
+    assert!(
+        session.screen().unwrap().lock().is_err(),
+        "test setup failed: screen mutex should be poisoned by now"
+    );
+
+    // expect_screen_contains must still see the rendered content via the
+    // poison-recovery path in lock_screen().
+    session
+        .expect_screen_contains("POISON-MARKER", Duration::from_secs(1))
+        .await
+        .expect("must recover from poisoning and still see the marker");
+
+    // The tap closure also recovers from poisoning, so new bytes continue
+    // to update the screen and `AFTER` should land too.
+    session
+        .expect_screen_contains("AFTER", Duration::from_secs(3))
+        .await
+        .expect("tap must continue feeding screen across poison recovery");
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
 /// `detach_screen` removes its tap and `screen()` returns None.
 #[tokio::test]
 async fn detach_screen_removes_internal_tap() {

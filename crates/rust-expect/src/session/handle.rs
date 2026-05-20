@@ -34,6 +34,33 @@ pub type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TapId(u64);
 
+impl std::fmt::Display for TapId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "tap#{}", self.0)
+    }
+}
+
+/// Lock the screen mutex, recovering from poisoning.
+///
+/// A user-supplied tap (or `Screen::process` panicking on a malformed parse
+/// path) can poison the screen mutex. Silently returning a default on
+/// poisoning makes screen-aware expects look like they always-miss, which
+/// is a confusing failure mode. Recovering via `into_inner` lets the call
+/// continue against the actual screen state — the screen contents are
+/// still valid; only the lock was tainted.
+#[cfg(feature = "screen")]
+fn lock_screen(
+    screen: &Arc<std::sync::Mutex<crate::screen::Screen>>,
+) -> std::sync::MutexGuard<'_, crate::screen::Screen> {
+    match screen.lock() {
+        Ok(g) => g,
+        Err(poison) => {
+            tracing::warn!("screen mutex was poisoned; recovering inner state");
+            poison.into_inner()
+        }
+    }
+}
+
 /// A session handle for interacting with a spawned process.
 ///
 /// The session provides methods to send input, expect patterns in output,
@@ -176,9 +203,14 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         )));
         let screen_for_tap = screen.clone();
         let id = self.add_output_tap(move |chunk| {
-            if let Ok(mut s) = screen_for_tap.lock() {
-                s.process(chunk);
-            }
+            // Recover from poisoning so a panic elsewhere can't permanently
+            // stop screen updates — the inner Screen state is still valid;
+            // only the lock is tainted.
+            let mut s = match screen_for_tap.lock() {
+                Ok(g) => g,
+                Err(poison) => poison.into_inner(),
+            };
+            s.process(chunk);
         });
         self.screen = Some(screen);
         self.screen_tap_id = Some(id);
@@ -495,16 +527,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let poll = Duration::from_millis(50);
 
         loop {
-            if screen
-                .lock()
-                .map(|s| s.query().contains(needle))
-                .unwrap_or(false)
-            {
+            if lock_screen(&screen).query().contains(needle) {
                 return Ok(());
             }
             if self.eof {
                 return Err(ExpectError::Eof {
-                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                    buffer: lock_screen(&screen).text(),
                 });
             }
             let elapsed = start.elapsed();
@@ -512,7 +540,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 return Err(ExpectError::Timeout {
                     duration: timeout,
                     pattern: needle.to_string(),
-                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                    buffer: lock_screen(&screen).text(),
                 });
             }
             let remaining = timeout.saturating_sub(elapsed);
@@ -557,11 +585,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let poll = Duration::from_millis(50);
 
         loop {
-            let present = screen
-                .lock()
-                .map(|s| s.query().contains(needle))
-                .unwrap_or(false);
-            if !present {
+            if !lock_screen(&screen).query().contains(needle) {
                 return Ok(());
             }
             if self.eof {
@@ -572,7 +596,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 return Err(ExpectError::Timeout {
                     duration: timeout,
                     pattern: format!("!{needle}"),
-                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                    buffer: lock_screen(&screen).text(),
                 });
             }
             let remaining = timeout.saturating_sub(elapsed);
@@ -619,7 +643,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
         let start = tokio::time::Instant::now();
         let poll = Duration::from_millis(50);
-        let mut last_text = screen.lock().map(|s| s.text()).unwrap_or_default();
+        let mut last_text = lock_screen(&screen).text();
         let mut last_change = tokio::time::Instant::now();
 
         loop {
@@ -633,11 +657,11 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 return Err(ExpectError::Timeout {
                     duration: max_wait,
                     pattern: "<screen stability>".to_string(),
-                    buffer: screen.lock().map(|s| s.text()).unwrap_or_default(),
+                    buffer: lock_screen(&screen).text(),
                 });
             }
             self.read_with_timeout(poll).await?;
-            let current = screen.lock().map(|s| s.text()).unwrap_or_default();
+            let current = lock_screen(&screen).text();
             if current != last_text {
                 last_text = current;
                 last_change = tokio::time::Instant::now();

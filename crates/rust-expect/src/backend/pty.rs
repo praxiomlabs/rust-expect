@@ -155,27 +155,37 @@ unsafe fn apply_env_in_child(
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
-                    // Walk environ and unsetenv each key. setenv() may realloc
-                    // environ but that's OK between fork and exec.
+                    // Collect every existing key into owned CStrings BEFORE we
+                    // start calling unsetenv. unsetenv mutates the global
+                    // `environ` array — entries shift, the array can be
+                    // reallocated — so iterating it concurrently with
+                    // mutation is fragile and libc-dependent. Snapshotting
+                    // first sidesteps the issue entirely, and the keys can
+                    // be of arbitrary length without truncation.
                     extern "C" {
                         static mut environ: *mut *mut libc::c_char;
                     }
-                    while !environ.is_null() && !(*environ).is_null() {
-                        let entry = *environ;
-                        let mut len = 0usize;
-                        while *entry.add(len) != 0 && *entry.add(len) != b'=' as libc::c_char {
-                            len += 1;
+                    let mut names: Vec<std::ffi::CString> = Vec::new();
+                    if !environ.is_null() {
+                        let mut p = environ;
+                        while !(*p).is_null() {
+                            let entry = *p;
+                            // Find the '=' separator (or NUL if malformed).
+                            let mut len = 0usize;
+                            while *entry.add(len) != 0 && *entry.add(len) != b'=' as libc::c_char {
+                                len += 1;
+                            }
+                            if len > 0 {
+                                let bytes = std::slice::from_raw_parts(entry.cast::<u8>(), len);
+                                if let Ok(c) = std::ffi::CString::new(bytes) {
+                                    names.push(c);
+                                }
+                            }
+                            p = p.add(1);
                         }
-                        if len == 0 {
-                            break;
-                        }
-                        let mut name_buf = [0u8; 256];
-                        let n = len.min(name_buf.len() - 1);
-                        for i in 0..n {
-                            name_buf[i] = *entry.add(i) as u8;
-                        }
-                        name_buf[n] = 0;
-                        libc::unsetenv(name_buf.as_ptr().cast::<libc::c_char>());
+                    }
+                    for name in &names {
+                        libc::unsetenv(name.as_ptr());
                     }
                 }
             }

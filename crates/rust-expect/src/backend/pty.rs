@@ -162,7 +162,9 @@ unsafe fn apply_env_in_child(
                     // mutation is fragile and libc-dependent. Snapshotting
                     // first sidesteps the issue entirely, and the keys can
                     // be of arbitrary length without truncation.
-                    extern "C" {
+                    // Edition 2024 requires extern blocks declaring foreign
+                    // statics to be wrapped in `unsafe extern`.
+                    unsafe extern "C" {
                         static mut environ: *mut *mut libc::c_char;
                     }
                     let mut names: Vec<std::ffi::CString> = Vec::new();
@@ -265,6 +267,25 @@ impl PtySpawner {
     }
 
     /// Spawn a command.
+    ///
+    /// # Runtime requirement (Unix)
+    ///
+    /// The Unix implementation forks and then calls `setenv` / `unsetenv` /
+    /// `clearenv` between fork and exec to apply the configured env mode.
+    /// Those libc functions are **not** async-signal-safe — they allocate
+    /// — so the post-fork window in the child must run on a single thread
+    /// for the call to be sound. In this crate that is true because
+    /// callers reach `spawn` directly from a fresh `tokio::main` or
+    /// equivalent before any background thread has captured the
+    /// allocator lock at the fork point.
+    ///
+    /// **If you embed this crate in a host that pre-spawns worker
+    /// threads (for example, a multi-threaded scheduler that's already
+    /// running by the time you call `Session::spawn`)**, the assumption
+    /// breaks: another thread may hold the allocator lock at the moment
+    /// of `fork`, and the child can deadlock or corrupt heap state on
+    /// the first `setenv` call. In that environment, prefer a
+    /// `posix_spawn`-based spawner or a pre-fork sentinel-pipe helper.
     ///
     /// # Errors
     ///

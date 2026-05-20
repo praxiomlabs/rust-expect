@@ -36,11 +36,12 @@ pub type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
 /// [`Session::add_output_tap`] and accepted by
 /// [`Session::remove_output_tap`].
 ///
-/// The underlying id is `u128` so a hypothetical wraparound (~2^128
-/// registrations on the same session) is operationally impossible —
-/// removing a wrong tap by id collision can't happen in practice.
+/// Backed by `u64`. The id space is large enough that wraparound is not
+/// reachable in practice; the implementation uses a non-wrapping `+= 1`
+/// so a hypothetical exhaustion would surface as a loud panic instead of
+/// silently colliding with a still-registered tap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TapId(u128);
+pub struct TapId(u64);
 
 impl std::fmt::Display for TapId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -90,7 +91,7 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     /// stored as (id, callback) so they can be removed individually.
     output_taps: Vec<(TapId, OutputTap)>,
     /// Monotonic counter for assigning new `TapId`s.
-    next_tap_id: u128,
+    next_tap_id: u64,
     /// Attached virtual terminal screen, fed from an output tap.
     #[cfg(feature = "screen")]
     screen: Option<Arc<StdMutex<Screen>>>,
@@ -98,6 +99,11 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     /// remove only that tap and leave user-registered taps in place.
     #[cfg(feature = "screen")]
     screen_tap_id: Option<TapId>,
+    /// Poll interval used by the screen-aware expect helpers
+    /// (`expect_screen_contains`, `wait_screen_not_contains`,
+    /// `wait_screen_stable`). 50 ms by default.
+    #[cfg(feature = "screen")]
+    screen_poll_interval: Duration,
 }
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
@@ -120,7 +126,30 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             screen: None,
             #[cfg(feature = "screen")]
             screen_tap_id: None,
+            #[cfg(feature = "screen")]
+            screen_poll_interval: Duration::from_millis(50),
         }
+    }
+
+    /// Set the polling interval used by the screen-aware expect helpers.
+    ///
+    /// Affects `expect_screen_contains`, `wait_screen_not_contains`, and
+    /// `wait_screen_stable`. Smaller values reduce match latency at the
+    /// cost of CPU; larger values do the opposite. Default is 50 ms.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub const fn set_screen_poll_interval(&mut self, interval: Duration) {
+        self.screen_poll_interval = interval;
+    }
+
+    /// Get the current screen-poll interval. Default 50 ms.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    #[must_use]
+    pub const fn screen_poll_interval(&self) -> Duration {
+        self.screen_poll_interval
     }
 
     /// Register a callback that will be invoked with every chunk of bytes
@@ -151,7 +180,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         F: Fn(&[u8]) + Send + Sync + 'static,
     {
         let id = TapId(self.next_tap_id);
-        self.next_tap_id = self.next_tap_id.wrapping_add(1);
+        // Plain addition (not wrapping_add): on the astronomically unlikely
+        // event of u64 exhaustion on a single session, we'd rather panic
+        // loudly than silently issue a colliding id.
+        self.next_tap_id += 1;
         self.output_taps.push((id, Arc::new(f)));
         id
     }
@@ -167,8 +199,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
     /// Iterate the callbacks for all currently registered output taps.
     ///
-    /// Primarily useful for the [`interact()`](Self::interact) path which runs
-    /// its own read loop and needs to invoke the same taps.
+    /// Exposed for instrumentation and inspection only — the read loops in
+    /// [`expect`](Self::expect) and [`interact`](Self::interact) invoke
+    /// these themselves. Returns the callback `Arc`s in registration
+    /// order; ids are intentionally omitted (use
+    /// [`add_output_tap`](Self::add_output_tap)'s return value if you
+    /// need the id).
     pub fn output_tap_callbacks(&self) -> impl Iterator<Item = &OutputTap> {
         self.output_taps.iter().map(|(_, cb)| cb)
     }
@@ -206,14 +242,9 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let screen = Arc::new(StdMutex::new(Screen::new(rows as usize, cols as usize)));
         let screen_for_tap = screen.clone();
         let id = self.add_output_tap(move |chunk| {
-            // Recover from poisoning so a panic elsewhere can't permanently
-            // stop screen updates — the inner Screen state is still valid;
-            // only the lock is tainted.
-            let mut s = match screen_for_tap.lock() {
-                Ok(g) => g,
-                Err(poison) => poison.into_inner(),
-            };
-            s.process(chunk);
+            // Reuse the shared poison-recovery helper so the tap-side and
+            // read-side recovery logic stays in lockstep.
+            lock_screen(&screen_for_tap).process(chunk);
         });
         self.screen = Some(screen);
         self.screen_tap_id = Some(id);
@@ -381,10 +412,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// should write them through the regular [`send`](Self::send) path.
     pub async fn send_paste(&mut self, text: &str) -> Result<()> {
         if memchr::memmem::find(text.as_bytes(), b"\x1b[201~").is_some() {
-            return Err(ExpectError::PatternNotFound {
-                pattern: "send_paste".to_string(),
-                buffer:
-                    "input contains the bracketed-paste end marker (\\x1b[201~); refusing to send"
+            return Err(ExpectError::InvalidInput {
+                api: "send_paste".to_string(),
+                reason:
+                    "input contains the bracketed-paste end marker (\\x1b[201~); use send() for raw bytes that include this sequence"
                         .to_string(),
             });
         }
@@ -520,7 +551,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         };
 
         let start = tokio::time::Instant::now();
-        let poll = Duration::from_millis(50);
+        let poll = self.screen_poll_interval;
 
         loop {
             if lock_screen(&screen).query().contains(needle) {
@@ -575,7 +606,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         };
 
         let start = tokio::time::Instant::now();
-        let poll = Duration::from_millis(50);
+        let poll = self.screen_poll_interval;
 
         loop {
             if !lock_screen(&screen).query().contains(needle) {
@@ -632,7 +663,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         };
 
         let start = tokio::time::Instant::now();
-        let poll = Duration::from_millis(50);
+        let poll = self.screen_poll_interval;
         let mut last_revision = lock_screen(&screen).revision();
         let mut last_change = tokio::time::Instant::now();
 
@@ -813,7 +844,16 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     where
         T: 'static,
     {
-        InteractBuilder::new(&self.transport)
+        // Snapshot the currently registered output taps so the interact
+        // read loop can fire them on every chunk. Without this, attached
+        // screens and transcript recorders would silently freeze for the
+        // duration of interact().
+        let taps: Vec<OutputTap> = self
+            .output_taps
+            .iter()
+            .map(|(_, tap)| tap.clone())
+            .collect();
+        InteractBuilder::new(&self.transport, taps)
     }
 
     /// Run a dialog on this session.

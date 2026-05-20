@@ -126,6 +126,21 @@ pub enum ExpectError {
     /// `wait_screen_stable` without first calling `Session::attach_screen`.
     #[error("no screen is attached to this session — call Session::attach_screen() first")]
     ScreenNotAttached,
+
+    /// Caller-supplied input was rejected before any I/O happened.
+    ///
+    /// Used by APIs that validate their input — for example, `send_paste`
+    /// refuses payloads containing the bracketed-paste end marker because
+    /// they would let the receiver drop out of paste mode mid-stream. The
+    /// `reason` is a short human-readable explanation suitable for surfacing
+    /// in a test failure or log line.
+    #[error("invalid input to {api}: {reason}")]
+    InvalidInput {
+        /// Name of the API that rejected the input (e.g. `"send_paste"`).
+        api: String,
+        /// Human-readable explanation of why the input was rejected.
+        reason: String,
+    },
     /// Failed to spawn a process.
     #[error("failed to spawn process: {0}")]
     Spawn(#[from] SpawnError),

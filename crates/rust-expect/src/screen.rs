@@ -61,10 +61,11 @@ impl Screen {
 
     /// Get the current revision counter.
     ///
-    /// Bumps once per `process()` call, regardless of whether the call
-    /// caused any cell change. Useful as an O(1) "did anything come in?"
-    /// check — `wait_screen_stable` uses it to avoid materializing the
-    /// full screen text on every poll. Wraps on `u64::MAX`.
+    /// Bumps once per byte consumed inside `process()`, regardless of
+    /// whether the byte caused any cell change. Useful as an O(1) "did
+    /// anything come in?" check — `wait_screen_stable` uses it to avoid
+    /// materializing the full screen text on every poll. Wraps on
+    /// `u64::MAX`.
     #[must_use]
     pub const fn revision(&self) -> u64 {
         self.revision

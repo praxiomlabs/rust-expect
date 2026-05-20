@@ -469,6 +469,29 @@ async fn resize_pty_resizes_attached_screen() {
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 }
 
+/// `set_screen_poll_interval` round-trips and is honored by the screen-aware
+/// expect helpers (the existing tests rely on the default 50 ms; this is a
+/// smoke test that overriding the interval doesn't break the loop).
+#[tokio::test]
+async fn screen_poll_interval_is_configurable() {
+    let (cmd, args, config) = build("printf 'pong\\n'; sleep 0.5; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
+    session.attach_screen();
+
+    assert_eq!(session.screen_poll_interval(), Duration::from_millis(50));
+    session.set_screen_poll_interval(Duration::from_millis(20));
+    assert_eq!(session.screen_poll_interval(), Duration::from_millis(20));
+
+    session
+        .expect_screen_contains("pong", Duration::from_secs(2))
+        .await
+        .unwrap();
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
 /// `send_paste` rejects input containing the closing paste marker.
 #[tokio::test]
 async fn send_paste_rejects_embedded_end_marker() {
@@ -481,7 +504,13 @@ async fn send_paste_rejects_embedded_end_marker() {
 
     let evil = "ok then \x1b[201~ → DROP OUT ← \x1b[200~";
     let r = session.send_paste(evil).await;
-    assert!(r.is_err(), "should reject embedded \\x1b[201~");
+    assert!(
+        matches!(
+            r,
+            Err(ExpectError::InvalidInput { ref api, .. }) if api == "send_paste"
+        ),
+        "should reject embedded \\x1b[201~ with InvalidInput, got {r:?}"
+    );
 
     // Clean text still works.
     session.send_paste("hello").await.unwrap();

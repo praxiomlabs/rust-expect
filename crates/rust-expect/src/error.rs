@@ -117,7 +117,15 @@ fn format_eof_error(buffer: &str) -> String {
 
 /// The main error type for rust-expect operations.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ExpectError {
+    /// A screen-aware operation was called without a screen attached.
+    ///
+    /// Indicates a programmer error rather than a runtime miss: the caller
+    /// invoked `expect_screen_contains`, `wait_screen_not_contains`, or
+    /// `wait_screen_stable` without first calling `Session::attach_screen`.
+    #[error("no screen is attached to this session — call Session::attach_screen() first")]
+    ScreenNotAttached,
     /// Failed to spawn a process.
     #[error("failed to spawn process: {0}")]
     Spawn(#[from] SpawnError),

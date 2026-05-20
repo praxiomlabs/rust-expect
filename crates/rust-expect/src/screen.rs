@@ -40,6 +40,9 @@ pub struct Screen {
     bg: Color,
     /// Current text attributes.
     attrs: Attributes,
+    /// Monotonic counter that ticks on each `process()` call, used as a
+    /// cheap signal that the screen has received input. See [`revision`].
+    revision: u64,
 }
 
 impl Screen {
@@ -52,7 +55,19 @@ impl Screen {
             fg: Color::Default,
             bg: Color::Default,
             attrs: Attributes::empty(),
+            revision: 0,
         }
+    }
+
+    /// Get the current revision counter.
+    ///
+    /// Bumps once per `process()` call, regardless of whether the call
+    /// caused any cell change. Useful as an O(1) "did anything come in?"
+    /// check — `wait_screen_stable` uses it to avoid materializing the
+    /// full screen text on every poll. Wraps on `u64::MAX`.
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Create a new screen with standard VT100 dimensions (24x80).
@@ -93,9 +108,12 @@ impl Screen {
     /// Process input bytes.
     pub fn process(&mut self, data: &[u8]) {
         for byte in data {
-            if let Some(result) = self.parser.parse(*byte) {
+            for result in self.parser.parse(*byte).into_iter().flatten() {
                 self.apply_result(result);
             }
+            // A non-zero number of input bytes always advances the screen's
+            // revision counter so cheap stability polls can detect activity.
+            self.revision = self.revision.wrapping_add(1);
         }
     }
 

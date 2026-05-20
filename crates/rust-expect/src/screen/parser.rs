@@ -162,18 +162,26 @@ impl AnsiParser {
     }
 
     /// Parse a byte and return any completed sequences.
-    pub fn parse(&mut self, byte: u8) -> Option<ParseResult> {
-        match self.state {
-            ParserState::Ground => self.ground(byte),
+    ///
+    /// Returns up to two emissions in the order they should be applied to
+    /// the screen. The second slot is only populated on UTF-8 malformed-
+    /// sequence recovery: when an expected continuation byte fails to
+    /// arrive and is replaced by an unrelated byte, we emit a `U+FFFD`
+    /// for the broken sequence (slot 0) and then process the new byte
+    /// normally (slot 1). Callers should iterate via `.into_iter().flatten()`.
+    pub fn parse(&mut self, byte: u8) -> [Option<ParseResult>; 2] {
+        let primary = match self.state {
+            ParserState::Ground => return self.ground(byte),
             ParserState::Escape => self.escape(byte),
             ParserState::CsiEntry => self.csi_entry(byte),
             ParserState::CsiParam => self.csi_param(byte),
             ParserState::CsiIntermediate => self.csi_intermediate(byte),
             ParserState::OscString => self.osc_string(byte),
-        }
+        };
+        [primary, None]
     }
 
-    fn ground(&mut self, byte: u8) -> Option<ParseResult> {
+    fn ground(&mut self, byte: u8) -> [Option<ParseResult>; 2] {
         // ESC and C0 control bytes terminate any in-progress UTF-8 sequence
         // and are handled directly. We don't expect them mid-codepoint in
         // well-formed input, but if it happens we abandon the partial
@@ -183,19 +191,18 @@ impl AnsiParser {
                 self.utf8_len = 0;
                 self.utf8_needed = 0;
                 self.state = ParserState::Escape;
-                return None;
+                return [None, None];
             }
             0x00..=0x1a | 0x1c..=0x1f => {
                 self.utf8_len = 0;
                 self.utf8_needed = 0;
-                return Some(ParseResult::Control(byte));
+                return [Some(ParseResult::Control(byte)), None];
             }
             _ => {}
         }
 
         // UTF-8 decoding.
-        //   0xxxxxxx (0x00-0x7F)  — 1-byte ASCII (already handled above for
-        //                            control bytes; 0x20-0x7F falls through here)
+        //   0xxxxxxx (0x00-0x7F)  — 1-byte ASCII
         //   10xxxxxx (0x80-0xBF)  — continuation byte
         //   110xxxxx (0xC2-0xDF)  — start of 2-byte sequence
         //   1110xxxx (0xE0-0xEF)  — start of 3-byte sequence
@@ -203,7 +210,7 @@ impl AnsiParser {
         if self.utf8_needed == 0 {
             // Not currently assembling a multi-byte codepoint.
             if byte < 0x80 {
-                return Some(ParseResult::Print(byte as char));
+                return [Some(ParseResult::Print(byte as char)), None];
             }
             let needed = match byte {
                 0xC2..=0xDF => 2,
@@ -212,35 +219,35 @@ impl AnsiParser {
                 // 0x80-0xBF as a starting byte is a stray continuation, and
                 // 0xC0/0xC1/0xF5..=0xFF are invalid lead bytes. In all cases
                 // emit U+FFFD and don't poison the accumulator.
-                _ => return Some(ParseResult::Print(std::char::REPLACEMENT_CHARACTER)),
+                _ => {
+                    return [
+                        Some(ParseResult::Print(std::char::REPLACEMENT_CHARACTER)),
+                        None,
+                    ];
+                }
             };
             self.utf8_buf[0] = byte;
             self.utf8_len = 1;
             self.utf8_needed = needed;
-            return None;
+            return [None, None];
         }
 
         // Mid-sequence: expect a continuation byte.
         if (byte & 0xC0) != 0x80 {
-            // Malformed: previous codepoint was incomplete. Emit replacement
-            // and restart processing with the current byte by recursing once.
+            // Malformed: previous codepoint was incomplete. Emit U+FFFD
+            // for the broken sequence (slot 0) and then process the new
+            // byte normally (slot 1), preserving both visual order and
+            // the new byte's intended effect.
             self.utf8_len = 0;
             self.utf8_needed = 0;
-            // Emit replacement now; the next call will see this same byte
-            // again. We can't directly emit two ParseResults from one call,
-            // so we drop the new byte's processing for this tick. Callers
-            // iterate byte-by-byte and won't observe data loss in practice
-            // because the malformed prefix is rare and the next byte will
-            // be handled normally on the subsequent call.
-            // To keep the contract strict, we reprocess here:
             let recovered = Some(ParseResult::Print(std::char::REPLACEMENT_CHARACTER));
-            // Stash the new byte back as if just received in Ground.
-            // We can do that with a single direct ground() call now that
-            // utf8_needed is cleared. But we still need to return _something_
-            // for the replacement char; the new byte's effect is reduced to
-            // a state transition. In the common malformed case this is fine.
-            let _ = self.ground(byte);
-            return recovered;
+            // ground() recursion is safe now that utf8_needed is cleared;
+            // it cannot re-enter this branch on the same byte.
+            // The recursive call returns at most one primary emission for a
+            // byte arriving in Ground state with no UTF-8 backlog; the
+            // secondary slot is always None on that path.
+            let [reprocessed_primary, _] = self.ground(byte);
+            return [recovered, reprocessed_primary];
         }
 
         // Valid continuation. Accumulate.
@@ -249,7 +256,7 @@ impl AnsiParser {
         self.utf8_len += 1;
 
         if self.utf8_len < self.utf8_needed {
-            return None;
+            return [None, None];
         }
 
         // Complete codepoint — decode.
@@ -260,7 +267,7 @@ impl AnsiParser {
             .unwrap_or(std::char::REPLACEMENT_CHARACTER);
         self.utf8_len = 0;
         self.utf8_needed = 0;
-        Some(ParseResult::Print(ch))
+        [Some(ParseResult::Print(ch)), None]
     }
 
     fn escape(&mut self, byte: u8) -> Option<ParseResult> {
@@ -550,10 +557,20 @@ pub fn apply_sgr(params: &[u16], fg: &mut Color, bg: &mut Color, attrs: &mut Att
 mod tests {
     use super::*;
 
+    /// Helper that drains the up-to-two-result array `parse()` now returns.
+    fn drain<'a>(
+        parser: &'a mut AnsiParser,
+        bytes: impl IntoIterator<Item = u8> + 'a,
+    ) -> impl Iterator<Item = ParseResult> + 'a {
+        bytes
+            .into_iter()
+            .flat_map(|b| parser.parse(b).into_iter().flatten())
+    }
+
     #[test]
     fn parse_cursor_up() {
         let mut parser = AnsiParser::new();
-        let result = "\x1b[5A".bytes().filter_map(|b| parser.parse(b)).last();
+        let result = drain(&mut parser, "\x1b[5A".bytes()).last();
         assert_eq!(
             result,
             Some(ParseResult::Sequence(AnsiSequence::CursorUp(5)))
@@ -563,7 +580,7 @@ mod tests {
     #[test]
     fn parse_cursor_position() {
         let mut parser = AnsiParser::new();
-        let result = "\x1b[10;20H".bytes().filter_map(|b| parser.parse(b)).last();
+        let result = drain(&mut parser, "\x1b[10;20H".bytes()).last();
         assert_eq!(
             result,
             Some(ParseResult::Sequence(AnsiSequence::CursorPosition {
@@ -576,7 +593,7 @@ mod tests {
     #[test]
     fn parse_sgr() {
         let mut parser = AnsiParser::new();
-        let result = "\x1b[1;31m".bytes().filter_map(|b| parser.parse(b)).last();
+        let result = drain(&mut parser, "\x1b[1;31m".bytes()).last();
         assert_eq!(
             result,
             Some(ParseResult::Sequence(AnsiSequence::SetGraphics(vec![
@@ -589,7 +606,28 @@ mod tests {
     fn parse_printable() {
         let mut parser = AnsiParser::new();
         let result = parser.parse(b'A');
-        assert_eq!(result, Some(ParseResult::Print('A')));
+        assert_eq!(result, [Some(ParseResult::Print('A')), None]);
+    }
+
+    /// Malformed-recovery: a UTF-8 start byte followed by a non-continuation
+    /// byte must emit BOTH U+FFFD for the broken sequence AND the recovery
+    /// byte's own emission, in that order.
+    #[test]
+    fn parse_malformed_utf8_emits_both_results() {
+        let mut parser = AnsiParser::new();
+        // 0xE2 starts a 3-byte sequence; 'X' is not a valid continuation.
+        // We need to feed the lead byte first (which returns [None, None]
+        // while waiting for continuations), then 'X' interrupts.
+        assert_eq!(parser.parse(0xE2), [None, None]);
+        let results: Vec<ParseResult> = parser.parse(b'X').into_iter().flatten().collect();
+        assert_eq!(
+            results,
+            vec![
+                ParseResult::Print(std::char::REPLACEMENT_CHARACTER),
+                ParseResult::Print('X'),
+            ],
+            "malformed recovery must emit U+FFFD then the recovery byte's result"
+        );
     }
 
     #[test]

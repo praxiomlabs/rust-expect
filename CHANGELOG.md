@@ -73,6 +73,35 @@ integration coverage.
 
 - `backend::PtyConfig` now exposes an `env: HashMap<String, String>` field
   used to plumb `SessionBuilder::env()` values through to the spawned child.
+- `ExpectError::ScreenNotAttached` distinguishes "caller forgot to call
+  `attach_screen`" from a runtime substring miss; the screen-aware expect
+  methods now return this variant instead of conflating it with
+  `PatternNotFound`. `ExpectError` itself is now `#[non_exhaustive]` so
+  adding further variants is non-breaking.
+- `Session::screen()`'s return type is `Option<&Arc<Mutex<Screen>>>`;
+  `Screen::revision() -> u64` is a cheap monotonic counter that bumps
+  once per `process()` call. `wait_screen_stable` polls this counter
+  instead of materializing `screen.text()` every 50 ms.
+- `TapId` is now backed by `u128` (was `u64`), making id collision via
+  wraparound operationally impossible. Implements `fmt::Display` for
+  ergonomic logging in downstream observability.
+- The screen `AnsiParser::parse(byte)` signature changed from
+  `Option<ParseResult>` to `[Option<ParseResult>; 2]` to correctly emit
+  both `U+FFFD` and the recovery byte's own result when a malformed
+  UTF-8 sequence is interrupted, in the right visual order. Callers
+  iterate via `.into_iter().flatten()`.
+
+### Security notes
+
+- `apply_env_in_child` (`backend/pty.rs`) calls `setenv`/`unsetenv`
+  between `fork` and `exec`. These functions are not async-signal-safe
+  (they allocate), so the call is technically only sound in
+  single-threaded contexts. This codebase forks before any tokio worker
+  threads exist, which preserves the invariant **today**. If the
+  workspace ever switches to a runtime that pre-spawns workers, or if
+  spawning is moved into a multi-threaded context, this assumption
+  breaks — callers must either re-introduce a single-threaded fork
+  helper or switch to `posix_spawn`/`execve(envp)`.
 
 ## [0.1.0] - 2025-01-03
 

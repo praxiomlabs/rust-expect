@@ -2635,6 +2635,7 @@ dependencies = [
  "expectrl",
  "futures",
  "libc",
+ "memchr",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",

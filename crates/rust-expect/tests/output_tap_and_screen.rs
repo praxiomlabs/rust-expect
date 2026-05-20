@@ -10,7 +10,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rust_expect::{Session, SessionBuilder};
+use rust_expect::{ExpectError, Session, SessionBuilder};
 
 fn build(script: &str) -> (String, Vec<String>, rust_expect::config::SessionConfig) {
     let cmd = "/bin/sh".to_string();
@@ -487,6 +487,122 @@ async fn send_paste_rejects_embedded_end_marker() {
     session.send_paste("hello").await.unwrap();
     let _ = session.send_control(rust_expect::ControlChar::CtrlD).await;
     session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// Calling a screen-aware expect without attaching a screen returns the
+/// dedicated `ScreenNotAttached` variant — not a runtime "pattern not found"
+/// miss that would be easy to misinterpret.
+#[tokio::test]
+async fn screen_aware_methods_return_screen_not_attached() {
+    let (cmd, args, config) = build("sleep 1; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
+    // Intentionally do NOT call attach_screen.
+
+    let r = session
+        .expect_screen_contains("anything", Duration::from_millis(100))
+        .await;
+    assert!(
+        matches!(r, Err(ExpectError::ScreenNotAttached)),
+        "expect_screen_contains without attach should return ScreenNotAttached, got {r:?}"
+    );
+
+    let r = session
+        .wait_screen_not_contains("anything", Duration::from_millis(100))
+        .await;
+    assert!(
+        matches!(r, Err(ExpectError::ScreenNotAttached)),
+        "wait_screen_not_contains without attach should return ScreenNotAttached, got {r:?}"
+    );
+
+    let r = session
+        .wait_screen_stable(Duration::from_millis(50), Duration::from_millis(100))
+        .await;
+    assert!(
+        matches!(r, Err(ExpectError::ScreenNotAttached)),
+        "wait_screen_stable without attach should return ScreenNotAttached, got {r:?}"
+    );
+
+    let _ = session.send_control(rust_expect::ControlChar::CtrlC).await;
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// `Screen::revision()` bumps once per `process()` call so cheap stability
+/// polls can detect activity without materializing the full screen text.
+#[tokio::test]
+async fn screen_revision_advances_on_input() {
+    let (cmd, args, config) = build("printf 'a\\n'; sleep 0.3; printf 'b\\n'; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
+    session.attach_screen();
+
+    // Initial state: no input processed yet.
+    let r0 = session.screen().unwrap().lock().unwrap().revision();
+    assert_eq!(r0, 0);
+
+    session
+        .expect_timeout("a", Duration::from_secs(2))
+        .await
+        .unwrap();
+    let r1 = session.screen().unwrap().lock().unwrap().revision();
+    assert!(
+        r1 > r0,
+        "revision should advance after the first chunk: r0={r0}, r1={r1}"
+    );
+
+    session
+        .expect_timeout("b", Duration::from_secs(2))
+        .await
+        .unwrap();
+    let r2 = session.screen().unwrap().lock().unwrap().revision();
+    assert!(
+        r2 > r1,
+        "revision should advance again after the second chunk: r1={r1}, r2={r2}"
+    );
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// Parser malformed-UTF-8 recovery emits both `U+FFFD` and the recovery
+/// byte's own emission in the correct visual order. Without the fix, the
+/// recovery byte's effect was dropped.
+#[tokio::test]
+async fn malformed_utf8_emits_recovery_and_next_byte() {
+    // E2 = lead byte of a 3-byte UTF-8 sequence (e.g. start of '╭').
+    // Following it with 'X' (not a continuation) should produce U+FFFD
+    // then 'X', rendered onto cells 0 and 1 respectively.
+    //
+    // Use `printf` with octal escapes so /bin/sh emits the raw bytes.
+    let (cmd, args, config) = build("printf '\\342X\\n'; exit 0");
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
+    session.attach_screen();
+
+    session
+        .expect_screen_contains("X", Duration::from_secs(3))
+        .await
+        .unwrap();
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+
+    let row0 = session
+        .screen()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .buffer()
+        .row_text(0);
+    let chars: Vec<char> = row0.chars().take(2).collect();
+    assert_eq!(
+        chars,
+        vec![std::char::REPLACEMENT_CHARACTER, 'X'],
+        "expected U+FFFD then 'X' in cells 0/1, got row0={row0:?}"
+    );
 }
 
 /// `send_paste` wraps text in bracketed-paste markers.

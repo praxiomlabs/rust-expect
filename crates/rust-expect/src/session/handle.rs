@@ -4,6 +4,8 @@
 //! to control spawned processes, send input, and expect output.
 
 use std::sync::Arc;
+#[cfg(feature = "screen")]
+use std::sync::{Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -18,6 +20,8 @@ use crate::dialog::{Dialog, DialogExecutor, DialogResult};
 use crate::error::{ExpectError, Result};
 use crate::expect::{ExpectState, MatchResult, Matcher, Pattern, PatternManager, PatternSet};
 use crate::interact::InteractBuilder;
+#[cfg(feature = "screen")]
+use crate::screen::Screen;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
 
 /// Callback invoked for every chunk of bytes read from the transport.
@@ -31,8 +35,12 @@ pub type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
 /// Opaque handle identifying a registered output tap. Returned by
 /// [`Session::add_output_tap`] and accepted by
 /// [`Session::remove_output_tap`].
+///
+/// The underlying id is `u128` so a hypothetical wraparound (~2^128
+/// registrations on the same session) is operationally impossible —
+/// removing a wrong tap by id collision can't happen in practice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TapId(u64);
+pub struct TapId(u128);
 
 impl std::fmt::Display for TapId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -49,9 +57,7 @@ impl std::fmt::Display for TapId {
 /// continue against the actual screen state — the screen contents are
 /// still valid; only the lock was tainted.
 #[cfg(feature = "screen")]
-fn lock_screen(
-    screen: &Arc<std::sync::Mutex<crate::screen::Screen>>,
-) -> std::sync::MutexGuard<'_, crate::screen::Screen> {
+fn lock_screen(screen: &Arc<StdMutex<Screen>>) -> MutexGuard<'_, Screen> {
     match screen.lock() {
         Ok(g) => g,
         Err(poison) => {
@@ -84,10 +90,10 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     /// stored as (id, callback) so they can be removed individually.
     output_taps: Vec<(TapId, OutputTap)>,
     /// Monotonic counter for assigning new `TapId`s.
-    next_tap_id: u64,
+    next_tap_id: u128,
     /// Attached virtual terminal screen, fed from an output tap.
     #[cfg(feature = "screen")]
-    screen: Option<Arc<std::sync::Mutex<crate::screen::Screen>>>,
+    screen: Option<Arc<StdMutex<Screen>>>,
     /// Tap id used to feed the attached screen, so `detach_screen` can
     /// remove only that tap and leave user-registered taps in place.
     #[cfg(feature = "screen")]
@@ -197,10 +203,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     pub fn attach_screen_with_dims(&mut self, rows: u16, cols: u16) {
         // Replace any previous screen + its tap so we don't leak callbacks.
         self.detach_screen();
-        let screen = Arc::new(std::sync::Mutex::new(crate::screen::Screen::new(
-            rows as usize,
-            cols as usize,
-        )));
+        let screen = Arc::new(StdMutex::new(Screen::new(rows as usize, cols as usize)));
         let screen_for_tap = screen.clone();
         let id = self.add_output_tap(move |chunk| {
             // Recover from poisoning so a panic elsewhere can't permanently
@@ -239,7 +242,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Available with the `screen` feature.
     #[cfg(feature = "screen")]
     #[must_use]
-    pub const fn screen(&self) -> Option<&Arc<std::sync::Mutex<crate::screen::Screen>>> {
+    pub const fn screen(&self) -> Option<&Arc<StdMutex<Screen>>> {
         self.screen.as_ref()
     }
 
@@ -377,11 +380,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// out of paste mode mid-payload. Callers that want to send such bytes
     /// should write them through the regular [`send`](Self::send) path.
     pub async fn send_paste(&mut self, text: &str) -> Result<()> {
-        if text
-            .as_bytes()
-            .windows(b"\x1b[201~".len())
-            .any(|w| w == b"\x1b[201~")
-        {
+        if memchr::memmem::find(text.as_bytes(), b"\x1b[201~").is_some() {
             return Err(ExpectError::PatternNotFound {
                 pattern: "send_paste".to_string(),
                 buffer:
@@ -517,10 +516,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     #[cfg(feature = "screen")]
     pub async fn expect_screen_contains(&mut self, needle: &str, timeout: Duration) -> Result<()> {
         let Some(screen) = self.screen.clone() else {
-            return Err(ExpectError::PatternNotFound {
-                pattern: needle.to_string(),
-                buffer: "<no screen attached>".to_string(),
-            });
+            return Err(ExpectError::ScreenNotAttached);
         };
 
         let start = tokio::time::Instant::now();
@@ -575,10 +571,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         timeout: Duration,
     ) -> Result<()> {
         let Some(screen) = self.screen.clone() else {
-            return Err(ExpectError::PatternNotFound {
-                pattern: format!("!{needle}"),
-                buffer: "<no screen attached>".to_string(),
-            });
+            return Err(ExpectError::ScreenNotAttached);
         };
 
         let start = tokio::time::Instant::now();
@@ -635,15 +628,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         max_wait: Duration,
     ) -> Result<()> {
         let Some(screen) = self.screen.clone() else {
-            return Err(ExpectError::PatternNotFound {
-                pattern: "<screen stability>".to_string(),
-                buffer: "<no screen attached>".to_string(),
-            });
+            return Err(ExpectError::ScreenNotAttached);
         };
 
         let start = tokio::time::Instant::now();
         let poll = Duration::from_millis(50);
-        let mut last_text = lock_screen(&screen).text();
+        let mut last_revision = lock_screen(&screen).revision();
         let mut last_change = tokio::time::Instant::now();
 
         loop {
@@ -661,9 +651,9 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 });
             }
             self.read_with_timeout(poll).await?;
-            let current = lock_screen(&screen).text();
-            if current != last_text {
-                last_text = current;
+            let current_revision = lock_screen(&screen).revision();
+            if current_revision != last_revision {
+                last_revision = current_revision;
                 last_change = tokio::time::Instant::now();
             }
         }
@@ -692,7 +682,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap_clone(chunk)));
                     if result.is_err() {
                         tracing::warn!(
-                            tap_id = id.0,
+                            %id,
                             "output tap panicked; the panic was caught and other taps continue"
                         );
                     }

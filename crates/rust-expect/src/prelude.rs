@@ -5,7 +5,7 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use rust_expect::prelude::*;
 //!
 //! #[tokio::main]

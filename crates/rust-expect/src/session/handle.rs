@@ -819,7 +819,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use rust_expect::{Session, InteractAction};
     ///
     /// #[tokio::main]
@@ -863,7 +863,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use rust_expect::{Session, Dialog, DialogStep};
     ///
     /// #[tokio::main]
@@ -914,7 +914,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use rust_expect::Session;
     ///
     /// #[tokio::main]
@@ -952,7 +952,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use rust_expect::{Session, Pattern};
     ///
     /// #[tokio::main]
@@ -1037,7 +1037,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use rust_expect::{Session, Pattern};
     ///
     /// #[tokio::main]
@@ -1105,7 +1105,7 @@ impl Session<AsyncPty> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use rust_expect::Session;
     ///
     /// #[tokio::main]
@@ -1239,7 +1239,7 @@ impl Session<WindowsAsyncPty> {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use rust_expect::Session;
     ///
     /// #[tokio::main]

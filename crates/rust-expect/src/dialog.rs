@@ -61,7 +61,7 @@
 //!
 //! ## Async Execution
 //!
-//! ```ignore
+//! ```no_run
 //! use rust_expect::{Session, Dialog, DialogStep};
 //!
 //! #[tokio::main]

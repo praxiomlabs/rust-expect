@@ -15,11 +15,11 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use rust_expect::prelude::*;
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), ExpectError> {
+//! async fn main() -> rust_expect::Result<()> {
 //!     let mut session = Session::spawn("/bin/bash", &[]).await?;
 //!     session.expect("$").await?;
 //!     session.send_line("echo hello").await?;

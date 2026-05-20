@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+## [0.1.0] - 2026-05-20
+
+Initial public release on crates.io. This is the first published version; the
+sections below consolidate the full pre-release development history.
+
 ### Changed
 
 - Updated development toolchain to Rust 1.92
 - MSRV remains at 1.88 for Edition 2024 and let chains support
+- `justfile` MSRV variable synced to 1.88 (was 1.85, drifted from `Cargo.toml`)
+- `rust-toolchain.toml` header clarifies the 1.92 pin is a dev convenience and
+  does not raise the published MSRV
+- Removed unused `crossterm` dependency from `rust-expect` and the workspace
 
 ### Fixed
 
@@ -129,28 +140,40 @@ here for archaeology and for anyone tracking the development branch.
   used `text()` comparison should switch to revision comparison for
   O(1) "did anything come in?" checks.
 
-## [0.1.0] - 2025-01-03
+### Release-prep polish (2026-05-20)
 
-### Added
+- README quick-start example now compiles against the real API
+  (`Session::spawn(prog, &[]).await?`, `send_line`, `result.matched` field)
+- Module-level doctests in `lib.rs`, `session.rs`, `prelude.rs`, and several
+  others converted from `ignore` to `no_run` so `cargo test --doc` now
+  compile-checks them. SSH/interact snippets that reference outdated
+  example-only APIs remain `ignore`d pending an example rewrite.
+- `ROADMAP.md` refreshed to reflect the current release-prep state and
+  the as-shipped feature set, including the TUI-driving primitives
+- All `unsafe` blocks across the workspace carry explicit SAFETY comments
+  describing the invariant the caller relies on
+- Production-path `.unwrap()` calls in `windows::async_adapter`,
+  `util::backpressure::time_until_reset`, `util::zerocopy::freeze`, and
+  `transcript::asciicast` escape parsing have been replaced with
+  `.expect(...)` carrying the local invariant
+- `ARCHITECTURE.md` header refreshed with a navigation note pointing first
+  readers at `README.md` and rustdoc
 
-- Initial release of rust-expect
+### Foundation (initial implementation)
+
+The following capabilities were built up during pre-release development and
+are part of the 0.1.0 baseline:
+
 - Core session management with async/await support
 - Pattern matching with literal, regex, and glob patterns
 - PTY (pseudo-terminal) support for Unix and Windows (ConPTY)
 - Dialog system for scripted interactions
 - Human-like typing simulation
-
-### Feature Modules
-
-- `ssh` - SSH session support via russh
-- `mock` - Mock sessions for testing
-- `screen` - Virtual terminal emulation with ANSI support
-- `pii-redaction` - Automatic PII masking in logs
-- `test-utils` - Testing utilities and fixtures
-- `metrics` - Performance monitoring
-
-### Crates
-
-- `rust-expect` - Main library
-- `rust-expect-macros` - Procedural macros
-- `rust-pty` - Low-level PTY abstraction
+- `ssh` feature — SSH session support via russh
+- `mock` feature — mock sessions for testing
+- `screen` feature — virtual terminal emulation with ANSI support
+- `pii-redaction` feature — automatic PII masking in logs
+- `test-utils` feature — testing utilities and fixtures
+- `metrics` feature — performance monitoring (Prometheus + OpenTelemetry)
+- Three publishable workspace crates: `rust-expect`, `rust-expect-macros`,
+  `rust-pty`

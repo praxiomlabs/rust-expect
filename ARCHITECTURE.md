@@ -1,10 +1,17 @@
 # rust-expect: Technical Architecture
 
 **Version:** 1.2.0
-**Date:** 2025-12-30
+**Date:** 2026-05-20
 **Status:** Authoritative
-**Dependency Versions:** As of December 2025
+**Dependency Versions:** As of May 2026
 **Aligns With:** REQUIREMENTS.md v1.2.0
+
+> **Navigation:** This document is intentionally long (≈8k lines) — it is the
+> authoritative reference for every subsystem, not an introduction. Use the
+> Table of Contents below to jump to the section you need; new contributors
+> should start with [README.md](README.md) and the per-crate rustdoc
+> (`cargo doc --workspace --open`) for orientation, then return here for
+> design intent and rationale.
 
 ---
 

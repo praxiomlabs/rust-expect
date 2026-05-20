@@ -11,7 +11,7 @@
 # Project metadata (from Cargo.toml)
 project_name := "rust-expect"
 version := "0.1.0"
-msrv := "1.85"
+msrv := "1.88"
 edition := "2024"
 
 # Main crate for default operations

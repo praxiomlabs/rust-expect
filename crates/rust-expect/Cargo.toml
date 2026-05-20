@@ -37,9 +37,6 @@ thiserror.workspace = true
 # Logging
 tracing.workspace = true
 
-# Terminal manipulation (for interactive mode)
-crossterm.workspace = true
-
 # Serialization (for transcripts and config)
 serde.workspace = true
 serde_json.workspace = true

@@ -94,7 +94,8 @@ pub fn decode_utf8_escape(bytes: &[u8]) -> EncodedText {
                 // Add the valid prefix
                 let valid_up_to = e.valid_up_to();
                 if valid_up_to > 0 {
-                    // Safe: from_utf8 confirmed these bytes are valid
+                    // SAFETY: `from_utf8` returned `Utf8Error::valid_up_to() == valid_up_to`,
+                    // which guarantees `bytes[i..i + valid_up_to]` is well-formed UTF-8.
                     result.push_str(unsafe {
                         std::str::from_utf8_unchecked(&bytes[i..i + valid_up_to])
                     });
@@ -134,6 +135,8 @@ pub fn decode_utf8_skip(bytes: &[u8]) -> EncodedText {
             Err(e) => {
                 let valid_up_to = e.valid_up_to();
                 if valid_up_to > 0 {
+                    // SAFETY: `valid_up_to` slice is guaranteed well-formed UTF-8 by
+                    // the contract of `std::str::Utf8Error::valid_up_to`.
                     result.push_str(unsafe {
                         std::str::from_utf8_unchecked(&bytes[i..i + valid_up_to])
                     });

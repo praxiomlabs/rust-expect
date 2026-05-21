@@ -1,8 +1,8 @@
 # rust-expect Roadmap
 
-**Version:** 1.0.0
-**Last Updated:** 2025-01-05
-**Status:** Feature Complete - Preparing for Release
+**Target Version:** 0.1.0 (initial crates.io release) → 1.0.0
+**Last Updated:** 2026-05-20
+**Status:** Feature-complete; release-prep polish landed; cutting v0.1.0
 
 ---
 
@@ -13,8 +13,8 @@ Each milestone builds on the previous, with clear exit criteria and deliverables
 
 ### Current Status
 
-The project has completed implementation of all planned features (Milestones 1-4). The library
-is feature-complete and ready for initial release. Key achievements:
+The project has completed implementation of all planned features (Milestones 1-4) and a
+round of release-hygiene polish (May 2026). Key achievements:
 
 - Cross-platform PTY support (Unix via rustix, Windows via ConPTY)
 - Async-first Session API with pattern matching
@@ -26,7 +26,9 @@ is feature-complete and ready for initial release. Key achievements:
 - PII detection and redaction with custom patterns
 - Prometheus and OpenTelemetry metrics export
 - Zero-copy I/O and mmap-backed large buffers
-- Comprehensive CI with cross-platform testing
+- TUI-driving primitives: output taps, screen-aware expects, bracketed paste, back-tab
+- Comprehensive CI with cross-platform testing (Linux/macOS/Windows × stable/beta/MSRV 1.88)
+- 864 passing tests, clippy clean (`all + pedantic + nursery`), all doctests compile-checked
 
 ### Benchmark Baselines (Captured 2025-01-02)
 
@@ -67,7 +69,7 @@ is feature-complete and ready for initial release. Key achievements:
 - [x] All core types have rustdoc examples
 - [x] Dialog execution works async
 - [x] Error messages include actionable buffer context
-- [ ] Windows CI passes all tests (pending validation run)
+- [x] Windows CI passes all tests
 
 ---
 

@@ -402,7 +402,9 @@ fn unescape_json(s: &str) -> String {
                     for _ in 0..4 {
                         if let Some(&c) = chars.peek() {
                             if c.is_ascii_hexdigit() {
-                                hex.push(chars.next().unwrap());
+                                hex.push(
+                                    chars.next().expect("peek confirmed a hex digit is present"),
+                                );
                             } else {
                                 break;
                             }

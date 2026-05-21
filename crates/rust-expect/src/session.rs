@@ -18,7 +18,7 @@
 //!
 //! ## Basic Usage
 //!
-//! ```ignore
+//! ```no_run
 //! use rust_expect::Session;
 //!
 //! #[tokio::main]
@@ -43,20 +43,26 @@
 //!
 //! ## Using the Builder
 //!
-//! ```ignore
-//! use rust_expect::SessionBuilder;
+//! ```no_run
+//! use rust_expect::{Session, SessionBuilder};
 //! use std::time::Duration;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), rust_expect::ExpectError> {
-//!     let mut session = SessionBuilder::new()
+//!     // Builder produces a SessionConfig; spawn via Session::spawn_with_config.
+//!     let config = SessionBuilder::new()
 //!         .command("/bin/bash")
-//!         .args(&["-l"])
+//!         .args(["-l"])
 //!         .timeout(Duration::from_secs(30))
 //!         .dimensions(120, 40)
 //!         .env("TERM", "xterm-256color")
-//!         .spawn()
-//!         .await?;
+//!         .build();
+//!
+//!     let mut session = Session::spawn_with_config(
+//!         &config.command,
+//!         &config.args.iter().map(String::as_str).collect::<Vec<_>>(),
+//!         config.clone(),
+//!     ).await?;
 //!
 //!     session.expect("$ ").await?;
 //!     Ok(())
@@ -65,7 +71,7 @@
 //!
 //! ## Multi-Pattern Matching
 //!
-//! ```ignore
+//! ```no_run
 //! use rust_expect::{Session, Pattern, PatternSet};
 //! use std::time::Duration;
 //!
@@ -77,10 +83,10 @@
 //!     let mut patterns = PatternSet::new();
 //!     patterns
 //!         .add(Pattern::literal("$ "))
-//!         .add(Pattern::literal("# "))
-//!         .add(Pattern::timeout(Duration::from_secs(5)));
+//!         .add(Pattern::literal("# "));
 //!
-//!     // Expect any of the patterns
+//!     // Expect any of the patterns; pass a bound via expect_timeout if needed.
+//!     let _ = Duration::from_secs(5);
 //!     let result = session.expect_any(&patterns).await?;
 //!     println!("Matched: {}", result.matched);
 //!     Ok(())

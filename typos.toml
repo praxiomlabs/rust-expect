@@ -1,0 +1,19 @@
+# Configuration for the `typos` spell checker (used by `just typos`).
+# https://github.com/crate-ci/typos
+#
+# Add rules here when typos surfaces a false positive in code that is
+# intentionally written that way (regex character classes, FFI names,
+# legacy spelling preserved for compatibility, etc.).
+
+[default.extend-words]
+# Part of the character class `[Ee]rror` inside the literal regex
+# `*[Ee]rror*` in expect/pattern.rs::Pattern::error_indicator. The lone
+# "rror" suffix is not a real typo.
+rror = "rror"
+
+[files]
+extend-exclude = [
+    "target/",
+    "Cargo.lock",
+    "*.lock",
+]

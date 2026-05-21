@@ -16,12 +16,16 @@
 //!
 //! # Example
 //!
-//! ```ignore
+//! ```no_run
 //! use rust_pty::unix::UnixPtySystem;
 //! use rust_pty::{PtySystem, PtyConfig};
 //!
+//! # async fn run() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = PtyConfig::default();
-//! let (master, child) = UnixPtySystem::spawn("/bin/bash", &[], &config).await?;
+//! let args: [&str; 0] = [];
+//! let (master, child) = UnixPtySystem::spawn("/bin/bash", args, &config).await?;
+//! # let _ = (master, child);
+//! # Ok(()) }
 //! ```
 
 mod buffer;

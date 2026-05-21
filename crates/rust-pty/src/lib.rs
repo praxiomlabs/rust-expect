@@ -10,7 +10,7 @@
 //!
 //! # Quick Start
 //!
-//! ```ignore
+//! ```no_run
 //! use rust_pty::{NativePtySystem, PtySystem, PtyConfig};
 //! use tokio::io::{AsyncReadExt, AsyncWriteExt};
 //!

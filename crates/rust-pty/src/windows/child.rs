@@ -269,6 +269,8 @@ where
     // Set up startup info with pseudo console
     let (startup_info, _attr_list) = create_startup_info(hpc)?;
 
+    // SAFETY: PROCESS_INFORMATION is plain-old-data; all-zero is a valid
+    // (uninitialized) state that CreateProcessW will overwrite on success.
     let mut process_info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
 
     // SAFETY: All pointers are valid and properly initialized
@@ -301,7 +303,10 @@ where
         CloseHandle(process_info.hThread);
     }
 
-    // Assign process to job
+    // Assign process to job.
+    // SAFETY: CreateProcessW succeeded above (FALSE-check at line 294 returned early),
+    // so process_info.hProcess is a freshly-opened, owned handle that we are taking
+    // sole ownership of.
     let process = unsafe { OwnedHandle::from_raw_handle(process_info.hProcess as RawHandle) };
 
     if let Some(ref job_handle) = job {
@@ -428,7 +433,9 @@ fn create_job_object() -> Result<Option<OwnedHandle>> {
         return Ok(None);
     }
 
-    // Configure job to kill child processes when job handle is closed
+    // Configure job to kill child processes when job handle is closed.
+    // SAFETY: JOBOBJECT_EXTENDED_LIMIT_INFORMATION is plain-old-data; zero-init is
+    // the documented starting state before setting LimitFlags below.
     let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
     info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
 
@@ -450,6 +457,8 @@ fn create_job_object() -> Result<Option<OwnedHandle>> {
         return Ok(None);
     }
 
+    // SAFETY: `job` is the handle returned by CreateJobObjectW above and is non-null
+    // (early return on null at line 427). Wrapping it in OwnedHandle transfers ownership.
     Ok(Some(unsafe {
         OwnedHandle::from_raw_handle(job as RawHandle)
     }))
@@ -495,6 +504,8 @@ fn create_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>)> {
         return Err(PtyError::Spawn(io::Error::last_os_error()));
     }
 
+    // SAFETY: STARTUPINFOEXW is plain-old-data; zero-init is the documented
+    // baseline. cb and lpAttributeList are set on the next two lines.
     let mut startup_info: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     startup_info.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     startup_info.lpAttributeList = attr_list.as_mut_ptr() as *mut _;

@@ -1,4 +1,7 @@
-# rust-expect requires Rust 1.88+ for Edition 2024 and let chains support
+# Development toolchain pinned to 1.92 for consistent local/CI builds and to
+# unlock unstable rustfmt options (e.g., `imports_granularity`). The published
+# MSRV is 1.88 (see `workspace.package.rust-version` in Cargo.toml) — this
+# pin does not raise what consumers of the crate must satisfy.
 # https://doc.rust-lang.org/edition-guide/rust-2024/index.html
 
 [toolchain]

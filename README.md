@@ -25,30 +25,29 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-expect = "0.1"
+rust-expect = "0.2"
 ```
 
 ### Basic Example
 
-```rust
+```rust,no_run
 use rust_expect::prelude::*;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Spawn a new session
-    let mut session = Session::spawn("bash")?;
+    let mut session = Session::spawn("/bin/bash", &[]).await?;
 
     // Wait for prompt and send command
     session.expect("$ ").await?;
-    session.send("echo 'Hello, World!'\n").await?;
+    session.send_line("echo 'Hello, World!'").await?;
 
     // Expect the output
     let result = session.expect("Hello, World!").await?;
-    println!("Matched: {}", result.matched());
+    println!("Matched: {}", result.matched);
 
     // Clean exit
-    session.send("exit\n").await?;
+    session.send_line("exit").await?;
     session.expect_eof().await?;
 
     Ok(())
@@ -57,7 +56,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Using Dialogs
 
-```rust
+```rust,no_run
 use rust_expect::prelude::*;
 use rust_expect::dialog::{Dialog, DialogStep};
 
@@ -68,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .step(DialogStep::expect("password: ").then_send("secret\n"))
         .step(DialogStep::expect("$ "));
 
-    let mut session = Session::spawn("login_program")?;
+    let mut session = Session::spawn("login_program", &[]).await?;
     session.run_dialog(&dialog).await?;
 
     Ok(())
@@ -136,23 +135,24 @@ driving against third-party applications.
 
 ### Pattern Matching
 
-```rust
+```rust,no_run
 use rust_expect::expect::{Pattern, PatternSet};
 
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
 // Literal string
-let pattern = Pattern::literal("hello");
+let _pattern = Pattern::literal("hello");
 
 // Regular expression
-let pattern = Pattern::regex(r"\d{3}-\d{4}")?;
+let _pattern = Pattern::regex(r"\d{3}-\d{4}")?;
 
 // Glob pattern
-let pattern = Pattern::glob("Error: *");
+let _pattern = Pattern::glob("Error: *");
 
-// Multiple patterns
+// Multiple patterns — timeout is supplied to `expect_timeout`, not as a Pattern.
 let mut patterns = PatternSet::new();
 patterns.add(Pattern::literal("success"));
 patterns.add(Pattern::literal("failure"));
-patterns.add(Pattern::timeout(Duration::from_secs(10)));
+# Ok(()) }
 ```
 
 ## Feature Flags
@@ -171,7 +171,7 @@ Enable features in `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-expect = { version = "0.1", features = ["ssh", "screen"] }
+rust-expect = { version = "0.2", features = ["ssh", "screen"] }
 ```
 
 ## Crates

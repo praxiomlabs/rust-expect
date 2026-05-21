@@ -105,8 +105,13 @@ impl AsyncRead for WindowsPtyMaster {
             return Poll::Ready(Ok(())); // EOF
         }
 
-        // Check current state
-        let mut state = this.pending_read.lock().unwrap();
+        // Check current state. The pending_read mutex only guards Idle/InProgress/Ready
+        // state transitions; nothing held under it can panic, so poisoning is unreachable
+        // in practice — surface it loudly if the invariant ever breaks.
+        let mut state = this
+            .pending_read
+            .lock()
+            .expect("pending_read mutex poisoned: no panicking op runs while held");
         match std::mem::replace(&mut *state, PendingReadState::Idle) {
             PendingReadState::Idle => {
                 // Start a new blocking read operation
@@ -159,8 +164,11 @@ impl AsyncRead for WindowsPtyMaster {
                     .map_err(io::Error::other)
                     .and_then(|r| r);
 
-                    // Store result and wake
-                    let mut state = pending_read.lock().unwrap();
+                    // Store result and wake. Same poisoning invariant as the poll_read
+                    // acquisition above.
+                    let mut state = pending_read
+                        .lock()
+                        .expect("pending_read mutex poisoned: no panicking op runs while held");
                     let waker =
                         match std::mem::replace(&mut *state, PendingReadState::Ready(result)) {
                             PendingReadState::InProgress(waker) => waker,

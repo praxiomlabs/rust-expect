@@ -37,26 +37,20 @@ thiserror.workspace = true
 # Logging
 tracing.workspace = true
 
-# Serialization (for transcripts and config)
-serde.workspace = true
+# Serialization (for transcripts)
 serde_json.workspace = true
-toml.workspace = true
 
 # Random number generation (for human typing simulation)
 rand.workspace = true
 
 # Futures utilities for async combinators
 futures.workspace = true
-tokio-stream.workspace = true
 
 # Zero-copy byte buffers
 bytes.workspace = true
 
 # libc for low-level Unix operations
 libc.workspace = true
-
-# ANSI parsing (optional, for screen buffer)
-vte = { workspace = true, optional = true }
 
 # Bitflags for terminal attributes (screen buffer)
 bitflags = { workspace = true, optional = true }
@@ -106,7 +100,7 @@ ssh = ["dep:russh"]
 mock = []
 
 # Enable screen buffer with ANSI parsing
-screen = ["dep:vte", "dep:bitflags"]
+screen = ["dep:bitflags"]
 
 # Enable PII detection and redaction
 pii-redaction = []
@@ -134,3 +128,14 @@ insecure-skip-verify = []
 
 # Enable all optional features (excludes insecure-skip-verify for safety)
 full = ["ssh", "mock", "screen", "pii-redaction", "metrics"]
+
+# Examples that depend on optional features must declare them so
+# `cargo build/test --features <other>` skips them rather than failing to
+# resolve `main` after the file gets cfg'd out.
+[[example]]
+name = "drive_htop"
+required-features = ["screen"]
+
+[[example]]
+name = "drive_less"
+required-features = ["screen"]

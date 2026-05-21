@@ -23,9 +23,6 @@ tokio.workspace = true
 # Error handling
 thiserror.workspace = true
 
-# Logging
-tracing.workspace = true
-
 # Unix-specific dependencies
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

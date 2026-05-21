@@ -9,10 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No unreleased changes._
 
-## [0.1.0] - 2026-05-20
+## [0.2.0] - 2026-05-20
 
-Initial public release on crates.io. This is the first published version; the
-sections below consolidate the full pre-release development history.
+Second public release. Contains breaking changes versus 0.1.0; see the
+**Breaking changes** section below. Pre-1.0 semver allows breaking changes
+in minor versions ([RELEASING.md §Version Numbering](RELEASING.md#version-numbering)).
+
+### Breaking changes
+
+- `ExpectError` is now `#[non_exhaustive]`. Exhaustive `match` arms over it
+  without a wildcard will no longer compile; add `_ => {}` or handle the
+  new variants explicitly.
+- New `ExpectError` variants: `ScreenNotAttached` (screen-aware methods
+  called without `attach_screen`) and `InvalidInput { api, reason }`
+  (caller-supplied input rejected before any I/O).
+- `screen::AnsiParser::parse(byte)` signature changed from
+  `Option<ParseResult>` to `[Option<ParseResult>; 2]`. The second slot is
+  populated only on UTF-8 malformed-sequence recovery so both the `U+FFFD`
+  replacement and the recovery byte's own effect are emitted in the correct
+  visual order. Callers iterate via `.into_iter().flatten()`.
+  `Screen::process` already does this; direct `AnsiParser` consumers need
+  a one-line change.
+- `backend::PtyConfig` gained an `env: HashMap<String, String>` field used
+  to plumb `SessionBuilder::env()` values through to the spawned child.
+  Construction via `PtyConfig { .. }` literal (rather than the builder /
+  `Default::default()`) now requires the new field. `#[non_exhaustive]`
+  prevents this kind of break going forward.
+- `Session::add_output_tap` now returns a `TapId` (was `()`). Existing call
+  sites that ignore the return value continue to compile; sites that want
+  to deregister later capture the id.
 
 ### Changed
 
@@ -22,6 +47,9 @@ sections below consolidate the full pre-release development history.
 - `rust-toolchain.toml` header clarifies the 1.92 pin is a dev convenience and
   does not raise the published MSRV
 - Removed unused `crossterm` dependency from `rust-expect` and the workspace
+- `.cargo/audit.toml` advisory ignore list synced with `deny.toml` so both
+  security tools agree (eight transitive russh-stack advisories with the
+  same documented rationale appear in both files)
 
 ### Fixed
 
@@ -93,8 +121,9 @@ integration coverage.
   `Screen::revision() -> u64` is a cheap monotonic counter that bumps
   once per `process()` call. `wait_screen_stable` polls this counter
   instead of materializing `screen.text()` every 50 ms.
-- `TapId` is now backed by `u128` (was `u64`), making id collision via
-  wraparound operationally impossible. Implements `fmt::Display` for
+- `TapId` is backed by `u64` and uses a non-wrapping `+= 1` increment so a
+  hypothetical exhaustion would surface as a loud panic instead of silently
+  colliding with a still-registered tap. Implements `fmt::Display` for
   ergonomic logging in downstream observability.
 - The screen `AnsiParser::parse(byte)` signature changed from
   `Option<ParseResult>` to `[Option<ParseResult>; 2]` to correctly emit
@@ -114,33 +143,7 @@ integration coverage.
   breaks — callers must either re-introduce a single-threaded fork
   helper or switch to `posix_spawn`/`execve(envp)`.
 
-### API changes within this release
-
-These changes happened entirely within the unreleased `[Unreleased]` cycle
-and therefore do not affect any published version. They are documented
-here for archaeology and for anyone tracking the development branch.
-
-- `ExpectError` is now `#[non_exhaustive]`. Exhaustive `match` arms over
-  it without a wildcard will no longer compile; add `_ => {}` (or handle
-  the new variants explicitly).
-- New `ExpectError` variants: `ScreenNotAttached` (screen-aware methods
-  called without `attach_screen`) and `InvalidInput { api, reason }`
-  (caller-supplied input rejected before any I/O).
-- `screen::AnsiParser::parse(byte)` signature changed from
-  `Option<ParseResult>` to `[Option<ParseResult>; 2]`. The second slot
-  is populated only on UTF-8 malformed-sequence recovery so both the
-  `U+FFFD` replacement and the recovery byte's own effect are emitted in
-  the correct visual order. Callers iterate via `.into_iter().flatten()`.
-  `Screen::process` already does this; direct `AnsiParser` consumers
-  need a one-line change.
-- `Session::add_output_tap` now returns a `TapId` (was `()`). Existing
-  call sites that ignore the return value continue to compile; sites
-  that want to deregister later capture the id.
-- `Screen` has a new `revision()` accessor. Screen-state polling that
-  used `text()` comparison should switch to revision comparison for
-  O(1) "did anything come in?" checks.
-
-### Release-prep polish (2026-05-20)
+### Release-prep polish
 
 - README quick-start example now compiles against the real API
   (`Session::spawn(prog, &[]).await?`, `send_line`, `result.matched` field)
@@ -159,21 +162,28 @@ here for archaeology and for anyone tracking the development branch.
 - `ARCHITECTURE.md` header refreshed with a navigation note pointing first
   readers at `README.md` and rustdoc
 
-### Foundation (initial implementation)
+## [0.1.0] - 2025-01-03
 
-The following capabilities were built up during pre-release development and
-are part of the 0.1.0 baseline:
+### Added
 
+- Initial release of rust-expect
 - Core session management with async/await support
 - Pattern matching with literal, regex, and glob patterns
 - PTY (pseudo-terminal) support for Unix and Windows (ConPTY)
 - Dialog system for scripted interactions
 - Human-like typing simulation
-- `ssh` feature — SSH session support via russh
-- `mock` feature — mock sessions for testing
-- `screen` feature — virtual terminal emulation with ANSI support
-- `pii-redaction` feature — automatic PII masking in logs
-- `test-utils` feature — testing utilities and fixtures
-- `metrics` feature — performance monitoring (Prometheus + OpenTelemetry)
-- Three publishable workspace crates: `rust-expect`, `rust-expect-macros`,
-  `rust-pty`
+
+### Feature Modules
+
+- `ssh` - SSH session support via russh
+- `mock` - Mock sessions for testing
+- `screen` - Virtual terminal emulation with ANSI support
+- `pii-redaction` - Automatic PII masking in logs
+- `test-utils` - Testing utilities and fixtures
+- `metrics` - Performance monitoring
+
+### Crates
+
+- `rust-expect` - Main library
+- `rust-expect-macros` - Procedural macros
+- `rust-pty` - Low-level PTY abstraction

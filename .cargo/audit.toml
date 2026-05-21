@@ -1,8 +1,14 @@
 # cargo-audit configuration
 # https://rustsec.org/
+#
+# This file MUST stay in sync with `deny.toml`'s `[advisories].ignore` list.
+# Both tools surface the same RustSec advisories; `cargo audit` is run by the
+# `just audit` recipe and `cargo deny check` is run by `just deny`. Drift
+# between them is the most common cause of release-check false positives.
 
 [advisories]
-# Advisories to ignore
+# Advisories to ignore. Each entry below is mirrored in deny.toml with the
+# same rationale; update both together.
 ignore = [
     # Transitive dependency via russh -> rsa. No fix available upstream.
     # The Marvin Attack (timing sidechannel for RSA key recovery) requires
@@ -10,4 +16,29 @@ ignore = [
     # latency for SSH use cases.
     # Tracking: https://github.com/RustCrypto/RSA/issues/19
     "RUSTSEC-2023-0071",
+    # AWS-LC timing/CRL/PKCS7/X.509 advisories. All transitive through russh's
+    # TLS/crypto stack. Fixes exist in newer aws-lc-rs versions but pulling
+    # them in requires bumping russh's pinned rsa dep, which breaks
+    # internal-russh-forked-ssh-key 0.6.16. Re-evaluate on next russh release.
+    "RUSTSEC-2026-0044",
+    "RUSTSEC-2026-0045",
+    "RUSTSEC-2026-0046",
+    "RUSTSEC-2026-0047",
+    "RUSTSEC-2026-0048",
+    # bytes BytesMut::reserve integer overflow. Direct dep but the buggy
+    # path requires constructing buffers near isize::MAX, which the matcher
+    # caps at the buffer.max_size config. Bumping bytes to 1.x+ needs to be
+    # coordinated with tokio's pinned version.
+    "RUSTSEC-2026-0007",
+    # cmov non-constant-time on ARM32. Transitive via russh's RSA stack.
+    # rust-expect doesn't target ARM32 in CI or release builds.
+    "RUSTSEC-2026-0003",
+    # libcrux-sha3 incremental SHAKE squeeze. Transitive via russh's
+    # post-quantum KEM; the affected squeeze pattern is not on the
+    # handshake path.
+    "RUSTSEC-2026-0074",
+    # rand 0.9 unsound when used with a custom logger that calls rand::rng().
+    # rust-expect uses rand only for HumanTyper, which never installs a
+    # custom logger.
+    "RUSTSEC-2026-0097",
 ]

@@ -1,7 +1,7 @@
 # Releasing rust-expect
 
-**Version:** 0.1.0
-**Last Updated:** 2025-01-03
+**Version:** 0.2.0
+**Last Updated:** 2026-05-20
 **Workspace Crates:** 3 (rust-pty, rust-expect-macros, rust-expect)
 **Status:** Pre-release
 
@@ -34,7 +34,7 @@
 just release-check
 just ci-status-all
 just tag
-git push origin v0.1.0
+git push origin v0.2.0
 
 # ❌ WRONG: Manual cargo publish
 cargo publish -p rust-pty  # NEVER DO THIS
@@ -161,9 +161,9 @@ MAJOR.MINOR.PATCH
 
 | Crate | Version | Stability |
 |-------|---------|-----------|
-| rust-pty | 0.1.0 | Pre-stable |
-| rust-expect-macros | 0.1.0 | Pre-stable |
-| rust-expect | 0.1.0 | Pre-stable |
+| rust-pty | 0.2.0 | Pre-stable |
+| rust-expect-macros | 0.2.0 | Pre-stable |
+| rust-expect | 0.2.0 | Pre-stable |
 
 ### Version Synchronization
 
@@ -296,7 +296,7 @@ just tag
 # Review the tag message
 
 # 5. Push tag to trigger automated release
-git push origin v0.1.0
+git push origin v0.2.0
 
 # 6. Monitor the release workflow
 gh run watch

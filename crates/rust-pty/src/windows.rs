@@ -28,12 +28,16 @@ mod pipes;
 
 use std::ffi::OsStr;
 use std::future::Future;
+use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use async_adapter::WindowsPtyMaster;
 pub use child::{WindowsPtyChild, spawn_child};
 pub use conpty::{ConPty, is_conpty_available};
 pub use pipes::{PipePair, create_input_pipe, create_output_pipe, set_inheritable};
+use windows_sys::Win32::Foundation::HANDLE;
+use windows_sys::Win32::System::Threading::{INFINITE, WaitForSingleObject};
 
 use crate::config::{PtyConfig, WindowSize};
 use crate::error::{PtyError, Result};
@@ -106,9 +110,48 @@ impl PtySystem for WindowsPtySystem {
                 window_size,
             );
 
+            // Wire up exit detection.
+            //
+            // ConPTY keeps the output pipe open for the lifetime of the pseudo
+            // console (held here by `conpty`), so the child's exit is *not*
+            // observable by reading the pipe — a reader would block forever and
+            // `wait()`/`expect_eof()` would never return. Spawn a watcher thread
+            // that blocks on the child process handle and, once the child exits,
+            // closes the pseudo console (delivering EOF to readers and unblocking
+            // any in-flight `ReadFile`) and clears the master's open flag (so
+            // post-exit writes fail with `BrokenPipe` rather than being silently
+            // buffered into a dead PTY).
+            let watch_handle = child.duplicate_process_handle()?;
+            spawn_exit_watcher(watch_handle, Arc::clone(&conpty), master.open_flag());
+
             Ok((master, child))
         }
     }
+}
+
+/// Spawn a background thread that closes the pseudo console once the child exits.
+///
+/// The thread blocks on the (duplicated) process handle, so it consumes no CPU
+/// while the child runs. When the session is dropped while the child is still
+/// alive, the child's job object kills it (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`),
+/// which signals the handle and lets this thread finish — it does not leak.
+fn spawn_exit_watcher(process: OwnedHandle, conpty: Arc<ConPty>, open: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        let handle = process.as_raw_handle() as HANDLE;
+        // SAFETY: `handle` is a valid process handle kept alive by `process`
+        // for the duration of this call. INFINITE blocks until the child exits.
+        unsafe {
+            WaitForSingleObject(handle, INFINITE);
+        }
+
+        // Child has exited. Close the pseudo console first so conhost exits and
+        // the output pipe breaks, then mark the transport closed. Order matters:
+        // closing the console unblocks any reader currently parked in `ReadFile`.
+        conpty.close();
+        open.store(false, Ordering::SeqCst);
+
+        // `process` (the duplicated handle) is closed here when it drops.
+    });
 }
 
 /// Convenience type alias for the default PTY system on Windows.

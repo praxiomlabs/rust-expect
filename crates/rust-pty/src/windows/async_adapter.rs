@@ -80,6 +80,16 @@ impl WindowsPtyMaster {
         }
     }
 
+    /// Get a clone of the shared "open" flag.
+    ///
+    /// The exit watcher clears this when the child exits, which makes
+    /// subsequent reads short-circuit to EOF and subsequent writes fail with
+    /// `BrokenPipe` instead of being silently buffered into a dead PTY.
+    #[must_use]
+    pub fn open_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.open)
+    }
+
     /// Create without resize support.
     pub fn without_resize(input: OwnedHandle, output: OwnedHandle) -> Self {
         Self {

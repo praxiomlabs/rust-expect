@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{io, ptr};
 
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
 use windows_sys::Win32::System::Console::HPCON;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -20,9 +20,10 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, TerminateJobObject,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-    INFINITE, InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-    PROCESS_INFORMATION, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
+    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTUPINFOEXW,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 /// Windows BOOL type (i32 in windows-sys 0.61+)
@@ -73,9 +74,53 @@ impl WindowsPtyChild {
     }
 
     /// Check if the process is still running.
+    ///
+    /// This performs a non-blocking peek at the process handle rather than
+    /// relying solely on the cached `running` flag, so it reports the truth
+    /// immediately after the child exits — even before the exit watcher thread
+    /// (or an explicit `wait`/`try_wait`) has had a chance to observe it.
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
+        if !self.running.load(Ordering::SeqCst) {
+            return false;
+        }
+
+        let handle = self.process.as_raw_handle() as HANDLE;
+        // SAFETY: handle is a valid process handle owned by self. A zero timeout
+        // makes this a non-blocking state query.
+        let signaled = unsafe { WaitForSingleObject(handle, 0) } == WAIT_OBJECT_0;
+        if signaled {
+            self.running.store(false, Ordering::SeqCst);
+        }
+        !signaled
+    }
+
+    /// Duplicate the process handle into a new owned handle.
+    ///
+    /// Used to hand a process handle to the exit-watcher thread so it can
+    /// outlive (or run independently of) this `WindowsPtyChild` without racing
+    /// on the original handle's ownership.
+    pub fn duplicate_process_handle(&self) -> Result<OwnedHandle> {
+        let mut dup: HANDLE = ptr::null_mut();
+        // SAFETY: source and target process handles come from GetCurrentProcess
+        // (pseudo-handles, always valid), the source handle is owned by self,
+        // and `dup` is a valid out-pointer.
+        let ok = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                self.process.as_raw_handle() as HANDLE,
+                GetCurrentProcess(),
+                &mut dup,
+                0,
+                FALSE,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if ok == FALSE {
+            return Err(PtyError::Spawn(io::Error::last_os_error()));
+        }
+        // SAFETY: DuplicateHandle succeeded, so `dup` is a fresh owned handle.
+        Ok(unsafe { OwnedHandle::from_raw_handle(dup as RawHandle) })
     }
 
     /// Wait for the child process to exit.

@@ -4,6 +4,7 @@
 //! Pseudo Console API introduced in Windows 10 1809.
 
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows_sys::Win32::Foundation::{HANDLE, S_OK};
 use windows_sys::Win32::System::Console::{
@@ -25,6 +26,12 @@ pub struct ConPty {
     /// Pipe handles passed to CreatePseudoConsole that must be closed after child spawn.
     /// These are kept alive until close_pty_pipes() is called.
     pty_pipes: Option<(OwnedHandle, OwnedHandle)>,
+    /// Whether `ClosePseudoConsole` has already been called for `handle`.
+    ///
+    /// The pseudo console is closed eagerly by the exit watcher when the child
+    /// exits (to deliver EOF to readers) and again from `Drop`. This guard makes
+    /// `close()` idempotent so the HPCON is never double-freed.
+    closed: AtomicBool,
 }
 
 // SAFETY: ConPTY handles can be safely sent between threads
@@ -88,7 +95,28 @@ impl ConPty {
             input_write,
             output_read,
             pty_pipes: Some((input_read, output_write)),
+            closed: AtomicBool::new(false),
         })
+    }
+
+    /// Close the pseudo console, releasing its resources.
+    ///
+    /// Calling `ClosePseudoConsole` causes the backing console host to exit,
+    /// which closes its end of the output pipe. Any reader blocked in `ReadFile`
+    /// on the output pipe is unblocked and observes EOF (`ERROR_BROKEN_PIPE`).
+    /// This is how a child's exit becomes observable at the I/O layer — ConPTY
+    /// does not break the output pipe merely because the child process exits.
+    ///
+    /// Idempotent: the underlying `ClosePseudoConsole` runs at most once, so it
+    /// is safe to call from both the exit watcher and `Drop`.
+    pub fn close(&self) {
+        if !self.closed.swap(true, Ordering::SeqCst) {
+            // SAFETY: handle was obtained from CreatePseudoConsole and has not
+            // been closed before (guarded by the `closed` swap above).
+            unsafe {
+                ClosePseudoConsole(self.handle);
+            }
+        }
     }
 
     /// Close the PTY pipe handles after child process is spawned.
@@ -125,6 +153,15 @@ impl ConPty {
     ///
     /// Returns an error if the resize operation fails.
     pub fn resize(&self, size: WindowSize) -> Result<()> {
+        // The HPCON is freed once `close()` runs (on child exit or drop); resizing
+        // it afterwards would be a use-after-free. Refuse instead.
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(PtyError::Windows {
+                message: "cannot resize: pseudo console is closed".into(),
+                code: 0,
+            });
+        }
+
         let coord = COORD {
             X: size.cols as i16,
             Y: size.rows as i16,
@@ -146,10 +183,8 @@ impl ConPty {
 
 impl Drop for ConPty {
     fn drop(&mut self) {
-        // SAFETY: handle was obtained from CreatePseudoConsole
-        unsafe {
-            ClosePseudoConsole(self.handle);
-        }
+        // Idempotent: a no-op if the exit watcher already closed the console.
+        self.close();
     }
 }
 

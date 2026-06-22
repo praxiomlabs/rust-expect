@@ -9,8 +9,10 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+use crate::backend::ChildExit;
 use crate::config::SessionConfig;
 use crate::error::{ExpectError, Result, SpawnError};
+use crate::types::ProcessExitStatus;
 
 /// A PTY-based transport for local process communication.
 pub struct PtyTransport {
@@ -381,8 +383,8 @@ impl PtySpawner {
                 unsafe {
                     libc::close(master_fd);
                     libc::setsid();
-                    // Cast TIOCSCTTY to c_ulong for macOS compatibility (u32 -> u64)
-                    libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::c_ulong, 0);
+                    // Widen TIOCSCTTY to c_ulong for macOS compatibility (u32 -> u64).
+                    libc::ioctl(slave_fd, libc::c_ulong::from(libc::TIOCSCTTY), 0);
 
                     libc::dup2(slave_fd, 0);
                     libc::dup2(slave_fd, 1);
@@ -680,6 +682,12 @@ pub struct AsyncPty {
     pid: u32,
     /// Terminal dimensions.
     dimensions: (u16, u16),
+    /// Cached exit status, set once the child has been reaped.
+    ///
+    /// `waitpid` is not idempotent — a second reap of an already-collected
+    /// child fails with `ECHILD` — so the first observed status is cached here
+    /// and returned by all subsequent `try_wait`/`is_running` calls.
+    exit_status: Option<ProcessExitStatus>,
 }
 
 #[cfg(unix)]
@@ -704,7 +712,57 @@ impl AsyncPty {
             inner,
             pid,
             dimensions,
+            exit_status: None,
         })
+    }
+
+    /// Non-blocking reap of the child process.
+    ///
+    /// Returns `Some(status)` if the child has exited (caching it for future
+    /// calls), or `None` while it is still running. A child reaped elsewhere
+    /// (`ECHILD`) is reported as exited with [`ProcessExitStatus::Unknown`],
+    /// since its real code is no longer recoverable.
+    #[allow(unsafe_code)]
+    pub fn try_wait(&mut self) -> Option<ProcessExitStatus> {
+        if let Some(status) = self.exit_status {
+            return Some(status);
+        }
+
+        let mut raw: libc::c_int = 0;
+        loop {
+            // SAFETY: self.pid is a valid PID from fork(); &raw mut raw is a
+            // valid out-pointer; WNOHANG makes this a non-blocking query.
+            let result = unsafe { libc::waitpid(self.pid as i32, &raw mut raw, libc::WNOHANG) };
+
+            if result == 0 {
+                // Child still running.
+                return None;
+            }
+
+            if result == -1 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    continue; // EINTR — retry the syscall.
+                }
+                // ECHILD (already reaped) or another error: the child is gone
+                // but its real status is unrecoverable.
+                let status = ProcessExitStatus::Unknown;
+                self.exit_status = Some(status);
+                return Some(status);
+            }
+
+            let status = decode_wait_status(raw);
+            self.exit_status = Some(status);
+            return Some(status);
+        }
+    }
+
+    /// Check whether the child process is still running.
+    ///
+    /// Non-blocking: performs a `waitpid(WNOHANG)` peek, so it reports the truth
+    /// immediately after the child exits. Mirrors `WindowsAsyncPty::is_running`.
+    pub fn is_running(&mut self) -> bool {
+        self.try_wait().is_none()
     }
 
     /// Get the process ID.
@@ -869,7 +927,32 @@ impl std::fmt::Debug for AsyncPty {
             .field("fd", self.inner.get_ref())
             .field("pid", &self.pid)
             .field("dimensions", &self.dimensions)
+            .field("exit_status", &self.exit_status)
             .finish()
+    }
+}
+
+#[cfg(unix)]
+impl ChildExit for AsyncPty {
+    fn try_exit_status(&mut self) -> Option<ProcessExitStatus> {
+        self.try_wait()
+    }
+}
+
+/// Decode a raw `waitpid` status word into a [`ProcessExitStatus`].
+///
+/// Distinguishes a normal exit (`WIFEXITED` → `Exited(code)`) from termination
+/// by a signal (`WIFSIGNALED` → `Signaled(sig)`), preserving the raw signal
+/// number rather than collapsing it into `128 + sig`.
+#[cfg(unix)]
+const fn decode_wait_status(raw: libc::c_int) -> ProcessExitStatus {
+    if libc::WIFEXITED(raw) {
+        ProcessExitStatus::Exited(libc::WEXITSTATUS(raw))
+    } else if libc::WIFSIGNALED(raw) {
+        ProcessExitStatus::Signaled(libc::WTERMSIG(raw))
+    } else {
+        // Stopped/continued: the child has not actually terminated.
+        ProcessExitStatus::Unknown
     }
 }
 
@@ -939,6 +1022,22 @@ impl WindowsAsyncPty {
         self.child
             .kill()
             .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
+    }
+}
+
+#[cfg(windows)]
+impl ChildExit for WindowsAsyncPty {
+    fn try_exit_status(&mut self) -> Option<ProcessExitStatus> {
+        // WindowsPtyChild::try_wait peeks GetExitCodeProcess without blocking and
+        // returns the real status once the child has exited. The exit watcher
+        // installed by rust-pty guarantees EOF is delivered to readers, so by the
+        // time Session::wait reaches here the child has typically already exited.
+        match self.child.try_wait() {
+            Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
+            Ok(Some(rust_pty::ExitStatus::Signaled(sig))) => Some(ProcessExitStatus::Signaled(sig)),
+            // Still running, or status unrecoverable.
+            Ok(None) | Err(_) => None,
+        }
     }
 }
 

@@ -17,6 +17,26 @@ pub use pty::{WindowsAsyncPty, WindowsPtyHandle};
 #[cfg(feature = "ssh")]
 pub mod ssh;
 
+/// Reaping/liveness probe for a transport that wraps a child process.
+///
+/// `Session::wait`/`wait_timeout` use this to report the child's *real* exit
+/// status after EOF, rather than [`ProcessExitStatus::Unknown`]. Transports
+/// that are not backed by a local child process (SSH channels, mock streams)
+/// rely on the default implementation, which reports `None` (status unknowable)
+/// and so leaves the session reporting `Unknown` — exactly the prior behavior.
+///
+/// [`ProcessExitStatus::Unknown`]: crate::types::ProcessExitStatus::Unknown
+pub trait ChildExit {
+    /// Non-blocking reap.
+    ///
+    /// Returns `Some(status)` once the child has exited and been reaped (the
+    /// status is cached, so repeated calls keep returning it), or `None` while
+    /// the child is still running or its status cannot be determined.
+    fn try_exit_status(&mut self) -> Option<crate::types::ProcessExitStatus> {
+        None
+    }
+}
+
 /// Trait for session backends.
 pub trait Backend {
     /// The transport type produced by this backend.

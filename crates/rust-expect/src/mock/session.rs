@@ -73,6 +73,10 @@ pub struct MockTransport {
     state: Arc<Mutex<MockState>>,
 }
 
+// A mock transport has no child process, so `wait`/`wait_timeout` report
+// `ProcessExitStatus::Unknown` via the default `ChildExit` implementation.
+impl crate::backend::ChildExit for MockTransport {}
+
 impl MockTransport {
     /// Create a new mock transport.
     #[must_use]

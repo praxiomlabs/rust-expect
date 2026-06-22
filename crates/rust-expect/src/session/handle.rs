@@ -11,6 +11,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
+use crate::backend::ChildExit;
 #[cfg(unix)]
 use crate::backend::{AsyncPty, PtyConfig, PtySpawner};
 #[cfg(windows)]
@@ -104,6 +105,27 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     /// `wait_screen_stable`). 50 ms by default.
     #[cfg(feature = "screen")]
     screen_poll_interval: Duration,
+}
+
+/// Whether a write error means the child/peer is gone (the PTY slave end
+/// closed, or the pipe broke) as opposed to a transient or unexpected failure.
+///
+/// After the slave closes, a write to the PTY master fails with `EIO` on Unix —
+/// which `std` reports as an uncategorized kind, so we match the raw code — and
+/// with `BrokenPipe` on Windows.
+fn write_error_means_closed(err: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    if matches!(
+        err.kind(),
+        ErrorKind::BrokenPipe | ErrorKind::ConnectionReset
+    ) {
+        return true;
+    }
+    #[cfg(unix)]
+    if err.raw_os_error() == Some(libc::EIO) {
+        return true;
+    }
+    false
 }
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
@@ -332,23 +354,37 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the write fails.
+    /// Returns [`ExpectError::SessionClosed`] if the child has already exited
+    /// (so the write would go to a dead PTY), or an I/O error if the write
+    /// otherwise fails.
     #[allow(clippy::significant_drop_tightening)]
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
         if matches!(self.state, SessionState::Closed | SessionState::Exited(_)) {
             return Err(ExpectError::SessionClosed);
         }
 
-        let mut transport = self.transport.lock().await;
-        transport
-            .write_all(data)
-            .await
-            .map_err(|e| ExpectError::io_context("writing to process", e))?;
-        transport
-            .flush()
-            .await
-            .map_err(|e| ExpectError::io_context("flushing process output", e))?;
-        Ok(())
+        // Perform the write under the lock, then release it before touching
+        // session state so the error-handling path can take `&mut self`.
+        let result = {
+            let mut transport = self.transport.lock().await;
+            match transport.write_all(data).await {
+                Ok(()) => transport.flush().await,
+                Err(e) => Err(e),
+            }
+        };
+
+        match result {
+            Ok(()) => Ok(()),
+            // A write to an already-exited child's PTY fails once the slave end
+            // closes (EIO on Unix, BrokenPipe on Windows). Surface that as a
+            // clean SessionClosed rather than a raw OS error, and mark the
+            // session closed so subsequent sends short-circuit immediately.
+            Err(e) if write_error_means_closed(&e) => {
+                self.state = SessionState::Closed;
+                Err(ExpectError::SessionClosed)
+            }
+            Err(e) => Err(ExpectError::io_context("writing to process", e)),
+        }
     }
 
     /// Send a string to the process.
@@ -738,66 +774,6 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         }
     }
 
-    /// Wait for the process to exit.
-    ///
-    /// This method blocks until EOF is detected on the session, which typically
-    /// happens when the child process terminates.
-    ///
-    /// # Warning
-    ///
-    /// This method has no timeout and may block indefinitely if the process
-    /// does not exit. Consider using [`wait_timeout`](Self::wait_timeout) or
-    /// [`expect_eof_timeout`](Self::expect_eof_timeout) for bounded waits.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if waiting fails due to I/O error.
-    pub async fn wait(&mut self) -> Result<ProcessExitStatus> {
-        // Read until EOF
-        while !self.eof {
-            if self.read_with_timeout(Duration::from_millis(100)).await? == 0 && !self.eof {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
-
-        // Return unknown status - actual status depends on backend
-        self.state = SessionState::Exited(ProcessExitStatus::Unknown);
-        Ok(ProcessExitStatus::Unknown)
-    }
-
-    /// Wait for the process to exit with a timeout.
-    ///
-    /// Like [`wait`](Self::wait), but with a maximum duration to wait.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The timeout expires before the process exits
-    /// - An I/O error occurs while waiting
-    pub async fn wait_timeout(&mut self, timeout: Duration) -> Result<ProcessExitStatus> {
-        let deadline = tokio::time::Instant::now() + timeout;
-
-        while !self.eof {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                return Err(ExpectError::timeout(
-                    timeout,
-                    "<EOF>",
-                    self.matcher.buffer_str(),
-                ));
-            }
-
-            // Use smaller of remaining time or 100ms for polling
-            let poll_timeout = remaining.min(Duration::from_millis(100));
-            if self.read_with_timeout(poll_timeout).await? == 0 && !self.eof {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        }
-
-        self.state = SessionState::Exited(ProcessExitStatus::Unknown);
-        Ok(ProcessExitStatus::Unknown)
-    }
-
     /// Check if a pattern matches immediately without blocking.
     #[must_use]
     pub fn check(&mut self, pattern: &Pattern) -> Option<MatchResult> {
@@ -1085,6 +1061,94 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     }
 }
 
+/// Process-lifecycle methods available when the transport can report a child's
+/// exit status (PTY-backed sessions). Transports without a child process use the
+/// default [`ChildExit`] impl and report [`ProcessExitStatus::Unknown`].
+impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
+    /// Wait for the process to exit.
+    ///
+    /// Blocks until EOF is detected on the session — which happens when the
+    /// child closes the slave end of the PTY, i.e. when it terminates — and
+    /// then reaps the child to report its real exit status.
+    ///
+    /// # Warning
+    ///
+    /// This method has no timeout and may block indefinitely if the process
+    /// does not exit. Consider using [`wait_timeout`](Self::wait_timeout) or
+    /// [`expect_eof_timeout`](Self::expect_eof_timeout) for bounded waits.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if waiting fails due to I/O error.
+    pub async fn wait(&mut self) -> Result<ProcessExitStatus> {
+        // Read until EOF (child closed the PTY slave / terminated).
+        while !self.eof {
+            if self.read_with_timeout(Duration::from_millis(100)).await? == 0 && !self.eof {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+
+        let status = self.reap_exit_status().await;
+        self.state = SessionState::Exited(status);
+        Ok(status)
+    }
+
+    /// Wait for the process to exit with a timeout.
+    ///
+    /// Like [`wait`](Self::wait), but with a maximum duration to wait.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The timeout expires before the process exits
+    /// - An I/O error occurs while waiting
+    pub async fn wait_timeout(&mut self, timeout: Duration) -> Result<ProcessExitStatus> {
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        while !self.eof {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(ExpectError::timeout(
+                    timeout,
+                    "<EOF>",
+                    self.matcher.buffer_str(),
+                ));
+            }
+
+            // Use smaller of remaining time or 100ms for polling
+            let poll_timeout = remaining.min(Duration::from_millis(100));
+            if self.read_with_timeout(poll_timeout).await? == 0 && !self.eof {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+
+        let status = self.reap_exit_status().await;
+        self.state = SessionState::Exited(status);
+        Ok(status)
+    }
+
+    /// Reap the child's real exit status after EOF has been observed.
+    ///
+    /// EOF means the child closed the PTY slave, so it has exited or is about
+    /// to. Poll the transport's non-blocking reap briefly to collect the real
+    /// `Exited`/`Signaled` status, falling back to [`ProcessExitStatus::Unknown`]
+    /// (the historical return) rather than blocking — e.g. for a non-process
+    /// transport, or a child that closed its output but lingers before exiting.
+    async fn reap_exit_status(&self) -> ProcessExitStatus {
+        // ~100ms ceiling (20 × 5ms); the common case resolves on the first poll.
+        const ATTEMPTS: u32 = 20;
+        for _ in 0..ATTEMPTS {
+            // Lock released at the end of this statement, before the sleep.
+            let status = self.transport.lock().await.try_exit_status();
+            if let Some(status) = status {
+                return status;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        ProcessExitStatus::Unknown
+    }
+}
+
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> std::fmt::Debug for Session<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
@@ -1225,6 +1289,20 @@ impl Session<AsyncPty> {
                 "killing process",
                 std::io::Error::new(std::io::ErrorKind::WouldBlock, "transport is locked"),
             ))
+        }
+    }
+
+    /// Check whether the child process is still running.
+    ///
+    /// Performs a non-blocking `waitpid(WNOHANG)` peek, so it reports the truth
+    /// immediately after the child exits. The portable counterpart of
+    /// [`Session::<WindowsAsyncPty>::is_running`].
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        if let Ok(mut transport) = self.transport.try_lock() {
+            transport.is_running()
+        } else {
+            true // Assume running if we can't check
         }
     }
 }

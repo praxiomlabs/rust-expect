@@ -401,6 +401,17 @@ impl SshChannelStream {
 }
 
 #[cfg(feature = "ssh")]
+impl crate::backend::ChildExit for SshChannelStream {
+    fn try_exit_status(&mut self) -> Option<crate::types::ProcessExitStatus> {
+        // SSH delivers the remote command's exit status as a channel message
+        // (captured into `exit_status`). There is no signal channel in the base
+        // protocol, so a received status is always a normal exit.
+        self.exit_status
+            .map(|code| crate::types::ProcessExitStatus::Exited(code as i32))
+    }
+}
+
+#[cfg(feature = "ssh")]
 impl AsyncRead for SshChannelStream {
     fn poll_read(
         mut self: Pin<&mut Self>,

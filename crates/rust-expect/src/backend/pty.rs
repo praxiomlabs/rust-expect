@@ -80,6 +80,7 @@ impl AsyncWrite for PtyTransport {
 
 /// Configuration for PTY spawning.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct PtyConfig {
     /// Terminal dimensions (cols, rows).
     pub dimensions: (u16, u16),

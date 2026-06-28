@@ -916,10 +916,14 @@ impl AsyncRead for AsyncPty {
 impl AsyncWrite for AsyncPty {
     #[allow(unsafe_code)]
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        // A dead child's PTY master buffers writes on Linux; surface exit as BrokenPipe.
+        if self.as_mut().get_mut().try_wait().is_some() {
+            return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+        }
         loop {
             let mut guard = match self.inner.poll_write_ready(cx) {
                 Poll::Ready(Ok(guard)) => guard,
@@ -1110,6 +1114,10 @@ impl AsyncWrite for WindowsAsyncPty {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        // Mirror the Unix guard: a write after the ConPTY child exits must surface closure.
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+        }
         Pin::new(&mut self.master).poll_write(cx, buf)
     }
 

@@ -1081,7 +1081,10 @@ impl ChildExit for WindowsAsyncPty {
         // time Session::wait reaches here the child has typically already exited.
         match self.child.try_wait() {
             Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
-            Ok(Some(rust_pty::ExitStatus::Signaled(sig))) => Some(ProcessExitStatus::Signaled(sig)),
+            // Windows reports every exit as `Terminated(exit_code)`; the code is the real exit code.
+            Ok(Some(rust_pty::ExitStatus::Terminated(code))) => {
+                Some(ProcessExitStatus::Exited(code as i32))
+            }
             // Still running, or status unrecoverable.
             Ok(None) | Err(_) => None,
         }

@@ -1,6 +1,6 @@
-//! Regression tests for Windows ConPTY child exit detection ("reaping").
+//! Regression tests for Windows `ConPTY` child exit detection ("reaping").
 //!
-//! ConPTY keeps the output pipe open for the lifetime of the pseudo console,
+//! `ConPTY` keeps the output pipe open for the lifetime of the pseudo console,
 //! so a child's exit is not observable simply by reading the pipe. Before the
 //! exit-watcher fix in `rust-pty`'s Windows backend, this caused two bugs:
 //!
@@ -9,7 +9,7 @@
 //!   2. Writes to an already-exited child's PTY returned `Ok` (silently
 //!      buffered) instead of failing.
 //!
-//! These tests spawn real ConPTY processes and assert the corrected behavior.
+//! These tests spawn real `ConPTY` processes and assert the corrected behavior.
 
 #![cfg(windows)]
 

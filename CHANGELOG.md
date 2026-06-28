@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+## [0.3.0] - 2026-06-28
+
+Fixes silently-ignored `working_dir` / `inherit_env`, a Windows compile
+break, and a cross-platform post-exit write bug, and upgrades `russh` to
+patch two DoS advisories. Contains one breaking change (see below); pre-1.0
+semver allows breaking changes in minor versions
+([RELEASING.md §Version Numbering](RELEASING.md#version-numbering)).
+
 ### Breaking changes
 
 - `backend::PtyConfig` is now `#[non_exhaustive]` and gained a

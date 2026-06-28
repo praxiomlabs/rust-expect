@@ -90,6 +90,9 @@ pub struct PtyConfig {
     /// Environment variables to apply per `env_mode` (overlay for `Extend`,
     /// the full set for `Clear`, ignored for `Inherit`).
     pub env: std::collections::HashMap<String, String>,
+    /// Working directory for the spawned child. `None` inherits the parent's
+    /// current directory.
+    pub working_directory: Option<std::path::PathBuf>,
 }
 
 impl Default for PtyConfig {
@@ -99,6 +102,7 @@ impl Default for PtyConfig {
             login_shell: false,
             env_mode: EnvMode::Inherit,
             env: std::collections::HashMap::new(),
+            working_directory: None,
         }
     }
 }
@@ -108,12 +112,13 @@ impl From<&SessionConfig> for PtyConfig {
         Self {
             dimensions: config.dimensions,
             login_shell: false,
-            env_mode: if config.env.is_empty() {
-                EnvMode::Inherit
-            } else {
-                EnvMode::Extend
+            env_mode: match (config.inherit_env, config.env.is_empty()) {
+                (false, _) => EnvMode::Clear,
+                (true, true) => EnvMode::Inherit,
+                (true, false) => EnvMode::Extend,
             },
             env: config.env.clone(),
+            working_directory: config.working_dir.clone(),
         }
     }
 }
@@ -246,6 +251,35 @@ fn build_env_cstrings(
     Ok(pairs)
 }
 
+/// Validate the configured working directory and convert it to a `CString`
+/// that can be safely passed to `chdir` between fork and exec on Unix.
+///
+/// The directory's existence is checked here so a bad path yields a clean
+/// `InvalidWorkingDir` error instead of an opaque child exit, and the
+/// allocation happens pre-fork because allocating in the child is unsound.
+#[cfg(unix)]
+fn build_cwd_cstring(
+    working_directory: Option<&std::path::PathBuf>,
+) -> Result<Option<std::ffi::CString>> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Some(path) = working_directory else {
+        return Ok(None);
+    };
+    if !path.is_dir() {
+        return Err(ExpectError::Spawn(SpawnError::InvalidWorkingDir {
+            path: path.display().to_string(),
+        }));
+    }
+    let cstring = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        ExpectError::Spawn(SpawnError::InvalidWorkingDir {
+            path: path.display().to_string(),
+        })
+    })?;
+    Ok(Some(cstring))
+}
+
 /// Spawner for PTY sessions.
 pub struct PtySpawner {
     config: PtyConfig,
@@ -332,6 +366,10 @@ impl PtySpawner {
         let env_pairs = build_env_cstrings(&self.config.env)?;
         let env_mode = self.config.env_mode;
 
+        // Validate the working directory and build its CString before forking;
+        // chdir(2) is async-signal-safe but the CString allocation is not.
+        let workdir_cstring = build_cwd_cstring(self.config.working_directory.as_ref())?;
+
         // Create PTY pair
         // SAFETY: openpty() is called with valid pointers to stack-allocated integers.
         // The null pointers for name, termp, and winp are explicitly allowed per POSIX.
@@ -392,6 +430,13 @@ impl PtySpawner {
 
                     if slave_fd > 2 {
                         libc::close(slave_fd);
+                    }
+
+                    // Change to the configured working directory before exec.
+                    if let Some(ref cwd) = workdir_cstring
+                        && libc::chdir(cwd.as_ptr()) != 0
+                    {
+                        libc::_exit(1);
                     }
 
                     // Apply env_mode + overrides before exec.
@@ -479,6 +524,7 @@ impl PtySpawner {
                 }
                 _ => built_env,
             },
+            working_directory: self.config.working_directory.clone(),
             ..Default::default()
         };
 

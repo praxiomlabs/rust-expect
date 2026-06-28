@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Breaking changes
+
+- `backend::PtyConfig` is now `#[non_exhaustive]` and gained a
+  `working_directory: Option<PathBuf>` field. External code constructing it
+  with a struct literal must switch to `PtyConfig::default()` (or the
+  `SessionBuilder` path); future field additions will no longer be breaking.
+
+### Fixed
+
+- **`SessionBuilder::working_directory` was silently ignored on spawn**: the
+  configured `working_dir` was dropped between `PtyConfig::from` and `execvp`,
+  so the child ran in the parent's directory. The child now `chdir`s to the
+  configured directory before exec on Unix and sets it on the Windows ConPTY
+  path. A non-existent directory returns `SpawnError::InvalidWorkingDir`
+  instead of being ignored.
+- **`SessionConfig::inherit_env(false)` was a silent no-op**: the flag was
+  never read, so the child always inherited the full parent environment. It
+  now produces a cleared environment, leaving only explicit `env` overrides.
+- **The crate failed to compile on Windows**: the Windows `ChildExit` impl
+  matched a `#[cfg(unix)]`-only `ExitStatus::Signaled` variant. It now maps
+  ConPTY's `Terminated(code)` to `ProcessExitStatus::Exited`.
+- **A write to an already-exited child could buffer indefinitely on Linux and
+  Windows** instead of reporting closure (only macOS surfaced it). `send` now
+  reports `SessionClosed` once the child has exited, regardless of whether
+  `wait()` was called first.
+
+### Security
+
+- Upgraded `russh` 0.56 → 0.61.2, patching RUSTSEC-2026-0153 and
+  RUSTSEC-2026-0154 (denial-of-service via unbounded allocation on the SSH
+  agent / transport paths; the latter was network-reachable in 0.56). The
+  refreshed dependency tree also clears the aws-lc-rs, cmov, and libcrux-sha3
+  advisories the old tree carried.
 
 ## [0.2.0] - 2026-05-20
 

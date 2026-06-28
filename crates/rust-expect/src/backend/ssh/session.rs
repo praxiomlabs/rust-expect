@@ -588,7 +588,7 @@ mod russh_impl {
                                         match handle
                                             .authenticate_publickey_with(
                                                 username,
-                                                key.clone(),
+                                                key.public_key().into_owned(),
                                                 rsa_hash,
                                                 &mut agent,
                                             )
@@ -597,7 +597,7 @@ mod russh_impl {
                                             Ok(auth_result) if auth_result.success() => {
                                                 tracing::info!(
                                                     user = %username,
-                                                    key_type = %key.algorithm().as_str(),
+                                                    key_type = %key.public_key().algorithm().as_str(),
                                                     "SSH agent authentication successful"
                                                 );
                                                 return Ok(true);
@@ -605,7 +605,7 @@ mod russh_impl {
                                             Ok(_) => {
                                                 tracing::debug!(
                                                     user = %username,
-                                                    key_type = %key.algorithm().as_str(),
+                                                    key_type = %key.public_key().algorithm().as_str(),
                                                     "SSH agent key rejected, trying next"
                                                 );
                                             }
@@ -666,7 +666,7 @@ mod russh_impl {
                                         match handle
                                             .authenticate_publickey_with(
                                                 username,
-                                                key.clone(),
+                                                key.public_key().into_owned(),
                                                 rsa_hash,
                                                 &mut agent,
                                             )
@@ -675,7 +675,7 @@ mod russh_impl {
                                             Ok(auth_result) if auth_result.success() => {
                                                 tracing::info!(
                                                     user = %username,
-                                                    key_type = %key.algorithm().as_str(),
+                                                    key_type = %key.public_key().algorithm().as_str(),
                                                     "Pageant authentication successful"
                                                 );
                                                 return Ok(true);
@@ -683,7 +683,7 @@ mod russh_impl {
                                             Ok(_) => {
                                                 tracing::debug!(
                                                     user = %username,
-                                                    key_type = %key.algorithm().as_str(),
+                                                    key_type = %key.public_key().algorithm().as_str(),
                                                     "Pageant key rejected, trying next"
                                                 );
                                             }
@@ -746,7 +746,7 @@ mod russh_impl {
                                         match handle
                                             .authenticate_publickey_with(
                                                 username,
-                                                key.clone(),
+                                                key.public_key().into_owned(),
                                                 rsa_hash,
                                                 &mut agent,
                                             )
@@ -755,7 +755,7 @@ mod russh_impl {
                                             Ok(auth_result) if auth_result.success() => {
                                                 tracing::info!(
                                                     user = %username,
-                                                    key_type = %key.algorithm().as_str(),
+                                                    key_type = %key.public_key().algorithm().as_str(),
                                                     "OpenSSH agent authentication successful"
                                                 );
                                                 return Ok(true);
@@ -763,7 +763,7 @@ mod russh_impl {
                                             Ok(_) => {
                                                 tracing::debug!(
                                                     user = %username,
-                                                    key_type = %key.algorithm().as_str(),
+                                                    key_type = %key.public_key().algorithm().as_str(),
                                                     "OpenSSH agent key rejected, trying next"
                                                 );
                                             }

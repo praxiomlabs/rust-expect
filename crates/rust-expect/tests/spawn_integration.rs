@@ -113,6 +113,97 @@ async fn parent_env_inherited_when_no_overrides() {
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 }
 
+/// cwd fix: `working_directory` must actually `chdir` the child before exec.
+/// Before the fix in `backend/pty.rs`, `working_dir` was dropped between
+/// `PtyConfig::from` and `execvp` on Unix, so the child ran in the parent's cwd.
+#[tokio::test]
+async fn working_dir_changes_child_cwd() {
+    use rust_expect::Session;
+
+    let dir = std::env::temp_dir();
+    let canonical = std::fs::canonicalize(&dir).expect("temp dir should canonicalize");
+    let expected = canonical.to_string_lossy().into_owned();
+
+    let config = SessionBuilder::new()
+        .command("/bin/sh")
+        .arg("-c")
+        .arg("pwd -P; exit 0")
+        .working_directory(&canonical)
+        .timeout(Duration::from_secs(5))
+        .build();
+
+    let mut session = Session::spawn_with_config("/bin/sh", &["-c", "pwd -P; exit 0"], config)
+        .await
+        .expect("spawn should succeed");
+
+    let m = session
+        .expect_timeout(expected.as_str(), Duration::from_secs(3))
+        .await
+        .expect("expected child to run in the configured working directory");
+    assert!(m.matched.contains(&expected));
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
+/// cwd fix: a non-existent `working_directory` must fail with a clean
+/// `InvalidWorkingDir` spawn error rather than a cryptic child exit.
+#[tokio::test]
+async fn working_dir_missing_returns_clean_error() {
+    use rust_expect::Session;
+
+    let config = SessionBuilder::new()
+        .command("/bin/sh")
+        .arg("-c")
+        .arg("exit 0")
+        .working_directory("/no/such/rust-expect/fixture/dir")
+        .build();
+
+    let result = Session::spawn_with_config("/bin/sh", &["-c", "exit 0"], config).await;
+    assert!(
+        result.is_err(),
+        "spawn should fail for a non-existent working directory"
+    );
+}
+
+/// env fix: `inherit_env(false)` must clear the parent environment so the child
+/// sees only explicit overrides. Before the fix the flag was a silent no-op.
+#[tokio::test]
+async fn inherit_env_false_clears_parent_env() {
+    use rust_expect::Session;
+    // SAFETY: single-threaded test setup.
+    #[allow(unsafe_code)]
+    unsafe {
+        std::env::set_var("RUST_EXPECT_CLEAR_PROBE", "should-not-appear");
+    }
+
+    let config = SessionBuilder::new()
+        .command("/bin/sh")
+        .arg("-c")
+        .arg("printf 'probe=[%s]\\n' \"$RUST_EXPECT_CLEAR_PROBE\"; exit 0")
+        .timeout(Duration::from_secs(5))
+        .build()
+        .inherit_env(false);
+
+    let mut session = Session::spawn_with_config(
+        "/bin/sh",
+        &[
+            "-c",
+            "printf 'probe=[%s]\\n' \"$RUST_EXPECT_CLEAR_PROBE\"; exit 0",
+        ],
+        config,
+    )
+    .await
+    .expect("spawn should succeed");
+
+    let m = session
+        .expect_timeout("probe=[]", Duration::from_secs(3))
+        .await
+        .expect("expected cleared env so the parent probe var is absent");
+    assert!(m.matched.contains("probe=[]"));
+
+    session.wait_timeout(Duration::from_secs(2)).await.ok();
+}
+
 /// Test `SessionBuilder` with custom dimensions.
 #[test]
 fn session_builder_with_dimensions() {

@@ -80,6 +80,7 @@ impl AsyncWrite for PtyTransport {
 
 /// Configuration for PTY spawning.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct PtyConfig {
     /// Terminal dimensions (cols, rows).
     pub dimensions: (u16, u16),
@@ -90,6 +91,9 @@ pub struct PtyConfig {
     /// Environment variables to apply per `env_mode` (overlay for `Extend`,
     /// the full set for `Clear`, ignored for `Inherit`).
     pub env: std::collections::HashMap<String, String>,
+    /// Working directory for the spawned child. `None` inherits the parent's
+    /// current directory.
+    pub working_directory: Option<std::path::PathBuf>,
 }
 
 impl Default for PtyConfig {
@@ -99,6 +103,7 @@ impl Default for PtyConfig {
             login_shell: false,
             env_mode: EnvMode::Inherit,
             env: std::collections::HashMap::new(),
+            working_directory: None,
         }
     }
 }
@@ -108,12 +113,13 @@ impl From<&SessionConfig> for PtyConfig {
         Self {
             dimensions: config.dimensions,
             login_shell: false,
-            env_mode: if config.env.is_empty() {
-                EnvMode::Inherit
-            } else {
-                EnvMode::Extend
+            env_mode: match (config.inherit_env, config.env.is_empty()) {
+                (false, _) => EnvMode::Clear,
+                (true, true) => EnvMode::Inherit,
+                (true, false) => EnvMode::Extend,
             },
             env: config.env.clone(),
+            working_directory: config.working_dir.clone(),
         }
     }
 }
@@ -246,6 +252,35 @@ fn build_env_cstrings(
     Ok(pairs)
 }
 
+/// Validate the configured working directory and convert it to a `CString`
+/// that can be safely passed to `chdir` between fork and exec on Unix.
+///
+/// The directory's existence is checked here so a bad path yields a clean
+/// `InvalidWorkingDir` error instead of an opaque child exit, and the
+/// allocation happens pre-fork because allocating in the child is unsound.
+#[cfg(unix)]
+fn build_cwd_cstring(
+    working_directory: Option<&std::path::PathBuf>,
+) -> Result<Option<std::ffi::CString>> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Some(path) = working_directory else {
+        return Ok(None);
+    };
+    if !path.is_dir() {
+        return Err(ExpectError::Spawn(SpawnError::InvalidWorkingDir {
+            path: path.display().to_string(),
+        }));
+    }
+    let cstring = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
+        ExpectError::Spawn(SpawnError::InvalidWorkingDir {
+            path: path.display().to_string(),
+        })
+    })?;
+    Ok(Some(cstring))
+}
+
 /// Spawner for PTY sessions.
 pub struct PtySpawner {
     config: PtyConfig,
@@ -332,6 +367,10 @@ impl PtySpawner {
         let env_pairs = build_env_cstrings(&self.config.env)?;
         let env_mode = self.config.env_mode;
 
+        // Validate the working directory and build its CString before forking;
+        // chdir(2) is async-signal-safe but the CString allocation is not.
+        let workdir_cstring = build_cwd_cstring(self.config.working_directory.as_ref())?;
+
         // Create PTY pair
         // SAFETY: openpty() is called with valid pointers to stack-allocated integers.
         // The null pointers for name, termp, and winp are explicitly allowed per POSIX.
@@ -392,6 +431,13 @@ impl PtySpawner {
 
                     if slave_fd > 2 {
                         libc::close(slave_fd);
+                    }
+
+                    // Change to the configured working directory before exec.
+                    if let Some(ref cwd) = workdir_cstring
+                        && libc::chdir(cwd.as_ptr()) != 0
+                    {
+                        libc::_exit(1);
                     }
 
                     // Apply env_mode + overrides before exec.
@@ -479,6 +525,7 @@ impl PtySpawner {
                 }
                 _ => built_env,
             },
+            working_directory: self.config.working_directory.clone(),
             ..Default::default()
         };
 
@@ -869,10 +916,14 @@ impl AsyncRead for AsyncPty {
 impl AsyncWrite for AsyncPty {
     #[allow(unsafe_code)]
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        // A dead child's PTY master buffers writes on Linux; surface exit as BrokenPipe.
+        if self.as_mut().get_mut().try_wait().is_some() {
+            return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+        }
         loop {
             let mut guard = match self.inner.poll_write_ready(cx) {
                 Poll::Ready(Ok(guard)) => guard,
@@ -1034,7 +1085,10 @@ impl ChildExit for WindowsAsyncPty {
         // time Session::wait reaches here the child has typically already exited.
         match self.child.try_wait() {
             Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
-            Ok(Some(rust_pty::ExitStatus::Signaled(sig))) => Some(ProcessExitStatus::Signaled(sig)),
+            // Windows reports every exit as `Terminated(exit_code)`; the code is the real exit code.
+            Ok(Some(rust_pty::ExitStatus::Terminated(code))) => {
+                Some(ProcessExitStatus::Exited(code as i32))
+            }
             // Still running, or status unrecoverable.
             Ok(None) | Err(_) => None,
         }
@@ -1060,6 +1114,10 @@ impl AsyncWrite for WindowsAsyncPty {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        // Mirror the Unix guard: a write after the ConPTY child exits must surface closure.
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
+        }
         Pin::new(&mut self.master).poll_write(cx, buf)
     }
 

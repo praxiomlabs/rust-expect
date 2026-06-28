@@ -21,39 +21,20 @@ version = 2
 yanked = "warn"
 # Ignore advisories (with reason)
 #
-# All entries here are transitive dependencies, mostly through the optional
-# `ssh` feature (russh). `cargo update` to newer versions of the underlying
-# crates is currently blocked because russh-forked-ssh-key 0.6.16 still
-# depends on the older `rsa::rand_core::RngCore` shape; pulling in newer
-# `rsa` breaks the build. Each entry below is paired with rationale so the
-# list can be re-audited when russh updates its dependency tree.
+# All entries here are transitive dependencies or have an unreachable affected
+# path. The russh 0.61 upgrade cleared the aws-lc-rs/cmov/libcrux-sha3
+# advisories that the older 0.56 tree carried. Each entry below is paired with
+# rationale so the list can be re-audited when dependencies update.
 ignore = [
     # Transitive via russh -> rsa. The Marvin Attack requires local timing
     # measurements and is mitigated by network latency for SSH use cases.
     # Tracking: https://github.com/RustCrypto/RSA/issues/19
     { id = "RUSTSEC-2023-0071", reason = "No fix; SSH timing mitigated by network latency" },
-    # AWS-LC timing/CRL/PKCS7/X.509 advisories. All transitive through russh's
-    # TLS/crypto stack. Fixes exist in newer aws-lc-rs versions but pulling
-    # them in requires bumping russh's pinned rsa dep, which breaks
-    # internal-russh-forked-ssh-key 0.6.16. Re-evaluate on next russh release.
-    { id = "RUSTSEC-2026-0044", reason = "Transitive via russh; awaits russh dep refresh" },
-    { id = "RUSTSEC-2026-0045", reason = "Transitive via russh; awaits russh dep refresh" },
-    { id = "RUSTSEC-2026-0046", reason = "Transitive via russh; awaits russh dep refresh" },
-    { id = "RUSTSEC-2026-0047", reason = "Transitive via russh; awaits russh dep refresh" },
-    { id = "RUSTSEC-2026-0048", reason = "Transitive via russh; awaits russh dep refresh" },
     # bytes BytesMut::reserve integer overflow. Direct dep but the buggy
     # path requires constructing buffers near isize::MAX, which the matcher
     # caps at the buffer.max_size config. Bumping bytes to 1.x+ needs to be
     # coordinated with tokio's pinned version.
     { id = "RUSTSEC-2026-0007", reason = "Buffer-overflow path unreachable: matcher caps reserve at buffer.max_size" },
-    # cmov non-constant-time on ARM32. Transitive via russh's RSA stack.
-    # rust-expect doesn't target ARM32 in CI or release builds; the
-    # primary platforms (x86_64/aarch64) are unaffected.
-    { id = "RUSTSEC-2026-0003", reason = "Transitive via russh; primary platforms x86_64/aarch64 unaffected" },
-    # libcrux-sha3 incremental SHAKE squeeze. Transitive via russh's
-    # post-quantum KEM. rust-expect doesn't call the affected API directly;
-    # russh's handshake doesn't use the squeeze pattern.
-    { id = "RUSTSEC-2026-0074", reason = "Transitive via russh KEM; affected squeeze pattern unreachable" },
     # rand 0.9 unsound when used with a custom logger that calls rand::rng().
     # rust-expect uses rand only for HumanTyper, which never installs a
     # custom logger.

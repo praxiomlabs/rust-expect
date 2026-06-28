@@ -10,7 +10,7 @@
 
 # Project metadata (from Cargo.toml)
 project_name := "rust-expect"
-version := "0.2.0"
+version := "0.3.0"
 msrv := "1.88"
 edition := "2024"
 

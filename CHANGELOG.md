@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **Screen scrollback history** (`screen` feature). `Screen::with_scrollback`
+  retains rows that scroll off the top of the viewport (bounded, oldest
+  dropped first), readable via `Screen::scrollback()` and
+  `Screen::full_text()`. `Screen::on_line_scrolled_out` streams each evicted
+  row as it finalizes, for lossless capture independent of the ring size. A new
+  public `Row` type exposes both `text()` and `cells()`.
+  `Session::attach_screen_with_scrollback` and
+  `Session::on_screen_line_scrolled_out` thread it through the session. Opt-in:
+  `scrollback_lines = 0` preserves the previous behavior with no extra
+  allocation. (#25)
+
+### Changed
+
+- Relaxed the `tokio` dependency requirement from `~1.49` to `1.49`
+  (`>=1.49.0, <2.0.0`), so a downstream project can use a newer tokio in the
+  same dependency graph. (#24)
 
 ## [0.3.0] - 2026-06-28
 

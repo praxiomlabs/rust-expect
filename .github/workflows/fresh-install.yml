@@ -1,0 +1,49 @@
+# Verifies that a fresh downstream project can add the *published* crate and
+# build it, per feature set. In-tree CI builds against the workspace Cargo.lock,
+# so it never sees the resolver outcome a new consumer gets. This job does, and
+# runs on a schedule so a regression is caught the day it lands (see issue #21,
+# where the `ssh` feature was unbuildable for every fresh consumer of 0.1/0.2).
+name: Fresh Install
+
+on:
+  schedule:
+    # Nightly at 04:00 UTC.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+  release:
+    types: [published]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fresh-install:
+    name: Fresh install (${{ matrix.features == '' && 'default' || matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - ''
+          - 'ssh'
+          - 'full'
+    steps:
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Create a fresh project and add the published crate
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          cd "$work"
+          cargo new consumer
+          cd consumer
+          if [ -z "${{ matrix.features }}" ]; then
+            cargo add rust-expect
+          else
+            cargo add rust-expect --features "${{ matrix.features }}"
+          fi
+          echo "--- resolved rust-expect ---"
+          cargo tree -i rust-expect --depth 0 || true
+          cargo build

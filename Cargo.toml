@@ -26,7 +26,7 @@ categories = ["command-line-utilities", "development-tools::testing", "asynchron
 
 [workspace.dependencies]
 # Async runtime - Tokio 1.49
-tokio = { version = "~1.49", features = ["full"] }
+tokio = { version = "1.49", features = ["full"] }
 
 # PTY operations - Unix syscalls via rustix
 rustix = { version = "1.1", features = ["termios", "process", "pty", "fs"] }

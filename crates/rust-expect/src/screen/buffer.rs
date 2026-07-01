@@ -3,7 +3,53 @@
 //! This module provides a 2D screen buffer for terminal emulation,
 //! storing characters, attributes, and cursor position.
 
+use std::collections::VecDeque;
 use std::fmt::{self, Write as _};
+
+/// Render a row of cells to text: the cells' characters with trailing
+/// whitespace trimmed. Shared by [`ScreenBuffer::row_text`] and [`Row::text`]
+/// so viewport and scrollback lines render identically.
+fn cells_to_text(cells: &[Cell]) -> String {
+    cells
+        .iter()
+        .map(|c| c.char)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+}
+
+/// A single row of cells, as retained in scrollback history.
+///
+/// Exposes both a text view ([`text`](Self::text)) and the underlying cells
+/// with their attributes ([`cells`](Self::cells)), so text-only consumers
+/// don't pay for attribute handling and attribute-aware consumers still have
+/// full access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    cells: Vec<Cell>,
+}
+
+impl Row {
+    /// The row's text, with trailing whitespace trimmed. Matches what
+    /// [`Screen::text`](crate::screen::Screen::text) produces for a viewport
+    /// row.
+    #[must_use]
+    pub fn text(&self) -> String {
+        cells_to_text(&self.cells)
+    }
+
+    /// The row's cells, including per-cell colors and attributes.
+    #[must_use]
+    pub fn cells(&self) -> &[Cell] {
+        &self.cells
+    }
+
+    /// Whether the row is empty once trailing whitespace is trimmed.
+    #[must_use]
+    pub fn is_blank(&self) -> bool {
+        self.cells.iter().all(|c| c.char == ' ')
+    }
+}
 
 /// A single cell in the screen buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,6 +257,19 @@ pub struct ScreenBuffer {
     scroll_region: (usize, usize),
     /// Saved cursor position.
     saved_cursor: Option<Cursor>,
+    /// Bounded scrollback history of rows that scrolled off the top. Oldest at
+    /// the front. Empty and never populated when `scrollback_limit == 0`.
+    scrollback: VecDeque<Row>,
+    /// Maximum scrollback rows to retain. `0` disables scrollback (no
+    /// allocation, today's behavior).
+    scrollback_limit: usize,
+    /// Rows that scrolled off during the current `process()`, drained by the
+    /// screen to fire the scrolled-out callback. Only populated when
+    /// `capture_scrolled` is set.
+    scrolled_out: Vec<Row>,
+    /// Whether to record scrolled-off rows into `scrolled_out` for callback
+    /// delivery (set independently of `scrollback_limit`).
+    capture_scrolled: bool,
 }
 
 impl ScreenBuffer {
@@ -226,6 +285,10 @@ impl ScreenBuffer {
             current_style: Cell::default(),
             scroll_region: (0, rows.saturating_sub(1)),
             saved_cursor: None,
+            scrollback: VecDeque::new(),
+            scrollback_limit: 0,
+            scrolled_out: Vec::new(),
+            capture_scrolled: false,
         }
     }
 
@@ -353,6 +416,29 @@ impl ScreenBuffer {
 
         if n == 0 {
             return;
+        }
+
+        // Capture rows leaving the top of the screen. Only a full-height scroll
+        // (top == 0) evicts real history; a sub-region scroll is app-internal
+        // and its overwritten rows are dropped as before.
+        if top == 0 && (self.scrollback_limit > 0 || self.capture_scrolled) {
+            for r in 0..n {
+                let start = r * self.cols;
+                let row = Row {
+                    cells: self.cells[start..start + self.cols].to_vec(),
+                };
+                if self.scrollback_limit > 0 {
+                    if self.scrollback.len() == self.scrollback_limit {
+                        self.scrollback.pop_front();
+                    }
+                    if self.capture_scrolled {
+                        self.scrolled_out.push(row.clone());
+                    }
+                    self.scrollback.push_back(row);
+                } else if self.capture_scrolled {
+                    self.scrolled_out.push(row);
+                }
+            }
         }
 
         // Move lines up
@@ -563,12 +649,7 @@ impl ScreenBuffer {
 
         let start = row * self.cols;
         let end = start + self.cols;
-        self.cells[start..end]
-            .iter()
-            .map(|c| c.char)
-            .collect::<String>()
-            .trim_end()
-            .to_string()
+        cells_to_text(&self.cells[start..end])
     }
 
     /// Get all content as a string.
@@ -578,6 +659,37 @@ impl ScreenBuffer {
             .map(|r| self.row_text(r))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Set the maximum number of scrollback rows to retain. `0` disables
+    /// scrollback. Shrinking the limit drops the oldest rows.
+    pub fn set_scrollback_limit(&mut self, limit: usize) {
+        self.scrollback_limit = limit;
+        while self.scrollback.len() > limit {
+            self.scrollback.pop_front();
+        }
+    }
+
+    /// The configured scrollback limit (`0` if disabled).
+    #[must_use]
+    pub const fn scrollback_limit(&self) -> usize {
+        self.scrollback_limit
+    }
+
+    /// Enable or disable recording scrolled-off rows for callback delivery.
+    pub const fn set_capture_scrolled(&mut self, on: bool) {
+        self.capture_scrolled = on;
+    }
+
+    /// The retained scrollback rows, oldest first.
+    #[must_use]
+    pub const fn scrollback(&self) -> &VecDeque<Row> {
+        &self.scrollback
+    }
+
+    /// Take the rows that scrolled off since the last drain.
+    pub fn take_scrolled_out(&mut self) -> Vec<Row> {
+        std::mem::take(&mut self.scrolled_out)
     }
 
     /// Resize the buffer.

@@ -272,6 +272,55 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         self.screen_tap_id = Some(id);
     }
 
+    /// Attach a screen with a bounded scrollback history, sized to the
+    /// session's configured dimensions.
+    ///
+    /// Rows that scroll off the top are retained (up to `scrollback_lines`)
+    /// and readable via the attached [`Screen`](crate::screen::Screen)'s
+    /// `scrollback()` / `full_text()`. For lossless capture independent of the
+    /// bound, register [`on_screen_line_scrolled_out`](Self::on_screen_line_scrolled_out).
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn attach_screen_with_scrollback(&mut self, scrollback_lines: usize) {
+        let (cols, rows) = self.config.dimensions;
+        // Replace any previous screen + its tap so we don't leak callbacks.
+        self.detach_screen();
+        let screen = Arc::new(StdMutex::new(Screen::with_scrollback(
+            rows as usize,
+            cols as usize,
+            scrollback_lines,
+        )));
+        let screen_for_tap = screen.clone();
+        let id = self.add_output_tap(move |chunk| {
+            lock_screen(&screen_for_tap).process(chunk);
+        });
+        self.screen = Some(screen);
+        self.screen_tap_id = Some(id);
+    }
+
+    /// Register a callback fired for each row that scrolls off the attached
+    /// screen, delivered as the row finalizes. Returns `false` if no screen is
+    /// attached.
+    ///
+    /// See [`Screen::on_line_scrolled_out`](crate::screen::Screen::on_line_scrolled_out)
+    /// for the reentrancy contract: the callback runs while the screen lock is
+    /// held and must not re-enter the `Session`/`Screen`.
+    ///
+    /// Available with the `screen` feature.
+    #[cfg(feature = "screen")]
+    pub fn on_screen_line_scrolled_out<F>(&mut self, callback: F) -> bool
+    where
+        F: FnMut(&crate::screen::Row) + Send + 'static,
+    {
+        if let Some(screen) = self.screen.as_ref() {
+            lock_screen(screen).on_line_scrolled_out(callback);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Detach the currently attached screen, also removing its output tap.
     /// No-op if no screen is attached. Returns `true` if a screen was
     /// detached.

@@ -21,14 +21,16 @@ pub mod parser;
 pub mod query;
 
 pub use buffer::{
-    Attributes, Cell, CellChange, ChangeType, Color, Cursor, ScreenBuffer, ScreenDiff,
+    Attributes, Cell, CellChange, ChangeType, Color, Cursor, Row, ScreenBuffer, ScreenDiff,
 };
 use parser::apply_sgr;
 pub use parser::{AnsiParser, AnsiSequence, EraseMode, ParseResult};
 pub use query::{Region, ScreenQuery, ScreenQueryExt};
 
+/// Callback invoked with each row that scrolls off the top of the viewport.
+type ScrolledOutCallback = Box<dyn FnMut(&Row) + Send>;
+
 /// A virtual terminal screen.
-#[derive(Clone)]
 pub struct Screen {
     /// The screen buffer.
     buffer: ScreenBuffer,
@@ -43,6 +45,27 @@ pub struct Screen {
     /// Monotonic counter that ticks on each `process()` call, used as a
     /// cheap signal that the screen has received input. See [`revision`].
     revision: u64,
+    /// Optional callback invoked for each row that scrolls off the top during
+    /// `process()`. Not cloned (see the manual `Clone` impl).
+    scrolled_out_cb: Option<ScrolledOutCallback>,
+}
+
+impl Clone for Screen {
+    /// Clones the screen state (including scrollback). The scrolled-out
+    /// callback is **not** carried over — a clone is a detached snapshot, not a
+    /// live stream. Re-register with [`on_line_scrolled_out`](Self::on_line_scrolled_out)
+    /// if the clone needs to stream.
+    fn clone(&self) -> Self {
+        Self {
+            buffer: self.buffer.clone(),
+            parser: self.parser.clone(),
+            fg: self.fg,
+            bg: self.bg,
+            attrs: self.attrs,
+            revision: self.revision,
+            scrolled_out_cb: None,
+        }
+    }
 }
 
 impl Screen {
@@ -56,7 +79,22 @@ impl Screen {
             bg: Color::Default,
             attrs: Attributes::empty(),
             revision: 0,
+            scrolled_out_cb: None,
         }
+    }
+
+    /// Create a screen with a bounded scrollback history.
+    ///
+    /// Rows that scroll off the top of the viewport are retained (up to
+    /// `scrollback_lines`, oldest dropped first) and readable via
+    /// [`scrollback`](Self::scrollback) and [`full_text`](Self::full_text).
+    /// `scrollback_lines = 0` is identical to [`new`](Self::new) — no history,
+    /// no extra allocation.
+    #[must_use]
+    pub fn with_scrollback(rows: usize, cols: usize, scrollback_lines: usize) -> Self {
+        let mut screen = Self::new(rows, cols);
+        screen.buffer.set_scrollback_limit(scrollback_lines);
+        screen
     }
 
     /// Get the current revision counter.
@@ -115,6 +153,17 @@ impl Screen {
             // A non-zero number of input bytes always advances the screen's
             // revision counter so cheap stability polls can detect activity.
             self.revision = self.revision.wrapping_add(1);
+        }
+
+        // Deliver rows that scrolled off during this call. Taking the rows
+        // before borrowing the callback keeps the two field borrows disjoint.
+        if self.scrolled_out_cb.is_some() {
+            let rows = self.buffer.take_scrolled_out();
+            if let Some(cb) = self.scrolled_out_cb.as_mut() {
+                for row in &rows {
+                    cb(row);
+                }
+            }
         }
     }
 
@@ -358,6 +407,50 @@ impl Screen {
         self.buffer.text()
     }
 
+    /// Register a callback fired for each row that scrolls off the top of the
+    /// viewport, in order, during [`process`](Self::process).
+    ///
+    /// This is the lossless path: rows are delivered as they finalize, so a
+    /// consumer can persist the full history regardless of the scrollback
+    /// bound — it works even with `scrollback_lines = 0`.
+    ///
+    /// # Reentrancy
+    ///
+    /// The callback fires while the screen is being driven. When the screen is
+    /// shared as `Arc<Mutex<Screen>>` (as [`Session::attach_screen`] does) it
+    /// runs *while the screen lock is held*. It receives a `&Row` valid only
+    /// for the call and must not call back into the `Screen`/`Session`, or it
+    /// will deadlock. Do minimal work — the same contract as output taps.
+    ///
+    /// [`Session::attach_screen`]: crate::Session::attach_screen
+    pub fn on_line_scrolled_out<F>(&mut self, callback: F)
+    where
+        F: FnMut(&Row) + Send + 'static,
+    {
+        self.buffer.set_capture_scrolled(true);
+        self.scrolled_out_cb = Some(Box::new(callback));
+    }
+
+    /// The retained scrollback rows, oldest first (the rows immediately above
+    /// the current viewport). Empty unless constructed with
+    /// [`with_scrollback`](Self::with_scrollback).
+    pub fn scrollback(&self) -> impl Iterator<Item = &Row> {
+        self.buffer.scrollback().iter()
+    }
+
+    /// The scrollback history followed by the current viewport, one line per
+    /// row with trailing whitespace trimmed.
+    ///
+    /// Guarantees: `full_text()` equals what [`text`](Self::text) would have
+    /// returned had nothing scrolled off — history lines use the same
+    /// extraction and trimming as viewport lines.
+    #[must_use]
+    pub fn full_text(&self) -> String {
+        let mut lines: Vec<String> = self.buffer.scrollback().iter().map(Row::text).collect();
+        lines.push(self.buffer.text());
+        lines.join("\n")
+    }
+
     /// Clear the screen.
     pub fn clear(&mut self) {
         self.buffer.clear();
@@ -434,6 +527,70 @@ mod tests {
         // Line 1 should have scrolled off
         assert!(!screen.query().contains("Line 1"));
         assert!(screen.query().contains("Line 4"));
+    }
+
+    #[test]
+    fn scrollback_disabled_by_default() {
+        let mut screen = Screen::new(3, 10);
+        screen.process_str("L0\r\nL1\r\nL2\r\nL3\r\nL4");
+        assert_eq!(screen.scrollback().count(), 0);
+        // With no scrollback, full_text is exactly the viewport text.
+        assert_eq!(screen.full_text(), screen.text());
+        assert_eq!(screen.text(), "L2\nL3\nL4");
+    }
+
+    #[test]
+    fn scrollback_retains_scrolled_rows() {
+        let mut screen = Screen::with_scrollback(3, 10, 10);
+        screen.process_str("L0\r\nL1\r\nL2\r\nL3\r\nL4");
+
+        let hist: Vec<String> = screen.scrollback().map(Row::text).collect();
+        assert_eq!(hist, vec!["L0".to_string(), "L1".to_string()]);
+        assert_eq!(screen.full_text(), "L0\nL1\nL2\nL3\nL4");
+        assert_eq!(screen.text(), "L2\nL3\nL4");
+    }
+
+    #[test]
+    fn scrollback_is_bounded_oldest_dropped() {
+        let mut screen = Screen::with_scrollback(3, 10, 1);
+        screen.process_str("L0\r\nL1\r\nL2\r\nL3\r\nL4");
+        let hist: Vec<String> = screen.scrollback().map(Row::text).collect();
+        // Only the most recent evicted row is kept; L0 was dropped.
+        assert_eq!(hist, vec!["L1".to_string()]);
+        assert_eq!(screen.full_text(), "L1\nL2\nL3\nL4");
+    }
+
+    #[test]
+    fn scrolled_out_callback_is_lossless_without_ring() {
+        use std::sync::{Arc, Mutex};
+        let collected = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = collected.clone();
+
+        // Ring disabled (0) — the callback still receives every evicted row.
+        let mut screen = Screen::with_scrollback(3, 10, 0);
+        screen.on_line_scrolled_out(move |row| sink.lock().unwrap().push(row.text()));
+        screen.process_str("L0\r\nL1\r\nL2\r\nL3\r\nL4");
+
+        assert_eq!(*collected.lock().unwrap(), vec!["L0".to_string(), "L1".to_string()]);
+        assert_eq!(screen.scrollback().count(), 0);
+    }
+
+    #[test]
+    fn row_exposes_text_and_cells() {
+        let mut screen = Screen::with_scrollback(3, 10, 10);
+        screen.process_str("hi\r\nL1\r\nL2\r\nL3");
+        let first = screen.scrollback().next().unwrap();
+        assert_eq!(first.text(), "hi");
+        assert_eq!(first.cells().len(), 10);
+        assert_eq!(first.cells()[0].char, 'h');
+        assert!(!first.is_blank());
+    }
+
+    #[test]
+    fn full_text_equals_text_when_nothing_scrolled() {
+        let mut screen = Screen::with_scrollback(24, 80, 100);
+        screen.process_str("short\r\ncontent");
+        assert_eq!(screen.full_text(), screen.text());
     }
 
     #[test]

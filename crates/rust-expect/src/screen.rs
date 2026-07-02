@@ -571,7 +571,10 @@ mod tests {
         screen.on_line_scrolled_out(move |row| sink.lock().unwrap().push(row.text()));
         screen.process_str("L0\r\nL1\r\nL2\r\nL3\r\nL4");
 
-        assert_eq!(*collected.lock().unwrap(), vec!["L0".to_string(), "L1".to_string()]);
+        assert_eq!(
+            *collected.lock().unwrap(),
+            vec!["L0".to_string(), "L1".to_string()]
+        );
         assert_eq!(screen.scrollback().count(), 0);
     }
 

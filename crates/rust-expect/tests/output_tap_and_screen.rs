@@ -700,7 +700,10 @@ async fn session_scrollback_and_callback_capture_scrolled_lines() {
         screen.full_text()
     };
     // Early lines scrolled off the 24-row viewport but survive in history.
-    assert!(full.contains("line-01"), "full_text missing early line:\n{full}");
+    assert!(
+        full.contains("line-01"),
+        "full_text missing early line:\n{full}"
+    );
     assert!(full.contains("line-40"), "full_text missing last line");
 
     // The streaming callback saw the earliest lines even though they are far

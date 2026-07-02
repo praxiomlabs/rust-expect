@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+## [0.4.0] - 2026-07-02
+
+Adds opt-in screen scrollback with a lossless streaming callback, and relaxes
+the `tokio` requirement so downstreams can use a newer runtime. Additive; no
+breaking changes.
+
 ### Added
 
 - **Screen scrollback history** (`screen` feature). `Screen::with_scrollback`

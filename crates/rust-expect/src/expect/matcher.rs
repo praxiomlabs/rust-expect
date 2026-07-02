@@ -111,7 +111,17 @@ impl Matcher {
                         captures: Vec::new(),
                     })
             }
-            Pattern::Eof | Pattern::Timeout(_) | Pattern::Bytes(_) => None,
+            // `Bytes(n)` matches once at least `n` raw bytes are buffered, and
+            // consumes the first `n` of them. It is resolved here (not in
+            // `Pattern::matches`) because it depends on the raw buffer length
+            // rather than the search text.
+            Pattern::Bytes(n) => (self.buffer.len() >= *n).then_some(MatchResult {
+                pattern_index: 0,
+                start: 0,
+                end: *n,
+                captures: Vec::new(),
+            }),
+            Pattern::Eof | Pattern::Timeout(_) => None,
         }
     }
 
@@ -119,17 +129,30 @@ impl Matcher {
     #[must_use]
     pub fn try_match_any(&mut self, patterns: &PatternSet) -> Option<MatchResult> {
         let text = self.get_search_text();
+        let buffer_len = self.buffer.len();
         let mut best: Option<MatchResult> = None;
 
         for (idx, named) in patterns.iter().enumerate() {
-            if let Some(pm) = named.pattern.matches(&text) {
-                let result = MatchResult {
+            // `Bytes(n)` depends on the raw buffer length, so it is matched
+            // directly here rather than via `Pattern::matches` (which only sees
+            // the search text and always returns `None` for `Bytes`).
+            let result = if let Pattern::Bytes(n) = &named.pattern {
+                (buffer_len >= *n).then_some(MatchResult {
+                    pattern_index: idx,
+                    start: 0,
+                    end: *n,
+                    captures: Vec::new(),
+                })
+            } else {
+                named.pattern.matches(&text).map(|pm| MatchResult {
                     pattern_index: idx,
                     start: self.adjust_position(pm.start),
                     end: self.adjust_position(pm.end),
                     captures: pm.captures,
-                };
+                })
+            };
 
+            if let Some(result) = result {
                 match &best {
                     None => best = Some(result),
                     Some(current) if result.start < current.start => best = Some(result),
@@ -371,6 +394,43 @@ mod tests {
         let result = matcher.try_match_any(&patterns);
         assert!(result.is_some());
         assert_eq!(result.unwrap().pattern_index, 1);
+    }
+
+    #[test]
+    fn matcher_bytes_waits_then_matches() {
+        let mut matcher = Matcher::new(1024);
+        let pattern = Pattern::bytes(5);
+
+        // Fewer than 5 bytes: no match.
+        matcher.append(b"abc");
+        assert!(
+            matcher.try_match(&pattern).is_none(),
+            "Bytes(5) must not match with only 3 bytes buffered"
+        );
+
+        // Reaching 5 bytes: matches, consuming exactly the first 5.
+        matcher.append(b"defgh");
+        let result = matcher.try_match(&pattern).expect("Bytes(5) should match");
+        assert_eq!(result.start, 0);
+        assert_eq!(result.end, 5);
+
+        let m = matcher.consume_match(&result);
+        assert_eq!(m.matched, "abcde");
+    }
+
+    #[test]
+    fn matcher_bytes_in_pattern_set() {
+        let mut matcher = Matcher::new(1024);
+        matcher.append(b"abcdef");
+
+        let mut patterns = PatternSet::new();
+        patterns.add(Pattern::literal("zzz")).add(Pattern::bytes(4));
+
+        let result = matcher
+            .try_match_any(&patterns)
+            .expect("Bytes(4) should match in the set");
+        assert_eq!(result.pattern_index, 1);
+        assert_eq!(result.end - result.start, 4);
     }
 
     #[test]

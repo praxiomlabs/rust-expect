@@ -281,6 +281,70 @@ fn build_cwd_cstring(
     Ok(Some(cstring))
 }
 
+/// Allocate a PTY master/slave pair, retrying briefly on failure.
+///
+/// macOS caps the system-wide PTY count at `kern.tty.ptmx_max` (511 by
+/// default) — far below Linux's dynamic `/dev/pts` allocation. Under heavy
+/// concurrent spawning (a parallel test suite, or an app driving many sessions
+/// at once) `openpty` can momentarily fail — with `ENXIO` ("Device not
+/// configured"), the BSD PTY-exhaustion code — even though a slot frees
+/// moments later as other sessions are torn down. We therefore retry with a
+/// short bounded backoff before giving up, which is what turns intermittent
+/// `PtyAllocation` failures on macOS into reliable spawns.
+///
+/// The retry fires on **any** `openpty` failure rather than matching a
+/// specific errno. Our call always passes fixed, valid arguments (null
+/// name/termp/winp), so the only realistic failure is resource exhaustion;
+/// retrying unconditionally is simpler and more robust than enumerating
+/// errnos, and the bound guarantees a genuinely permanent failure still
+/// surfaces promptly — carrying the raw OS error for diagnosis rather than the
+/// previous opaque "Failed to open PTY".
+#[cfg(unix)]
+#[allow(unsafe_code)]
+async fn open_pty_pair_with_retry() -> Result<(libc::c_int, libc::c_int)> {
+    // ~10 attempts with a short linear backoff bounds the worst-case added
+    // latency (~90ms) on a genuinely exhausted system while smoothing over
+    // sub-millisecond transient spikes under concurrent spawning.
+    const ATTEMPTS: u32 = 10;
+
+    let mut last_err = io::Error::other("openpty was never attempted");
+
+    for attempt in 0..ATTEMPTS {
+        let mut master: libc::c_int = 0;
+        let mut slave: libc::c_int = 0;
+
+        // SAFETY: openpty() is called with valid pointers to stack-allocated
+        // integers. The null pointers for name, termp, and winp are explicitly
+        // allowed per POSIX. We check the return value below.
+        let rc = unsafe {
+            libc::openpty(
+                &raw mut master,
+                &raw mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+
+        if rc == 0 {
+            return Ok((master, slave));
+        }
+
+        last_err = io::Error::last_os_error();
+        if attempt + 1 < ATTEMPTS {
+            // Non-blocking backoff so other sessions can release their PTYs.
+            tokio::time::sleep(std::time::Duration::from_millis(2 * u64::from(attempt + 1))).await;
+        }
+    }
+
+    Err(ExpectError::Spawn(SpawnError::PtyAllocation {
+        reason: format!(
+            "openpty failed after {ATTEMPTS} attempts \
+             (likely PTY-table exhaustion; on macOS see kern.tty.ptmx_max): {last_err}"
+        ),
+    }))
+}
+
 /// Spawner for PTY sessions.
 pub struct PtySpawner {
     config: PtyConfig,
@@ -371,32 +435,9 @@ impl PtySpawner {
         // chdir(2) is async-signal-safe but the CString allocation is not.
         let workdir_cstring = build_cwd_cstring(self.config.working_directory.as_ref())?;
 
-        // Create PTY pair
-        // SAFETY: openpty() is called with valid pointers to stack-allocated integers.
-        // The null pointers for name, termp, and winp are explicitly allowed per POSIX.
-        // We check the return value and handle errors appropriately.
-        let pty_result = unsafe {
-            let mut master: libc::c_int = 0;
-            let mut slave: libc::c_int = 0;
-
-            // Open PTY
-            if libc::openpty(
-                &raw mut master,
-                &raw mut slave,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            ) != 0
-            {
-                return Err(ExpectError::Spawn(SpawnError::PtyAllocation {
-                    reason: "Failed to open PTY".to_string(),
-                }));
-            }
-
-            (master, slave)
-        };
-
-        let (master_fd, slave_fd) = pty_result;
+        // Create PTY pair, retrying briefly on transient PTY-table exhaustion.
+        // See `open_pty_pair_with_retry` for the macOS `ptmx_max` rationale.
+        let (master_fd, slave_fd) = open_pty_pair_with_retry().await?;
 
         // Fork the process
         // SAFETY: fork() is safe to call at this point as we have no threads running
@@ -1162,6 +1203,21 @@ mod tests {
         let pty_config = PtyConfig::from(&session_config);
         assert_eq!(pty_config.dimensions.0, 120);
         assert_eq!(pty_config.dimensions.1, 40);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(unsafe_code)]
+    async fn open_pty_pair_with_retry_allocates_valid_fds() {
+        // Happy path: allocation succeeds and yields two distinct valid fds.
+        let (master, slave) = open_pty_pair_with_retry().await.expect("openpty");
+        assert!(master >= 0 && slave >= 0 && master != slave);
+        // SAFETY: both fds were just returned by openpty and are owned here;
+        // closing them releases the allocated PTY pair.
+        unsafe {
+            libc::close(master);
+            libc::close(slave);
+        }
     }
 
     #[cfg(unix)]

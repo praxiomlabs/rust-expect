@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Fixed
+
+- **Resilient PTY allocation on macOS/BSD.** macOS caps system-wide PTYs at
+  `kern.tty.ptmx_max` (511 by default), far below Linux's dynamic allocation,
+  so under heavy concurrent spawning `openpty` can transiently fail (the BSD
+  PTY-exhaustion code is `ENXIO`, "Device not configured") even though a slot
+  frees moments later. `Session::spawn` now retries PTY allocation with a short
+  bounded backoff and, on a genuine failure, surfaces the underlying OS error
+  instead of the opaque "Failed to open PTY". This removes intermittent
+  `PtyAllocation` failures seen when running the test suite — or an app driving
+  many sessions — in parallel on macOS. The retry fires on any `openpty`
+  failure rather than a specific errno: our arguments are always valid, so the
+  only realistic failure is exhaustion, and retrying unconditionally is simpler
+  and more robust.
 
 ## [0.4.0] - 2026-07-02
 

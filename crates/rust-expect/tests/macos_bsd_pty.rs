@@ -68,7 +68,8 @@ async fn expect_eof_resolves_promptly() {
 }
 
 /// The child's controlling terminal is the PTY slave: `tty(1)` names a real
-/// `/dev/ttys*` device rather than reporting "not a tty".
+/// slave device rather than reporting "not a tty". The device is named
+/// `/dev/ttys*` on macOS/BSD and `/dev/pts/*` on Linux.
 #[tokio::test]
 async fn child_controlling_terminal_is_pts() {
     let mut session = Session::spawn("/bin/sh", &["-c", "tty; exit 0"])
@@ -80,14 +81,68 @@ async fn child_controlling_terminal_is_pts() {
         .await
         .expect("expect_eof");
     let text = out.before;
+    // macOS/BSD: /dev/ttysNNN ; Linux: /dev/pts/N. Both mean the child has a
+    // controlling pts; `tty(1)` prints "not a tty" when it has none.
+    let names_pts = text.contains("/dev/ttys") || text.contains("/dev/pts/");
     assert!(
-        text.contains("/dev/tty"),
-        "child should have a controlling pts, got: {text:?}"
+        names_pts,
+        "child should have a controlling pts (/dev/ttys* or /dev/pts/*), got: {text:?}"
     );
     assert!(
         !text.contains("not a tty"),
         "child unexpectedly had no controlling terminal: {text:?}"
     );
+}
+
+/// Manual, macOS-only PTY-allocation stress test. Ignored so CI never runs it:
+///
+/// ```text
+/// cargo test -p rust-expect --test macos_bsd_pty -- --ignored --nocapture
+/// ```
+///
+/// macOS caps system-wide PTYs at `kern.tty.ptmx_max` (511 by default). This
+/// spawns large concurrent batches of immediately-exiting sessions — a far
+/// heavier concurrent-allocation load than [`concurrent_spawns_all_allocate`]
+/// — waiting on and reaping each (so no zombies accumulate), and asserts every
+/// spawn succeeds. It stays bounded well under the cap, and each wave fully
+/// drains before the next, so it never sustains exhaustion or starves other
+/// processes.
+///
+/// Relationship to the retry path: `open_pty_pair_with_retry` retries when
+/// `openpty` transiently fails as the PTY table brushes its cap. That happens
+/// here when the machine is *already* near the cap — e.g. run this while the
+/// full test suite runs, which is exactly the workload that surfaced the
+/// original flakiness. Note it is **not** possible to force a *recoverable*
+/// retry deterministically in isolation on macOS: holding sessions gives a
+/// hard step at the cap (over-subscription fails outright rather than
+/// transiently), and PTY teardown lags allocation, so a sustained push past
+/// the cap produces unrecoverable failures instead of transient ones. This
+/// test therefore verifies robustness under heavy concurrent allocation rather
+/// than asserting a retry fired.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "macOS PTY-cap stress; manual only: cargo test -- --ignored"]
+async fn pty_allocation_stress_under_concurrency() {
+    // 250 concurrent < the ~511 cap (minus baseline usage), so a single wave
+    // never sustains exhaustion; several drained waves keep the pressure up.
+    const BATCH: usize = 250;
+    const WAVES: usize = 4;
+
+    for wave in 0..WAVES {
+        let mut handles = Vec::with_capacity(BATCH);
+        for _ in 0..BATCH {
+            handles.push(tokio::spawn(async {
+                let mut s = Session::spawn("/bin/sh", &["-c", "exit 0"]).await?;
+                // wait_timeout reaps the child, so no zombies pile up.
+                s.wait_timeout(Duration::from_secs(10)).await.ok();
+                Ok::<(), rust_expect::ExpectError>(())
+            }));
+        }
+        for h in handles {
+            h.await
+                .expect("spawn task panicked")
+                .unwrap_or_else(|e| panic!("wave {wave}: every spawn should allocate a PTY: {e}"));
+        }
+    }
 }
 
 /// Concurrent PTY allocation stays reliable under moderate load. Exercises the

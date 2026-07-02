@@ -286,19 +286,19 @@ fn build_cwd_cstring(
 /// macOS caps the system-wide PTY count at `kern.tty.ptmx_max` (511 by
 /// default) — far below Linux's dynamic `/dev/pts` allocation. Under heavy
 /// concurrent spawning (a parallel test suite, or an app driving many sessions
-/// at once) `openpty` can momentarily fail even though a slot frees moments
-/// later as other sessions are torn down. We therefore retry with a short
-/// bounded backoff before giving up, which is what turns intermittent
+/// at once) `openpty` can momentarily fail — with `ENXIO` ("Device not
+/// configured"), the BSD PTY-exhaustion code — even though a slot frees
+/// moments later as other sessions are torn down. We therefore retry with a
+/// short bounded backoff before giving up, which is what turns intermittent
 /// `PtyAllocation` failures on macOS into reliable spawns.
 ///
-/// We retry on **any** `openpty` failure rather than matching a specific
-/// errno, because the errno is not trustworthy here: in the concurrent tokio
-/// spawn path on macOS, `openpty` has been observed to leave a *negative*
-/// `errno` (`-6` — the negation of `ENXIO`, "Device not configured", the PTY
-/// exhaustion code) instead of the usual positive value seen in isolated
-/// single-threaded calls. The retry is bounded, so a genuinely permanent
-/// failure still surfaces promptly, carrying the raw OS error for diagnosis
-/// rather than the previous opaque "Failed to open PTY".
+/// The retry fires on **any** `openpty` failure rather than matching a
+/// specific errno. Our call always passes fixed, valid arguments (null
+/// name/termp/winp), so the only realistic failure is resource exhaustion;
+/// retrying unconditionally is simpler and more robust than enumerating
+/// errnos, and the bound guarantees a genuinely permanent failure still
+/// surfaces promptly — carrying the raw OS error for diagnosis rather than the
+/// previous opaque "Failed to open PTY".
 #[cfg(unix)]
 #[allow(unsafe_code)]
 async fn open_pty_pair_with_retry() -> Result<(libc::c_int, libc::c_int)> {

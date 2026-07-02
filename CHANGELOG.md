@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of the opaque "Failed to open PTY". This removes intermittent
   `PtyAllocation` failures seen when running the test suite — or an app driving
   many sessions — in parallel on macOS. The retry fires on any `openpty`
-  failure rather than a specific errno, because macOS was observed to leave a
-  *negative* `errno` (`-6`) for this case in the concurrent spawn path.
+  failure rather than a specific errno: our arguments are always valid, so the
+  only realistic failure is exhaustion, and retrying unconditionally is simpler
+  and more robust.
 
 ## [0.4.0] - 2026-07-02
 

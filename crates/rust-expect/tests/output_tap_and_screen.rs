@@ -669,3 +669,48 @@ async fn send_paste_emits_bracketed_paste_markers() {
     let _ = session.send_control(rust_expect::ControlChar::CtrlD).await;
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 }
+
+/// A scrollback-enabled screen on a live session retains lines that scroll off
+/// the viewport, and the scrolled-out callback receives them losslessly.
+#[tokio::test]
+async fn session_scrollback_and_callback_capture_scrolled_lines() {
+    let (cmd, args, config) = build(
+        "i=1; while [ $i -le 40 ]; do printf 'line-%02d\\n' \"$i\"; i=$((i+1)); done; exit 0",
+    );
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut session = Session::spawn_with_config(&cmd, &arg_refs, config)
+        .await
+        .unwrap();
+
+    let scrolled: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = scrolled.clone();
+    session.attach_screen_with_scrollback(1000);
+    assert!(session.on_screen_line_scrolled_out(move |row| {
+        sink.lock().unwrap().push(row.text());
+    }));
+
+    // Consume all output; the tap feeds every byte into the screen.
+    session
+        .expect_eof_timeout(Duration::from_secs(5))
+        .await
+        .ok();
+
+    let full = {
+        let screen = session.screen().unwrap().lock().unwrap();
+        screen.full_text()
+    };
+    // Early lines scrolled off the 24-row viewport but survive in history.
+    assert!(
+        full.contains("line-01"),
+        "full_text missing early line:\n{full}"
+    );
+    assert!(full.contains("line-40"), "full_text missing last line");
+
+    // The streaming callback saw the earliest lines even though they are far
+    // beyond the viewport.
+    let saw_line_01 = {
+        let captured = scrolled.lock().unwrap();
+        captured.iter().any(|l| l.contains("line-01"))
+    };
+    assert!(saw_line_01, "callback did not capture line-01");
+}

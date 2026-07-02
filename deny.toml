@@ -88,10 +88,7 @@ deny = [
     { name = "anyhow", wrappers = ["prost-derive"] },
 ]
 # Skip duplicate dependency checks for known transitive conflicts
-skip = [
-    # crossterm uses signal-hook 0.3, rust-pty uses 0.4
-    { crate = "signal-hook@0.3", reason = "crossterm transitive dependency" },
-]
+skip = []
 skip-tree = [
     # Skip all duplicates from expectrl (dev-dependency benchmarking comparison)
     { crate = "expectrl", reason = "dev-dependency for benchmarks only" },

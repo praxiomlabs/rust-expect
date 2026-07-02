@@ -25,7 +25,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-expect = "0.3"
+rust-expect = "0.4"
 ```
 
 ### Basic Example
@@ -171,7 +171,7 @@ Enable features in `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-expect = { version = "0.3", features = ["ssh", "screen"] }
+rust-expect = { version = "0.4", features = ["ssh", "screen"] }
 ```
 
 ## Crates
@@ -192,6 +192,7 @@ See the [examples](crates/rust-expect/examples) directory:
 | `dialog.rs` | Dialog-based automation | - |
 | `patterns.rs` | Pattern matching capabilities | - |
 | `screen_buffer.rs` | Virtual terminal with ANSI | `screen` |
+| `scrollback.rs` | Observe content that scrolls off-screen | `screen` |
 | `pii_redaction.rs` | Sensitive data masking | `pii-redaction` |
 | `ssh.rs` | SSH session concepts | `ssh` |
 | `mock_testing.rs` | Mock backend for testing | `mock` |

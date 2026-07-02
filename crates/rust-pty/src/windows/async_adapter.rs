@@ -111,9 +111,14 @@ impl AsyncRead for WindowsPtyMaster {
     ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
 
-        if !this.open.load(Ordering::SeqCst) {
-            return Poll::Ready(Ok(())); // EOF
-        }
+        // NOTE: we deliberately do NOT short-circuit to EOF here when `open` is
+        // false. The exit watcher clears `open` the instant the child exits, but
+        // conhost may have already forwarded the child's final output into the
+        // output pipe. Returning EOF on `!open` would discard that buffered data
+        // (observed: a short-lived `cmd /c echo ...` loses its entire output).
+        // Instead we always attempt the read and let `ReadFile` drain the pipe
+        // until it reports `ERROR_BROKEN_PIPE` — the true EOF, which the watcher
+        // guarantees by calling `ClosePseudoConsole`. `open` still gates writes.
 
         // Check current state. The pending_read mutex only guards Idle/InProgress/Ready
         // state transitions; nothing held under it can panic, so poisoning is unreachable
@@ -126,7 +131,6 @@ impl AsyncRead for WindowsPtyMaster {
             PendingReadState::Idle => {
                 // Start a new blocking read operation
                 let handle = Arc::clone(&this.output);
-                let open = Arc::clone(&this.open);
                 let pending_read = Arc::clone(&this.pending_read);
                 let buf_capacity = buf.remaining();
 
@@ -137,10 +141,9 @@ impl AsyncRead for WindowsPtyMaster {
                 // Spawn the blocking read
                 tokio::task::spawn(async move {
                     let result = tokio::task::spawn_blocking(move || {
-                        if !open.load(Ordering::SeqCst) {
-                            return Ok(Vec::new()); // EOF
-                        }
-
+                        // The read is intentionally not gated on `open` (see the
+                        // poll_read note): the pipe must be drained until ReadFile
+                        // reports broken-pipe, or the child's final output is lost.
                         let mut buffer = vec![0u8; buf_capacity.min(4096)];
                         let mut bytes_read: u32 = 0;
 

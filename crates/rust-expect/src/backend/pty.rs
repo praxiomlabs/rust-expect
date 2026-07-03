@@ -684,25 +684,6 @@ impl PtyHandle {
             Ok(-1)
         }
     }
-
-    /// Send a signal to the process.
-    #[allow(unsafe_code)]
-    pub fn signal(&self, signal: i32) -> Result<()> {
-        // SAFETY: self.pid is a valid process ID from fork().
-        // The signal is passed from the caller and must be a valid signal number.
-        // kill() is safe to call with any PID; it returns an error for invalid PIDs.
-        let result = unsafe { libc::kill(self.pid as i32, signal) };
-        if result != 0 {
-            Err(ExpectError::Io(io::Error::last_os_error()))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Kill the process.
-    pub fn kill(&self) -> Result<()> {
-        self.signal(libc::SIGKILL)
-    }
 }
 
 #[cfg(windows)]
@@ -894,19 +875,40 @@ impl AsyncPty {
     }
 
     /// Send a signal to the child process.
+    ///
+    /// Guards against PID reuse: if the child has already exited (and possibly
+    /// been reaped, freeing its PID for the OS to recycle), this returns
+    /// [`ExpectError::SessionClosed`] rather than risk `libc::kill` landing on
+    /// an unrelated process. A raw `ESRCH` from `kill` maps to the same. Other
+    /// delivery failures (e.g. `EPERM`) are surfaced unchanged as
+    /// [`ExpectError::Io`].
     #[allow(unsafe_code)]
-    pub fn signal(&self, signal: i32) -> Result<()> {
+    pub fn signal(&mut self, signal: i32) -> Result<()> {
+        // Authoritative pre-kill check. `try_wait` reaps-and-caches; on this
+        // path `AsyncPty` is the only in-crate reaper, so `None` means the PID
+        // is still ours between here and the `kill` below. (This does not
+        // defend against the user reaping the same child out-of-band.)
+        if self.try_wait().is_some() {
+            return Err(ExpectError::SessionClosed);
+        }
         // SAFETY: pid is a valid process ID from fork().
         let result = unsafe { libc::kill(self.pid as i32, signal) };
-        if result != 0 {
-            Err(ExpectError::Io(io::Error::last_os_error()))
-        } else {
+        if result == 0 {
             Ok(())
+        } else {
+            let err = io::Error::last_os_error();
+            // Child exited between the guard and the kill (e.g. reaped
+            // out-of-band): treat as already closed rather than a raw error.
+            if err.raw_os_error() == Some(libc::ESRCH) {
+                Err(ExpectError::SessionClosed)
+            } else {
+                Err(ExpectError::Io(err))
+            }
         }
     }
 
     /// Kill the child process.
-    pub fn kill(&self) -> Result<()> {
+    pub fn kill(&mut self) -> Result<()> {
         self.signal(libc::SIGKILL)
     }
 }

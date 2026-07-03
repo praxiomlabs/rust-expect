@@ -1315,7 +1315,7 @@ impl Session<AsyncPty> {
     ///
     /// Returns an error if sending the signal fails.
     pub fn signal(&self, signal: i32) -> Result<()> {
-        if let Ok(transport) = self.transport.try_lock() {
+        if let Ok(mut transport) = self.transport.try_lock() {
             transport.signal(signal)
         } else {
             Err(ExpectError::io_context(
@@ -1331,7 +1331,7 @@ impl Session<AsyncPty> {
     ///
     /// Returns an error if killing the process fails.
     pub fn kill(&self) -> Result<()> {
-        if let Ok(transport) = self.transport.try_lock() {
+        if let Ok(mut transport) = self.transport.try_lock() {
             transport.kill()
         } else {
             Err(ExpectError::io_context(

@@ -148,3 +148,51 @@ async fn raw_send_after_exit_eventually_errors() {
         "1000 writes to an exited child all succeeded — exit was never surfaced"
     );
 }
+
+/// After the child has been reaped its PID is eligible for reuse, so
+/// `signal`/`kill` must NOT fire `libc::kill` at the (possibly recycled) PID.
+/// Both report `SessionClosed` instead. Regression test for S1.
+#[tokio::test]
+async fn reap_then_signal_is_rejected() {
+    let mut session = Session::spawn("/bin/sh", &["-c", "exit 0"])
+        .await
+        .expect("spawn");
+
+    // Reap the child so the guard has an authoritative "already exited" state.
+    let _ = tokio::time::timeout(Duration::from_secs(5), session.wait())
+        .await
+        .expect("wait() hung")
+        .expect("wait() errored");
+
+    match session.signal(libc::SIGTERM) {
+        Err(ExpectError::SessionClosed) => {}
+        other => panic!("expected SessionClosed from signal() after reap, got {other:?}"),
+    }
+    match session.kill() {
+        Err(ExpectError::SessionClosed) => {}
+        other => panic!("expected SessionClosed from kill() after reap, got {other:?}"),
+    }
+}
+
+/// The guard must not over-reject: a still-running child still receives the
+/// signal and terminates with it. Regression test for S1.
+#[tokio::test]
+async fn signal_running_child_still_delivers() {
+    let mut session = Session::spawn("/bin/sh", &["-c", "sleep 30"])
+        .await
+        .expect("spawn");
+
+    session
+        .signal(libc::SIGTERM)
+        .expect("signalling a live child should succeed");
+
+    let status = tokio::time::timeout(Duration::from_secs(5), session.wait())
+        .await
+        .expect("wait() hung")
+        .expect("wait() errored");
+    assert_eq!(
+        status,
+        ProcessExitStatus::Signaled(libc::SIGTERM),
+        "expected SIGTERM termination, got {status:?}"
+    );
+}

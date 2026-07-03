@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Guard `signal()`/`kill()` against PID reuse.** After a child exits and is
+  reaped, the OS can recycle its PID; the previous code called `libc::kill`
+  unconditionally, so a later `Session::signal`/`kill` could land on an
+  unrelated process. Both now perform an authoritative non-blocking reap check
+  before signalling and return `SessionClosed` if the child has already exited;
+  a raw `ESRCH` maps to the same. Genuine delivery failures (e.g. `EPERM`) are
+  still surfaced as `Io`. Signalling a live child is unchanged.
+
 - **Resilient PTY allocation on macOS/BSD.** macOS caps system-wide PTYs at
   `kern.tty.ptmx_max` (511 by default), far below Linux's dynamic allocation,
   so under heavy concurrent spawning `openpty` can transiently fail (the BSD
@@ -21,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure rather than a specific errno: our arguments are always valid, so the
   only realistic failure is exhaustion, and retrying unconditionally is simpler
   and more robust.
+
+### Changed
+
+- **API (Unix, pre-1.0 breaking):** as part of the PID-reuse guard,
+  `AsyncPty::signal`/`kill` now take `&mut self` (they perform an authoritative
+  reap check). `Session::signal`/`kill` keep their `&self` signatures. The
+  unguarded low-level `PtyHandle::signal`/`kill` methods have been removed;
+  signal a child through `Session`/`SyncSession` instead.
 
 ## [0.4.0] - 2026-07-02
 

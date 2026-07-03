@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Apply the configured terminal size at spawn.** `openpty` was called with a
+  null `winp`, so a freshly spawned child saw a 0x0 terminal until an explicit
+  `resize` — a full-screen (TUI) child would render into nothing. The PTY is
+  now allocated at the session's configured dimensions, so `stty size` (and
+  curses apps) report the right size from the first byte.
+
+- **Set close-on-exec on the PTY master.** The master fd lacked `FD_CLOEXEC`,
+  so under concurrent spawning it could leak into an unrelated child forked by
+  another session. The master is now marked close-on-exec immediately after
+  allocation. This is best-effort: a small `openpty`→`fcntl` window remains on
+  the hand-rolled Unix path (`openpty` offers no `O_CLOEXEC`), and it guards
+  the master only. It reduces the leak; it cannot eliminate the race on this
+  path.
+
 - **Guard `signal()`/`kill()` against PID reuse.** After a child exits and is
   reaped, the OS can recycle its PID; the previous code called `libc::kill`
   unconditionally, so a later `Session::signal`/`kill` could land on an

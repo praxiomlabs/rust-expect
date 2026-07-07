@@ -61,7 +61,8 @@ mod sync_session_tests {
 
     #[test]
     fn sync_session_has_pid() {
-        let session = SyncSession::spawn("/bin/true", &[]).expect("Failed to spawn true");
+        // `/usr/bin/true` exists on both Linux and macOS (macOS has no `/bin/true`).
+        let session = SyncSession::spawn("/usr/bin/true", &[]).expect("Failed to spawn true");
 
         assert!(session.pid() > 0);
     }

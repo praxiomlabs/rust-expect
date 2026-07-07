@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Unix spawn migrated off the hand-rolled `fork`/`exec` onto `tokio::process`
+  (via `rust-pty`).** The previous Unix `Session` spawn did non-async-signal-safe
+  work between `fork()` and `execvp` (environment mutation, heap allocation),
+  which is unsound under a multi-threaded Tokio runtime — the default
+  `#[tokio::main]`. The Unix transport now wraps rust-pty's
+  `UnixPtyMaster`/`UnixPtyChild`, whose only between-fork-and-exec work is
+  async-signal-safe `setsid` + `TIOCSCTTY`. This deletes a large block of
+  `unsafe` and resolves intermittent empty-output spawns observed under
+  multi-threaded load. `Session`/`SyncSession` public APIs are unchanged.
+- **API (Unix, pre-1.0):** the low-level re-exported `PtyHandle` now wraps
+  rust-pty's master/child instead of a raw fd; its `wait()` method was removed
+  (wait via `Session`/`SyncSession`). A null byte in the command or an argument
+  is still rejected, now with std's "nul byte found in provided data" message
+  rather than "... contains null byte".
+
 ### Fixed
+
+- **Spawning a non-existent program now returns a spawn error** instead of an
+  apparently-successful `Session` whose child immediately exits. The migrated
+  `tokio::process` path reports `exec` failures that the old hand-rolled fork
+  path silently swallowed (the parent returned a pid before the child's `exec`
+  failed).
 
 - **Apply the configured terminal size at spawn.** `openpty` was called with a
   null `winp`, so a freshly spawned child saw a 0x0 terminal until an explicit

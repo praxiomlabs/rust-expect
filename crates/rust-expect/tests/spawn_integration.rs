@@ -149,7 +149,7 @@ async fn working_dir_changes_child_cwd() {
 /// `InvalidWorkingDir` spawn error rather than a cryptic child exit.
 #[tokio::test]
 async fn working_dir_missing_returns_clean_error() {
-    use rust_expect::Session;
+    use rust_expect::{ExpectError, Session, SpawnError};
 
     let config = SessionBuilder::new()
         .command("/bin/sh")
@@ -159,9 +159,13 @@ async fn working_dir_missing_returns_clean_error() {
         .build();
 
     let result = Session::spawn_with_config("/bin/sh", &["-c", "exit 0"], config).await;
+    let err = result.expect_err("spawn should fail for a non-existent working directory");
     assert!(
-        result.is_err(),
-        "spawn should fail for a non-existent working directory"
+        matches!(
+            err,
+            ExpectError::Spawn(SpawnError::InvalidWorkingDir { .. })
+        ),
+        "expected InvalidWorkingDir, got {err:?}"
     );
 }
 
@@ -393,12 +397,27 @@ async fn spawn_cat_interactive() {
 /// Test process ID is available.
 #[tokio::test]
 async fn spawn_has_pid() {
-    let session = Session::spawn("/bin/true", &[])
+    // `/usr/bin/true` exists on both Linux and macOS (macOS has no `/bin/true`).
+    // The migrated spawn correctly reports exec failure for a missing program,
+    // unlike the old fork path which returned a pid for a doomed child.
+    let session = Session::spawn("/usr/bin/true", &[])
         .await
         .expect("Failed to spawn true");
 
     let pid = session.pid();
     assert!(pid > 0, "Expected valid PID, got {pid}");
+}
+
+/// Spawning a non-existent program must surface a spawn error. The old
+/// hand-rolled fork path returned `Ok` with a pid for a child that then failed
+/// to `exec`; the migrated `tokio::process` path reports the failure.
+#[tokio::test]
+async fn spawn_reports_missing_program() {
+    let result = Session::spawn("/no/such/rust-expect/program", &[]).await;
+    assert!(
+        result.is_err(),
+        "spawning a non-existent program should error, got Ok"
+    );
 }
 
 /// Test spawn with custom configuration.

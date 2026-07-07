@@ -6,7 +6,7 @@
 use std::ffi::OsStr;
 use std::future::Future;
 use std::io;
-use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::pin::Pin;
 use std::process::ExitStatus as StdExitStatus;
 use std::sync::Arc;
@@ -151,6 +151,37 @@ impl UnixPtyChild {
             && let Some(s) = *guard
         {
             return Ok(Some(s));
+        }
+
+        // For a `tokio::process`-spawned child, reap through tokio's own
+        // non-blocking `try_wait`. tokio owns SIGCHLD reaping for children it
+        // spawned; issuing a raw `waitpid` on the same PID here is incorrect
+        // API usage that only happens to work while tokio's reaper is idle, and
+        // it can race that reaper (stealing the status, or losing it to tokio).
+        match self.child.try_lock() {
+            Ok(mut child_guard) => {
+                if let Some(ref mut child) = *child_guard {
+                    return match child.try_wait().map_err(PtyError::Wait)? {
+                        Some(status) => {
+                            let exit_status = convert_exit_status(status);
+                            self.running.store(false, Ordering::SeqCst);
+                            if let Ok(mut guard) = self.exit_status.try_lock() {
+                                *guard = Some(exit_status);
+                            }
+                            Ok(Some(exit_status))
+                        }
+                        None => Ok(None),
+                    };
+                }
+                // No `TokioChild` (a `from_pid` adoptee): fall through to
+                // `waitpid` below.
+            }
+            Err(_) => {
+                // The child handle is momentarily locked (e.g. an in-flight
+                // `wait`). Don't race it with a raw `waitpid`; report
+                // not-yet-determinable rather than risk a double reap.
+                return Ok(None);
+            }
         }
 
         let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| {
@@ -307,16 +338,49 @@ where
         cmd.current_dir(dir);
     }
 
-    // Set up stdio to use the slave PTY
-    // SAFETY: We're duplicating a valid fd
+    // Set up stdio to use the slave PTY. Each `dup` is checked: building a
+    // `Stdio` from an invalid (-1) fd is unsound, and `dup` can fail (e.g.
+    // EMFILE). On failure, close any fds already duplicated here.
+    let stdin_fd = dup_slave(slave_raw)?;
+    let stdout_fd = match dup_slave(slave_raw) {
+        Ok(fd) => fd,
+        Err(e) => {
+            // SAFETY: stdin_fd is a valid fd created just above and owned here.
+            unsafe { libc::close(stdin_fd) };
+            return Err(e);
+        }
+    };
+    let stderr_fd = match dup_slave(slave_raw) {
+        Ok(fd) => fd,
+        Err(e) => {
+            // SAFETY: stdin_fd/stdout_fd are valid owned fds created above.
+            unsafe {
+                libc::close(stdin_fd);
+                libc::close(stdout_fd);
+            }
+            return Err(e);
+        }
+    };
+
+    // SAFETY: the three fds are valid, owned, and ownership transfers to the
+    // `Stdio` values (which close them).
     unsafe {
-        cmd.stdin(Stdio::from_raw_fd(libc::dup(slave_raw)));
-        cmd.stdout(Stdio::from_raw_fd(libc::dup(slave_raw)));
-        cmd.stderr(Stdio::from_raw_fd(libc::dup(slave_raw)));
+        cmd.stdin(Stdio::from_raw_fd(stdin_fd));
+        cmd.stdout(Stdio::from_raw_fd(stdout_fd));
+        cmd.stderr(Stdio::from_raw_fd(stderr_fd));
     }
 
-    // Configure process
-    if config.new_session {
+    // Configure process group / session.
+    //
+    // When `controlling_terminal` is set, the `setsid()` in the pre_exec hook
+    // below already creates a new session *and* a new process group with the
+    // child as leader. Calling `process_group(0)` here as well makes the child
+    // a group leader *before* exec, which then makes that `setsid()` fail with
+    // EPERM (a process that is already a group leader cannot start a new
+    // session). So only use `process_group(0)` for the
+    // new-session-without-controlling-terminal case; otherwise `setsid()`
+    // handles both.
+    if config.new_session && !config.controlling_terminal {
         cmd.process_group(0);
     }
 
@@ -345,6 +409,18 @@ where
     let child = cmd.spawn().map_err(PtyError::Spawn)?;
 
     Ok(UnixPtyChild::new(child))
+}
+
+/// Duplicate the slave fd for a child stdio stream, returning an error rather
+/// than a `-1` on failure.
+#[allow(unsafe_code)]
+fn dup_slave(slave_raw: RawFd) -> Result<RawFd> {
+    // SAFETY: slave_raw is a valid, open slave fd for the duration of the call.
+    let fd = unsafe { libc::dup(slave_raw) };
+    if fd == -1 {
+        return Err(PtyError::Spawn(io::Error::last_os_error()));
+    }
+    Ok(fd)
 }
 
 #[cfg(test)]

@@ -50,9 +50,27 @@ impl UnixPtyMaster {
     ///
     /// Returns an error if PTY allocation fails.
     pub fn open() -> Result<(Self, String)> {
-        // Open master PTY
-        let master_fd = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)
+        // Open master PTY.
+        //
+        // L1: request close-on-exec so the master fd can't leak into unrelated
+        // children spawned concurrently. On Linux rustix honors `CLOEXEC`
+        // atomically inside `posix_openpt` (no open->set race). Other platforms'
+        // `posix_openpt` has no atomic `O_CLOEXEC`, so there we set `FD_CLOEXEC`
+        // with a follow-up fcntl (best-effort; a small open->fcntl window
+        // remains, closed only once the platform gains an atomic path).
+        #[cfg(target_os = "linux")]
+        let master_fd = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC)
             .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;
+        #[cfg(not(target_os = "linux"))]
+        let master_fd = {
+            let fd = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)
+                .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;
+            let flags = rustix::io::fcntl_getfd(&fd)
+                .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;
+            rustix::io::fcntl_setfd(&fd, flags | rustix::io::FdFlags::CLOEXEC)
+                .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;
+            fd
+        };
 
         // Grant access to slave
         grantpt(&master_fd)
@@ -230,6 +248,11 @@ impl AsyncRead for UnixPtyMaster {
                 Err(rustix::io::Errno::AGAIN) => {
                     guard.clear_ready();
                 }
+                Err(rustix::io::Errno::INTR) => {
+                    // Interrupted by a signal before any bytes moved; the fd is
+                    // still ready, so loop and retry the read rather than
+                    // surfacing a spurious error (E1).
+                }
                 Err(e) => {
                     return Poll::Ready(Err(io::Error::from_raw_os_error(e.raw_os_error())));
                 }
@@ -259,6 +282,11 @@ impl AsyncWrite for UnixPtyMaster {
                 Ok(n) => return Poll::Ready(Ok(n)),
                 Err(rustix::io::Errno::AGAIN) => {
                     guard.clear_ready();
+                }
+                Err(rustix::io::Errno::INTR) => {
+                    // Interrupted by a signal before any bytes moved; the fd is
+                    // still ready, so loop and retry the write rather than
+                    // surfacing a spurious error (E1).
                 }
                 Err(e) => {
                     return Poll::Ready(Err(io::Error::from_raw_os_error(e.raw_os_error())));
@@ -309,9 +337,13 @@ pub fn open_slave(path: &str) -> Result<OwnedFd> {
 
     use rustix::fs::{Mode, OFlags, open};
 
+    // CLOEXEC: the child receives the slave via three explicit `dup`ed stdio
+    // fds; this original handle (used only for the pre_exec `TIOCSCTTY`) must
+    // not additionally leak across the exec. `dup` does not copy the flag, so
+    // the stdio copies remain inheritable as intended.
     let fd = open(
         Path::new(path),
-        OFlags::RDWR | OFlags::NOCTTY,
+        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;
@@ -336,6 +368,19 @@ mod tests {
                 || slave_path.starts_with("/dev/ttys")
                 || slave_path.starts_with("/dev/ttyp")
                 || slave_path.starts_with("/dev/pty")
+        );
+    }
+
+    /// L1: the master fd must be close-on-exec so it can't leak into unrelated
+    /// children spawned concurrently (atomic on Linux via `OpenptFlags`, via a
+    /// follow-up fcntl elsewhere).
+    #[tokio::test]
+    async fn master_is_close_on_exec() {
+        let (master, _slave_path) = UnixPtyMaster::open().expect("open");
+        let flags = rustix::io::fcntl_getfd(master.async_fd.get_ref()).expect("F_GETFD");
+        assert!(
+            flags.contains(rustix::io::FdFlags::CLOEXEC),
+            "master fd is missing FD_CLOEXEC"
         );
     }
 

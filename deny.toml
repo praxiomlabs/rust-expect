@@ -39,6 +39,11 @@ ignore = [
     # rust-expect uses rand only for HumanTyper, which never installs a
     # custom logger.
     { id = "RUSTSEC-2026-0097", reason = "Custom-logger interaction path unreachable: HumanTyper does not install loggers" },
+    # crossbeam-epoch fmt::Pointer invalid-ptr deref. Reached only via
+    # criterion -> rayon (a benchmark dev-dependency); not in any shipped
+    # artifact, and the Debug-formatting path for an invalid Atomic/Shared
+    # pointer is never exercised.
+    { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch invalid-ptr fmt::Pointer; dev-only (criterion/rayon benchmarks), path unreached" },
 ]
 
 [licenses]

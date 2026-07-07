@@ -39,7 +39,8 @@ jobs:
             --ignore RUSTSEC-2026-0047 \
             --ignore RUSTSEC-2026-0048 \
             --ignore RUSTSEC-2026-0074 \
-            --ignore RUSTSEC-2026-0097
+            --ignore RUSTSEC-2026-0097 \
+            --ignore RUSTSEC-2026-0204
 
   deny:
     name: Cargo Deny

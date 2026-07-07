@@ -34,6 +34,7 @@ mod pty;
 mod signals;
 
 use std::ffi::OsStr;
+use std::io;
 
 pub use buffer::PtyBuffer;
 pub use child::{UnixPtyChild, spawn_child};
@@ -44,8 +45,39 @@ pub use signals::{
 };
 
 use crate::config::PtyConfig;
-use crate::error::Result;
+use crate::error::{PtyError, Result};
 use crate::traits::PtySystem;
+
+/// Allocate a PTY master, retrying briefly on transient allocation failure.
+///
+/// macOS caps the system-wide PTY count at `kern.tty.ptmx_max` (511 by
+/// default), far below Linux's dynamic `/dev/pts`. Under heavy concurrent
+/// spawning `openpt` can momentarily fail (the BSD exhaustion code is `ENXIO`,
+/// "Device not configured") even though a slot frees moments later as other
+/// sessions are torn down. A short bounded backoff (~10 attempts, ~90ms worst
+/// case) turns those intermittent failures into reliable spawns; a genuinely
+/// permanent failure still surfaces promptly, carrying the underlying error.
+async fn open_master_with_retry() -> Result<(UnixPtyMaster, String)> {
+    const ATTEMPTS: u32 = 10;
+
+    let mut last_err = PtyError::Create(io::Error::other("openpt was never attempted"));
+    for attempt in 0..ATTEMPTS {
+        match UnixPtyMaster::open() {
+            Ok(pair) => return Ok(pair),
+            Err(e) => {
+                last_err = e;
+                if attempt + 1 < ATTEMPTS {
+                    // Non-blocking backoff so other sessions can release PTYs.
+                    tokio::time::sleep(std::time::Duration::from_millis(2 * u64::from(
+                        attempt + 1,
+                    )))
+                    .await;
+                }
+            }
+        }
+    }
+    Err(last_err)
+}
 
 /// Unix PTY system implementation.
 ///
@@ -67,8 +99,8 @@ impl PtySystem for UnixPtySystem {
         I: IntoIterator + Send,
         I::Item: AsRef<OsStr>,
     {
-        // Open master PTY
-        let (master, slave_path) = UnixPtyMaster::open()?;
+        // Open master PTY (retrying briefly on transient macOS ptmx exhaustion)
+        let (master, slave_path) = open_master_with_retry().await?;
 
         // Set initial window size
         let window_size = config.window_size.into();
@@ -138,6 +170,15 @@ mod tests {
         let status = child.wait().await.expect("wait");
         assert_eq!(status, crate::traits::ExitStatus::Exited(0));
         master.close().ok();
+    }
+
+    /// The allocation-retry wrapper succeeds on a healthy system (happy path;
+    /// the exhaustion-retry path itself is environmental and not unit-testable
+    /// without destabilizing the whole test run).
+    #[tokio::test]
+    async fn allocation_retry_happy_path() {
+        let (master, _slave_path) = open_master_with_retry().await.expect("allocate");
+        assert!(master.is_open());
     }
 
     /// `try_wait` must report the child's real exit status without erroring,

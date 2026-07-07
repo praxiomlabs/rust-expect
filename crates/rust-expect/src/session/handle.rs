@@ -19,7 +19,9 @@ use crate::backend::{PtyConfig, PtySpawner, WindowsAsyncPty};
 use crate::config::SessionConfig;
 use crate::dialog::{Dialog, DialogExecutor, DialogResult};
 use crate::error::{ExpectError, Result};
-use crate::expect::{ExpectState, MatchResult, Matcher, Pattern, PatternManager, PatternSet};
+use crate::expect::{
+    ExpectState, HandlerAction, MatchResult, Matcher, Pattern, PatternManager, PatternSet,
+};
 use crate::interact::InteractBuilder;
 #[cfg(feature = "screen")]
 use crate::screen::Screen;
@@ -531,31 +533,27 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let state = ExpectState::new(patterns.clone(), timeout);
 
         loop {
-            // Check before patterns first
-            if let Some((_, action)) = self
+            // Before patterns run before the explicit patterns (highest priority).
+            if let Some((_, action, pattern)) = self
                 .pattern_manager
                 .check_before(&self.matcher.buffer_str())
+                && let Some(outcome) = self.apply_ambient_action(action, &pattern).await?
             {
-                match action {
-                    crate::expect::HandlerAction::Continue => {}
-                    crate::expect::HandlerAction::Return(s) => {
-                        return Ok(Match::new(0, s, String::new(), self.matcher.buffer_str()));
-                    }
-                    crate::expect::HandlerAction::Abort(msg) => {
-                        return Err(ExpectError::PatternNotFound {
-                            pattern: msg,
-                            buffer: self.matcher.buffer_str(),
-                        });
-                    }
-                    crate::expect::HandlerAction::Respond(s) => {
-                        self.send_str(&s).await?;
-                    }
-                }
+                return Ok(outcome);
             }
 
             // Check for pattern match
             if let Some(result) = self.matcher.try_match_any(patterns) {
                 return Ok(self.matcher.consume_match(&result));
+            }
+
+            // After patterns run only as a fallback, once the explicit patterns
+            // have failed to match on this poll.
+            if let Some((_, action, pattern)) =
+                self.pattern_manager.check_after(&self.matcher.buffer_str())
+                && let Some(outcome) = self.apply_ambient_action(action, &pattern).await?
+            {
+                return Ok(outcome);
             }
 
             // Check for timeout
@@ -589,6 +587,52 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             // Read more data
             self.read_with_timeout(state.remaining_time()).await?;
         }
+    }
+
+    /// Apply an ambient (before/after) handler action.
+    ///
+    /// Returns `Some(match)` if the expect operation should return now
+    /// (`Return`), or `None` to continue the loop (`Continue`/`Respond`). For
+    /// `Respond` and `Return` the triggering match is consumed from the buffer
+    /// first, so the ambient pattern cannot re-fire on the next poll or on the
+    /// next `expect` call against the same buffer.
+    async fn apply_ambient_action(
+        &mut self,
+        action: HandlerAction,
+        pattern: &Pattern,
+    ) -> Result<Option<Match>> {
+        match action {
+            HandlerAction::Continue => Ok(None),
+            HandlerAction::Respond(s) => {
+                self.consume_ambient(pattern);
+                self.send_str(&s).await?;
+                Ok(None)
+            }
+            HandlerAction::Return(s) => {
+                // Consume the ambient match, but return the handler's value `s`
+                // as the matched string (preserving `Return`'s semantics); take
+                // before/after from the consumed match.
+                let (before, after) = match self.consume_ambient(pattern) {
+                    Some(m) => (m.before, m.after),
+                    None => (String::new(), self.matcher.buffer_str()),
+                };
+                Ok(Some(Match::new(0, s, before, after)))
+            }
+            HandlerAction::Abort(msg) => Err(ExpectError::PatternNotFound {
+                pattern: msg,
+                buffer: self.matcher.buffer_str(),
+            }),
+        }
+    }
+
+    /// Consume an ambient pattern's match from the buffer so it can't re-fire.
+    ///
+    /// Uses the real [`Matcher`] path (search-window offset, `Pattern::Bytes`
+    /// handling) rather than a raw offset. Returns the consumed [`Match`] if the
+    /// pattern still matches, else `None`.
+    fn consume_ambient(&mut self, pattern: &Pattern) -> Option<Match> {
+        let result = self.matcher.try_match(pattern)?;
+        Some(self.matcher.consume_match(&result))
     }
 
     /// Expect with a specific timeout.
@@ -1510,4 +1554,174 @@ fn is_pty_eof_error(e: &std::io::Error) -> bool {
     }
 
     false
+}
+
+/// Before/after ambient-pattern behavior driven through the real expect loop
+/// (M1). Uses the mock transport so reads/writes are deterministic.
+#[cfg(all(test, feature = "mock"))]
+mod ambient_pattern_tests {
+    use std::time::Duration;
+
+    use super::Session;
+    use crate::config::SessionConfig;
+    use crate::expect::{HandlerAction, Pattern, PersistentPattern};
+    use crate::mock::MockTransport;
+
+    /// Build a session over a mock transport pre-loaded with `output`, keeping a
+    /// cloned transport handle for queueing more output and reading what was sent.
+    fn session_with(output: &str) -> (Session<MockTransport>, MockTransport) {
+        let transport = MockTransport::new();
+        let handle = transport.clone();
+        handle.queue_output_str(output);
+        let session = Session::new(transport, SessionConfig::default());
+        (session, handle)
+    }
+
+    /// Bug A: after-patterns were never checked by the loop. An after-pattern
+    /// must fire as a fallback when the explicit pattern does not match.
+    #[tokio::test]
+    async fn after_pattern_fires_as_fallback() {
+        let (mut session, handle) = session_with("Show more? ");
+        let after = PersistentPattern::with_response(Pattern::literal("more? "), "yes\n");
+        session.pattern_manager_mut().add_after(after);
+
+        // No explicit match: the after-pattern should respond, then we time out.
+        let _ = session
+            .expect_timeout(Pattern::literal("NEVER"), Duration::from_millis(150))
+            .await;
+
+        let sent = String::from_utf8_lossy(&handle.take_input()).into_owned();
+        assert!(
+            sent.contains("yes"),
+            "after-pattern should have responded; sent = {sent:?}"
+        );
+    }
+
+    /// Bug B: a before `Respond` must consume its trigger so it can't re-fire.
+    /// We observe the consume via the following match's `before` (the prompt is
+    /// gone) — before the fix, `before` still contains the un-consumed prompt.
+    #[tokio::test]
+    async fn before_respond_consumes_trigger() {
+        let (mut session, handle) = session_with("password: welcome\n");
+        let before = PersistentPattern::with_response(Pattern::literal("password:"), "secret\n");
+        session.pattern_manager_mut().add_before(before);
+
+        let m = session
+            .expect_timeout(Pattern::literal("welcome"), Duration::from_secs(2))
+            .await
+            .expect("welcome should match");
+
+        assert!(
+            !m.before.contains("password"),
+            "before-trigger was not consumed; before = {:?}",
+            m.before
+        );
+        let sent = String::from_utf8_lossy(&handle.take_input()).into_owned();
+        assert!(
+            sent.contains("secret"),
+            "responder should have sent; sent = {sent:?}"
+        );
+    }
+
+    /// Reviewer note: a before `Return` must consume its trigger so the *next*
+    /// expect call against the same (persistent) buffer doesn't immediately
+    /// re-trigger instead of matching real output.
+    #[tokio::test]
+    async fn before_return_consumes_across_calls() {
+        let (mut session, _handle) = session_with("prompt data\n");
+        let before = PersistentPattern::new(
+            Pattern::literal("prompt"),
+            Box::new(|_| HandlerAction::Return("HANDLED".into())),
+        );
+        session.pattern_manager_mut().add_before(before);
+
+        let first = session
+            .expect_timeout(Pattern::literal("data"), Duration::from_secs(2))
+            .await
+            .expect("first expect");
+        assert_eq!(first.matched, "HANDLED", "before Return should fire first");
+
+        // Consumed, so the second call must match the real data, not re-Return.
+        let second = session
+            .expect_timeout(Pattern::literal("data"), Duration::from_secs(2))
+            .await
+            .expect("second expect should match data, not re-trigger");
+        assert!(
+            second.matched.contains("data"),
+            "before Return re-triggered across calls; got {:?}",
+            second.matched
+        );
+    }
+
+    /// Priority: a before pattern takes precedence over the explicit pattern.
+    #[tokio::test]
+    async fn before_beats_explicit_pattern() {
+        let (mut session, _handle) = session_with("xy\n");
+        let before = PersistentPattern::new(
+            Pattern::literal("x"),
+            Box::new(|_| HandlerAction::Return("BEFORE".into())),
+        );
+        session.pattern_manager_mut().add_before(before);
+
+        let m = session
+            .expect_timeout(Pattern::literal("x"), Duration::from_secs(2))
+            .await
+            .expect("match");
+        assert_eq!(
+            m.matched, "BEFORE",
+            "before should win over the explicit pattern"
+        );
+    }
+
+    /// Priority: an explicit pattern suppresses an after-pattern that would also
+    /// match (after runs only as a fallback once the explicit pattern fails).
+    #[tokio::test]
+    async fn explicit_beats_after_pattern() {
+        let (mut session, _handle) = session_with("target\n");
+        let after = PersistentPattern::new(
+            Pattern::literal("target"),
+            Box::new(|_| HandlerAction::Return("AFTER".into())),
+        );
+        session.pattern_manager_mut().add_after(after);
+
+        let m = session
+            .expect_timeout(Pattern::literal("target"), Duration::from_secs(2))
+            .await
+            .expect("match");
+        assert_eq!(
+            m.matched, "target",
+            "explicit pattern should suppress the after-pattern"
+        );
+    }
+
+    /// After-pattern consumption: like the before case, an after `Return` must
+    /// consume its trigger so the next expect call matches real output instead
+    /// of re-triggering the after-pattern.
+    #[tokio::test]
+    async fn after_return_consumes_across_calls() {
+        let (mut session, _handle) = session_with("prompt data\n");
+        let after = PersistentPattern::new(
+            Pattern::literal("prompt"),
+            Box::new(|_| HandlerAction::Return("A_HANDLED".into())),
+        );
+        session.pattern_manager_mut().add_after(after);
+
+        // Explicit pattern doesn't match, so the after-pattern fires and returns.
+        let first = session
+            .expect_timeout(Pattern::literal("NOPE"), Duration::from_secs(2))
+            .await
+            .expect("after-pattern should fire as fallback");
+        assert_eq!(first.matched, "A_HANDLED");
+
+        // Consumed, so this must match the real data, not re-trigger the after.
+        let second = session
+            .expect_timeout(Pattern::literal("data"), Duration::from_secs(2))
+            .await
+            .expect("second expect should match data, not re-trigger");
+        assert!(
+            second.matched.contains("data"),
+            "after Return re-triggered across calls; got {:?}",
+            second.matched
+        );
+    }
 }

@@ -97,13 +97,16 @@ impl std::fmt::Debug for PersistentPattern {
 
 /// Manager for before/after patterns.
 ///
-/// Before patterns are checked before every expect operation.
-/// After patterns are checked after each expect operation completes.
+/// On each poll of an expect operation, before patterns are checked *before*
+/// the explicit patterns (highest priority), and after patterns are checked
+/// *after* the explicit patterns fail to match (a fallback). This mirrors
+/// Tcl expect's `expect_before`/`expect_after` semantics; after patterns do
+/// **not** run once an explicit pattern has matched.
 #[derive(Default)]
 pub struct PatternManager {
-    /// Patterns checked before each expect.
+    /// Patterns checked before the explicit patterns on each poll.
     before_patterns: HashMap<String, PersistentPattern>,
-    /// Patterns checked after each expect.
+    /// Patterns checked as a fallback after the explicit patterns fail.
     after_patterns: HashMap<String, PersistentPattern>,
     /// Counter for generating unique IDs.
     next_id: usize,
@@ -164,17 +167,22 @@ impl PatternManager {
 
     /// Check before patterns against the buffer.
     ///
-    /// Returns the first matching handler action, or None if no patterns match.
+    /// Returns `(id, action, matched_pattern)` for the first matching pattern,
+    /// or `None` if none match. The matched pattern is returned so the caller
+    /// can consume the triggering match from its buffer (via `Matcher`) and
+    /// avoid re-firing on the next poll.
     #[must_use]
-    pub fn check_before(&self, buffer: &str) -> Option<(String, HandlerAction)> {
+    pub fn check_before(&self, buffer: &str) -> Option<(String, HandlerAction, Pattern)> {
         self.check_patterns(&self.before_patterns, buffer)
     }
 
     /// Check after patterns against the buffer.
     ///
-    /// Returns the first matching handler action, or None if no patterns match.
+    /// Returns `(id, action, matched_pattern)` for the first matching pattern,
+    /// or `None` if none match. See [`Self::check_before`] for why the pattern
+    /// is returned.
     #[must_use]
-    pub fn check_after(&self, buffer: &str) -> Option<(String, HandlerAction)> {
+    pub fn check_after(&self, buffer: &str) -> Option<(String, HandlerAction, Pattern)> {
         self.check_patterns(&self.after_patterns, buffer)
     }
 
@@ -229,7 +237,7 @@ impl PatternManager {
         &self,
         patterns: &HashMap<String, PersistentPattern>,
         buffer: &str,
-    ) -> Option<(String, HandlerAction)> {
+    ) -> Option<(String, HandlerAction, Pattern)> {
         // Collect enabled patterns sorted by priority
         let mut sorted: Vec<_> = patterns.iter().filter(|(_, p)| p.enabled).collect();
         sorted.sort_by_key(|(_, p)| p.priority);
@@ -238,7 +246,7 @@ impl PatternManager {
             if persistent.pattern.matches(buffer).is_some() {
                 let action = (persistent.handler)(buffer);
                 if !matches!(action, HandlerAction::Continue) {
-                    return Some((id.clone(), action));
+                    return Some((id.clone(), action, persistent.pattern.clone()));
                 }
             }
         }
@@ -371,7 +379,7 @@ mod tests {
         let result = manager.check_before("Enter password: ");
         assert!(result.is_some());
 
-        let (matched_id, action) = result.unwrap();
+        let (matched_id, action, _pattern) = result.unwrap();
         assert_eq!(matched_id, id);
         assert!(matches!(action, HandlerAction::Respond(_)));
     }
@@ -398,7 +406,7 @@ mod tests {
         let result = manager.check_before("test");
         assert!(result.is_some());
 
-        if let Some((_, HandlerAction::Respond(s))) = result {
+        if let Some((_, HandlerAction::Respond(s), _pattern)) = result {
             assert_eq!(s, "high");
         } else {
             panic!("Expected Respond action");
@@ -418,6 +426,26 @@ mod tests {
         // Disable and check again
         manager.get_before_mut(&id).unwrap().disable();
         assert!(manager.check_before("test").is_none());
+    }
+
+    #[test]
+    fn pattern_manager_after() {
+        let mut manager = PatternManager::new();
+
+        let pattern = PersistentPattern::with_response(Pattern::literal("more? "), "yes\n");
+        let id = manager.add_after(pattern);
+
+        let result = manager.check_after("Show more? ");
+        assert!(result.is_some(), "after pattern should match");
+
+        let (matched_id, action, _pattern) = result.unwrap();
+        assert_eq!(matched_id, id);
+        assert!(matches!(action, HandlerAction::Respond(_)));
+
+        // After patterns are independent of before patterns.
+        assert!(manager.check_before("Show more? ").is_none());
+        assert_eq!(manager.after_count(), 1);
+        assert_eq!(manager.before_count(), 0);
     }
 
     #[test]

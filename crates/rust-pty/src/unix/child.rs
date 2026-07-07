@@ -315,8 +315,17 @@ where
         cmd.stderr(Stdio::from_raw_fd(libc::dup(slave_raw)));
     }
 
-    // Configure process
-    if config.new_session {
+    // Configure process group / session.
+    //
+    // When `controlling_terminal` is set, the `setsid()` in the pre_exec hook
+    // below already creates a new session *and* a new process group with the
+    // child as leader. Calling `process_group(0)` here as well makes the child
+    // a group leader *before* exec, which then makes that `setsid()` fail with
+    // EPERM (a process that is already a group leader cannot start a new
+    // session). So only use `process_group(0)` for the
+    // new-session-without-controlling-terminal case; otherwise `setsid()`
+    // handles both.
+    if config.new_session && !config.controlling_terminal {
         cmd.process_group(0);
     }
 

@@ -120,4 +120,23 @@ mod tests {
             master.close().ok();
         }
     }
+
+    /// Regression: the default config sets both `new_session` and
+    /// `controlling_terminal`. Previously `spawn_child` called
+    /// `process_group(0)` (making the child a group leader) *and* `setsid()` in
+    /// the pre_exec hook, so `setsid()` failed with EPERM and the default spawn
+    /// errored. Unlike `spawn_echo`/`spawn_shell` above (which swallow spawn
+    /// failure via `if let Ok`), this asserts the spawn actually succeeds.
+    #[tokio::test]
+    async fn spawn_succeeds_with_default_config() {
+        let config = PtyConfig::default();
+        let (mut master, mut child) =
+            UnixPtySystem::spawn("/bin/sh", ["-c", "exit 0"], &config)
+                .await
+                .expect("default-config spawn must succeed (EPERM regression)");
+
+        let status = child.wait().await.expect("wait");
+        assert_eq!(status, crate::traits::ExitStatus::Exited(0));
+        master.close().ok();
+    }
 }

@@ -149,7 +149,7 @@ async fn working_dir_changes_child_cwd() {
 /// `InvalidWorkingDir` spawn error rather than a cryptic child exit.
 #[tokio::test]
 async fn working_dir_missing_returns_clean_error() {
-    use rust_expect::Session;
+    use rust_expect::{ExpectError, Session, SpawnError};
 
     let config = SessionBuilder::new()
         .command("/bin/sh")
@@ -159,9 +159,13 @@ async fn working_dir_missing_returns_clean_error() {
         .build();
 
     let result = Session::spawn_with_config("/bin/sh", &["-c", "exit 0"], config).await;
+    let err = result.expect_err("spawn should fail for a non-existent working directory");
     assert!(
-        result.is_err(),
-        "spawn should fail for a non-existent working directory"
+        matches!(
+            err,
+            ExpectError::Spawn(SpawnError::InvalidWorkingDir { .. })
+        ),
+        "expected InvalidWorkingDir, got {err:?}"
     );
 }
 

@@ -176,6 +176,17 @@ impl PtySpawner {
     pub async fn spawn(&self, command: &str, args: &[String]) -> Result<PtyHandle> {
         use rust_pty::{PtySystem, UnixPtySystem};
 
+        // Preserve the `InvalidWorkingDir` contract: rust-pty surfaces a missing
+        // working directory as a generic spawn failure, so validate it up front
+        // for a clear, specific error.
+        if let Some(dir) = &self.config.working_directory
+            && !dir.is_dir()
+        {
+            return Err(ExpectError::Spawn(SpawnError::InvalidWorkingDir {
+                path: dir.display().to_string(),
+            }));
+        }
+
         // Build env per env_mode (mirrors the Windows branch):
         // - Inherit (no overrides): env: None (rust-pty inherits the parent env).
         // - Inherit/Extend (with overrides): parent env + overrides (ours win).
@@ -356,18 +367,10 @@ impl PtyHandle {
         Ok(())
     }
 
-    /// Check if the child process is still running.
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        self.child.is_running()
-    }
-
-    /// Kill the child process.
-    pub fn kill(&mut self) -> Result<()> {
-        self.child
-            .kill()
-            .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
-    }
+    // NB: no `signal`/`kill` here. The unguarded low-level signal path was
+    // removed for the PID-reuse guard (S1); signal a child through
+    // `Session`/`SyncSession`, whose `AsyncPty::signal` performs the
+    // authoritative reap-before-kill check.
 }
 
 #[cfg(windows)]

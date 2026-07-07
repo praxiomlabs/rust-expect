@@ -6,7 +6,7 @@
 use std::ffi::OsStr;
 use std::future::Future;
 use std::io;
-use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::pin::Pin;
 use std::process::ExitStatus as StdExitStatus;
 use std::sync::Arc;
@@ -338,12 +338,36 @@ where
         cmd.current_dir(dir);
     }
 
-    // Set up stdio to use the slave PTY
-    // SAFETY: We're duplicating a valid fd
+    // Set up stdio to use the slave PTY. Each `dup` is checked: building a
+    // `Stdio` from an invalid (-1) fd is unsound, and `dup` can fail (e.g.
+    // EMFILE). On failure, close any fds already duplicated here.
+    let stdin_fd = dup_slave(slave_raw)?;
+    let stdout_fd = match dup_slave(slave_raw) {
+        Ok(fd) => fd,
+        Err(e) => {
+            // SAFETY: stdin_fd is a valid fd created just above and owned here.
+            unsafe { libc::close(stdin_fd) };
+            return Err(e);
+        }
+    };
+    let stderr_fd = match dup_slave(slave_raw) {
+        Ok(fd) => fd,
+        Err(e) => {
+            // SAFETY: stdin_fd/stdout_fd are valid owned fds created above.
+            unsafe {
+                libc::close(stdin_fd);
+                libc::close(stdout_fd);
+            }
+            return Err(e);
+        }
+    };
+
+    // SAFETY: the three fds are valid, owned, and ownership transfers to the
+    // `Stdio` values (which close them).
     unsafe {
-        cmd.stdin(Stdio::from_raw_fd(libc::dup(slave_raw)));
-        cmd.stdout(Stdio::from_raw_fd(libc::dup(slave_raw)));
-        cmd.stderr(Stdio::from_raw_fd(libc::dup(slave_raw)));
+        cmd.stdin(Stdio::from_raw_fd(stdin_fd));
+        cmd.stdout(Stdio::from_raw_fd(stdout_fd));
+        cmd.stderr(Stdio::from_raw_fd(stderr_fd));
     }
 
     // Configure process group / session.
@@ -385,6 +409,18 @@ where
     let child = cmd.spawn().map_err(PtyError::Spawn)?;
 
     Ok(UnixPtyChild::new(child))
+}
+
+/// Duplicate the slave fd for a child stdio stream, returning an error rather
+/// than a `-1` on failure.
+#[allow(unsafe_code)]
+fn dup_slave(slave_raw: RawFd) -> Result<RawFd> {
+    // SAFETY: slave_raw is a valid, open slave fd for the duration of the call.
+    let fd = unsafe { libc::dup(slave_raw) };
+    if fd == -1 {
+        return Err(PtyError::Spawn(io::Error::last_os_error()));
+    }
+    Ok(fd)
 }
 
 #[cfg(test)]

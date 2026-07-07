@@ -337,9 +337,13 @@ pub fn open_slave(path: &str) -> Result<OwnedFd> {
 
     use rustix::fs::{Mode, OFlags, open};
 
+    // CLOEXEC: the child receives the slave via three explicit `dup`ed stdio
+    // fds; this original handle (used only for the pre_exec `TIOCSCTTY`) must
+    // not additionally leak across the exec. `dup` does not copy the flag, so
+    // the stdio copies remain inheritable as intended.
     let fd = open(
         Path::new(path),
-        OFlags::RDWR | OFlags::NOCTTY,
+        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
         Mode::empty(),
     )
     .map_err(|e| PtyError::Create(io::Error::from_raw_os_error(e.raw_os_error())))?;

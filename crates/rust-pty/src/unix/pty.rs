@@ -248,6 +248,11 @@ impl AsyncRead for UnixPtyMaster {
                 Err(rustix::io::Errno::AGAIN) => {
                     guard.clear_ready();
                 }
+                Err(rustix::io::Errno::INTR) => {
+                    // Interrupted by a signal before any bytes moved; the fd is
+                    // still ready, so loop and retry the read rather than
+                    // surfacing a spurious error (E1).
+                }
                 Err(e) => {
                     return Poll::Ready(Err(io::Error::from_raw_os_error(e.raw_os_error())));
                 }
@@ -277,6 +282,11 @@ impl AsyncWrite for UnixPtyMaster {
                 Ok(n) => return Poll::Ready(Ok(n)),
                 Err(rustix::io::Errno::AGAIN) => {
                     guard.clear_ready();
+                }
+                Err(rustix::io::Errno::INTR) => {
+                    // Interrupted by a signal before any bytes moved; the fd is
+                    // still ready, so loop and retry the write rather than
+                    // surfacing a spurious error (E1).
                 }
                 Err(e) => {
                     return Poll::Ready(Err(io::Error::from_raw_os_error(e.raw_os_error())));

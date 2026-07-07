@@ -68,9 +68,9 @@ async fn open_master_with_retry() -> Result<(UnixPtyMaster, String)> {
                 last_err = e;
                 if attempt + 1 < ATTEMPTS {
                     // Non-blocking backoff so other sessions can release PTYs.
-                    tokio::time::sleep(std::time::Duration::from_millis(2 * u64::from(
-                        attempt + 1,
-                    )))
+                    tokio::time::sleep(std::time::Duration::from_millis(
+                        2 * u64::from(attempt + 1),
+                    ))
                     .await;
                 }
             }
@@ -162,10 +162,9 @@ mod tests {
     #[tokio::test]
     async fn spawn_succeeds_with_default_config() {
         let config = PtyConfig::default();
-        let (mut master, mut child) =
-            UnixPtySystem::spawn("/bin/sh", ["-c", "exit 0"], &config)
-                .await
-                .expect("default-config spawn must succeed (EPERM regression)");
+        let (mut master, mut child) = UnixPtySystem::spawn("/bin/sh", ["-c", "exit 0"], &config)
+            .await
+            .expect("default-config spawn must succeed (EPERM regression)");
 
         let status = child.wait().await.expect("wait");
         assert_eq!(status, crate::traits::ExitStatus::Exited(0));
@@ -187,10 +186,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn try_wait_reports_real_exit_status_under_multi_thread() {
         let config = PtyConfig::default();
-        let (mut master, mut child) =
-            UnixPtySystem::spawn("/bin/sh", ["-c", "exit 7"], &config)
-                .await
-                .expect("spawn");
+        let (mut master, mut child) = UnixPtySystem::spawn("/bin/sh", ["-c", "exit 7"], &config)
+            .await
+            .expect("spawn");
 
         let mut status = None;
         for _ in 0..500 {

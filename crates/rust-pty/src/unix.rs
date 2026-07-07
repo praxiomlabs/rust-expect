@@ -139,4 +139,34 @@ mod tests {
         assert_eq!(status, crate::traits::ExitStatus::Exited(0));
         master.close().ok();
     }
+
+    /// `try_wait` must report the child's real exit status without erroring,
+    /// under a multi-threaded runtime (the scenario where a raw `waitpid` in
+    /// `try_wait` could race tokio's own child reaper).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn try_wait_reports_real_exit_status_under_multi_thread() {
+        let config = PtyConfig::default();
+        let (mut master, mut child) =
+            UnixPtySystem::spawn("/bin/sh", ["-c", "exit 7"], &config)
+                .await
+                .expect("spawn");
+
+        let mut status = None;
+        for _ in 0..500 {
+            match child.try_wait() {
+                Ok(Some(s)) => {
+                    status = Some(s);
+                    break;
+                }
+                Ok(None) => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                Err(e) => panic!("try_wait errored (reaper race?): {e:?}"),
+            }
+        }
+        assert_eq!(
+            status,
+            Some(crate::traits::ExitStatus::Exited(7)),
+            "try_wait did not report the real exit status"
+        );
+        master.close().ok();
+    }
 }

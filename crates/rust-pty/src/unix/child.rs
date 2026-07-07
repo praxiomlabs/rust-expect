@@ -153,6 +153,37 @@ impl UnixPtyChild {
             return Ok(Some(s));
         }
 
+        // For a `tokio::process`-spawned child, reap through tokio's own
+        // non-blocking `try_wait`. tokio owns SIGCHLD reaping for children it
+        // spawned; issuing a raw `waitpid` on the same PID here is incorrect
+        // API usage that only happens to work while tokio's reaper is idle, and
+        // it can race that reaper (stealing the status, or losing it to tokio).
+        match self.child.try_lock() {
+            Ok(mut child_guard) => {
+                if let Some(ref mut child) = *child_guard {
+                    return match child.try_wait().map_err(PtyError::Wait)? {
+                        Some(status) => {
+                            let exit_status = convert_exit_status(status);
+                            self.running.store(false, Ordering::SeqCst);
+                            if let Ok(mut guard) = self.exit_status.try_lock() {
+                                *guard = Some(exit_status);
+                            }
+                            Ok(Some(exit_status))
+                        }
+                        None => Ok(None),
+                    };
+                }
+                // No `TokioChild` (a `from_pid` adoptee): fall through to
+                // `waitpid` below.
+            }
+            Err(_) => {
+                // The child handle is momentarily locked (e.g. an in-flight
+                // `wait`). Don't race it with a raw `waitpid`; report
+                // not-yet-determinable rather than risk a double reap.
+                return Ok(None);
+            }
+        }
+
         let pid = Pid::from_raw(self.pid as i32).ok_or_else(|| {
             PtyError::Wait(io::Error::new(io::ErrorKind::InvalidInput, "invalid pid"))
         })?;

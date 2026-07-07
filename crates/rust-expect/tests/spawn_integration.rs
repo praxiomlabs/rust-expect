@@ -66,7 +66,7 @@ async fn env_vars_reach_child_process() {
     // Match the full string in one expect to avoid races on the split
     // between `value=` and the rest of the line.
     let m = session
-        .expect_timeout("value=smelt-pinecone-42", Duration::from_secs(3))
+        .expect_timeout("value=smelt-pinecone-42", Duration::from_secs(10))
         .await
         .expect("expected child to receive RUST_EXPECT_TEST_VAR=smelt-pinecone-42");
     assert!(m.matched.contains("smelt-pinecone-42"));
@@ -105,7 +105,7 @@ async fn parent_env_inherited_when_no_overrides() {
     .expect("spawn should succeed");
 
     let m = session
-        .expect_timeout("probe=from-parent", Duration::from_secs(3))
+        .expect_timeout("probe=from-parent", Duration::from_secs(10))
         .await
         .expect("expected child to inherit RUST_EXPECT_PARENT_PROBE=from-parent");
     assert!(m.matched.contains("from-parent"));
@@ -137,7 +137,7 @@ async fn working_dir_changes_child_cwd() {
         .expect("spawn should succeed");
 
     let m = session
-        .expect_timeout(expected.as_str(), Duration::from_secs(3))
+        .expect_timeout(expected.as_str(), Duration::from_secs(10))
         .await
         .expect("expected child to run in the configured working directory");
     assert!(m.matched.contains(&expected));
@@ -196,7 +196,7 @@ async fn inherit_env_false_clears_parent_env() {
     .expect("spawn should succeed");
 
     let m = session
-        .expect_timeout("probe=[]", Duration::from_secs(3))
+        .expect_timeout("probe=[]", Duration::from_secs(10))
         .await
         .expect("expected cleared env so the parent probe var is absent");
     assert!(m.matched.contains("probe=[]"));

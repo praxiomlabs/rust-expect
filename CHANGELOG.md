@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Before/after ambient patterns now work.** `expect` never checked
+  after-patterns (`PatternManager::add_after` was inert — the loop only ran
+  before-patterns), and a before-pattern `Respond` re-fired on every poll
+  because the triggering match was never consumed (e.g. a `password:` handler
+  resent the password repeatedly). The expect loop now runs after-patterns as a
+  fallback once the explicit patterns fail, and consumes the triggering match
+  for `Respond`/`Return` (both before and after) so it cannot re-fire on the
+  next poll or the next `expect` call against the same buffer.
+
 - **Spawning a non-existent program now returns a spawn error** instead of an
   apparently-successful `Session` whose child immediately exits. The migrated
   `tokio::process` path reports `exec` failures that the old hand-rolled fork

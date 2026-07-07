@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Re-export `PersistentPattern` and `HandlerAction` at the crate root (they were
+  previously reachable only via `rust_expect::expect::…`), so before/after
+  ambient patterns can be built and registered without the longer module path.
+
 ### Changed
 
 - **Unix spawn migrated off the hand-rolled `fork`/`exec` onto `tokio::process`

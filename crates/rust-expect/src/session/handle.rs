@@ -1672,4 +1672,56 @@ mod ambient_pattern_tests {
             "before should win over the explicit pattern"
         );
     }
+
+    /// Priority: an explicit pattern suppresses an after-pattern that would also
+    /// match (after runs only as a fallback once the explicit pattern fails).
+    #[tokio::test]
+    async fn explicit_beats_after_pattern() {
+        let (mut session, _handle) = session_with("target\n");
+        let after = PersistentPattern::new(
+            Pattern::literal("target"),
+            Box::new(|_| HandlerAction::Return("AFTER".into())),
+        );
+        session.pattern_manager_mut().add_after(after);
+
+        let m = session
+            .expect_timeout(Pattern::literal("target"), Duration::from_secs(2))
+            .await
+            .expect("match");
+        assert_eq!(
+            m.matched, "target",
+            "explicit pattern should suppress the after-pattern"
+        );
+    }
+
+    /// After-pattern consumption: like the before case, an after `Return` must
+    /// consume its trigger so the next expect call matches real output instead
+    /// of re-triggering the after-pattern.
+    #[tokio::test]
+    async fn after_return_consumes_across_calls() {
+        let (mut session, _handle) = session_with("prompt data\n");
+        let after = PersistentPattern::new(
+            Pattern::literal("prompt"),
+            Box::new(|_| HandlerAction::Return("A_HANDLED".into())),
+        );
+        session.pattern_manager_mut().add_after(after);
+
+        // Explicit pattern doesn't match, so the after-pattern fires and returns.
+        let first = session
+            .expect_timeout(Pattern::literal("NOPE"), Duration::from_secs(2))
+            .await
+            .expect("after-pattern should fire as fallback");
+        assert_eq!(first.matched, "A_HANDLED");
+
+        // Consumed, so this must match the real data, not re-trigger the after.
+        let second = session
+            .expect_timeout(Pattern::literal("data"), Duration::from_secs(2))
+            .await
+            .expect("second expect should match data, not re-trigger");
+        assert!(
+            second.matched.contains("data"),
+            "after Return re-triggered across calls; got {:?}",
+            second.matched
+        );
+    }
 }

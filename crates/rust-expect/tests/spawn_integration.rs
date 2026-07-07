@@ -393,12 +393,27 @@ async fn spawn_cat_interactive() {
 /// Test process ID is available.
 #[tokio::test]
 async fn spawn_has_pid() {
-    let session = Session::spawn("/bin/true", &[])
+    // `/usr/bin/true` exists on both Linux and macOS (macOS has no `/bin/true`).
+    // The migrated spawn correctly reports exec failure for a missing program,
+    // unlike the old fork path which returned a pid for a doomed child.
+    let session = Session::spawn("/usr/bin/true", &[])
         .await
         .expect("Failed to spawn true");
 
     let pid = session.pid();
     assert!(pid > 0, "Expected valid PID, got {pid}");
+}
+
+/// Spawning a non-existent program must surface a spawn error. The old
+/// hand-rolled fork path returned `Ok` with a pid for a child that then failed
+/// to `exec`; the migrated `tokio::process` path reports the failure.
+#[tokio::test]
+async fn spawn_reports_missing_program() {
+    let result = Session::spawn("/no/such/rust-expect/program", &[]).await;
+    assert!(
+        result.is_err(),
+        "spawning a non-existent program should error, got Ok"
+    );
 }
 
 /// Test spawn with custom configuration.

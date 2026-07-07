@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Spawning a non-existent program now returns a spawn error** instead of an
+  apparently-successful `Session` whose child immediately exits. The migrated
+  `tokio::process` path reports `exec` failures that the old hand-rolled fork
+  path silently swallowed (the parent returned a pid before the child's `exec`
+  failed).
+
 - **Apply the configured terminal size at spawn.** `openpty` was called with a
   null `winp`, so a freshly spawned child saw a 0x0 terminal until an explicit
   `resize` — a full-screen (TUI) child would render into nothing. The PTY is

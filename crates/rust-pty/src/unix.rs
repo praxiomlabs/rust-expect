@@ -102,12 +102,16 @@ impl PtySystem for UnixPtySystem {
         // Open master PTY (retrying briefly on transient macOS ptmx exhaustion)
         let (master, slave_path) = open_master_with_retry().await?;
 
-        // Set initial window size
+        // Open slave for child.
+        //
+        // This must precede `set_window_size`: on macOS, `TIOCSWINSZ` on the
+        // master fails with `ENOTTY` ("Inappropriate ioctl for device") until
+        // the slave side has been opened. On Linux the order is immaterial.
+        let slave_fd = open_slave(&slave_path)?;
+
+        // Set initial window size (W1) now that the slave is open.
         let window_size = config.window_size.into();
         master.set_window_size(window_size)?;
-
-        // Open slave for child
-        let slave_fd = open_slave(&slave_path)?;
 
         // Spawn child process
         let child = spawn_child(slave_fd, program, args, config).await?;
@@ -156,7 +160,7 @@ mod tests {
     /// Regression: the default config sets both `new_session` and
     /// `controlling_terminal`. Previously `spawn_child` called
     /// `process_group(0)` (making the child a group leader) *and* `setsid()` in
-    /// the pre_exec hook, so `setsid()` failed with EPERM and the default spawn
+    /// the `pre_exec` hook, so `setsid()` failed with EPERM and the default spawn
     /// errored. Unlike `spawn_echo`/`spawn_shell` above (which swallow spawn
     /// failure via `if let Ok`), this asserts the spawn actually succeeds.
     #[tokio::test]

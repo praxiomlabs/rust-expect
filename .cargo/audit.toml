@@ -25,4 +25,8 @@ ignore = [
     # rust-expect uses rand only for HumanTyper, which never installs a
     # custom logger.
     "RUSTSEC-2026-0097",
+    # crossbeam-epoch invalid-pointer deref in the fmt::Pointer impl. Pulled in
+    # only via criterion/rayon for benchmarks (dev-only); the vulnerable
+    # formatting path is never reached. Mirrored in deny.toml.
+    "RUSTSEC-2026-0204",
 ]

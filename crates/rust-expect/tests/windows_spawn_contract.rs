@@ -1,11 +1,11 @@
-//! ConPTY spawn-contract integration tests (Windows).
+//! `ConPTY` spawn-contract integration tests (Windows).
 //!
 //! Peer libraries have shipped real Windows bugs where the spawn contract was
 //! silently broken: arguments dropped (expectrl #63), environment modes ignored
 //! (expectrl #69), the pseudo console created at 0x0, or exit codes lost. These
-//! tests spawn real ConPTY processes and assert each contract end-to-end.
+//! tests spawn real `ConPTY` processes and assert each contract end-to-end.
 //!
-//! To make assertions deterministic and immune to ConPTY escape-sequence
+//! To make assertions deterministic and immune to `ConPTY` escape-sequence
 //! pollution, the child is a tiny purpose-built helper (`reflector.exe`,
 //! compiled once with `rustc` into `CARGO_TARGET_TMPDIR`) that reflects its
 //! observed state (argv / env / cwd / console size) into a file whose path is

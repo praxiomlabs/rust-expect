@@ -425,6 +425,28 @@ let first = expect_any(&mut multi.sessions_mut(), "$").await?;
 
 ---
 
+## Upgrading rust-expect
+
+### 0.4 → 0.5
+
+The high-level `Session` and `SyncSession` APIs are unchanged, so most code needs
+no changes. The breaking changes are confined to the low-level, re-exported PTY
+handle:
+
+- **`PtyHandle` now wraps `rust-pty`'s master/child** instead of a raw file
+  descriptor. Code that reached into the raw fd should go through the `rust-pty`
+  types — or, preferably, use `Session`/`SyncSession`.
+- **`PtyHandle::wait()` was removed.** Wait for the child through
+  `Session`/`SyncSession` instead.
+- **`PtyHandle::signal()` and `PtyHandle::kill()` were removed.** Signal a child
+  through `Session::signal`/`kill` (or the `SyncSession` equivalents), which
+  guard against PID reuse.
+- **`AsyncPty::signal()` / `kill()` now take `&mut self`** (they perform an
+  authoritative reap check). Update any direct callers to hold a mutable binding;
+  `Session::signal`/`kill` keep their `&self` signatures.
+
+---
+
 ## Getting Help
 
 - [API Documentation](https://docs.rs/rust-expect)

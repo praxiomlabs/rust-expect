@@ -1,12 +1,12 @@
-//! Windows robustness checks (backlog S1 + ConPTY escape handling).
+//! Windows robustness checks (backlog S1 + `ConPTY` escape handling).
 //!
 //! - `kill()` on an already-exited child must be safe (no panic, clean result).
-//! - The `screen` feature's VT100 emulator must ingest ConPTY's escape-heavy
+//! - The `screen` feature's VT100 emulator must ingest `ConPTY`'s escape-heavy
 //!   handshake frame without panicking and expose a correctly-sized screen.
 //!
 //! Note: on some Windows configurations conhost does not forward a child's
 //! *rendered* text to the read pipe (an OS/environment behavior, reproducible
-//! with other ConPTY libraries), so these tests deliberately assert only on
+//! with other `ConPTY` libraries), so these tests deliberately assert only on
 //! properties that hold regardless of whether child output is forwarded.
 
 #![cfg(windows)]

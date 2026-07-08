@@ -45,7 +45,7 @@ async fn env_var_delivered_and_output_received_under_multi_thread() {
 
 /// The child must have a controlling terminal: `tty(1)` prints the slave device
 /// path when stdin is a tty, or "not a tty" otherwise. This validates that
-/// rust-pty's `setsid` + `TIOCSCTTY` pre_exec wiring took effect.
+/// rust-pty's `setsid` + `TIOCSCTTY` `pre_exec` wiring took effect.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn controlling_tty_established_under_multi_thread() {
     let mut session = Session::spawn("/bin/sh", &["-c", "tty"])

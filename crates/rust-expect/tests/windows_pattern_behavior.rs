@@ -1,17 +1,17 @@
-//! Windows ConPTY read/pattern behaviors.
+//! Windows `ConPTY` read/pattern behaviors.
 //!
-//! Covers two fixes verified on the ConPTY backend:
+//! Covers two fixes verified on the `ConPTY` backend:
 //!   1. `Pattern::Bytes(n)` now matches once `n` bytes are buffered (previously
 //!      it returned `None` unconditionally and hung until timeout).
 //!   2. The reader drains the output pipe until `ReadFile` reports broken-pipe,
 //!      instead of truncating as soon as the exit watcher clears the `open`
 //!      flag — so a child's buffered output is not discarded on exit.
 //!
-//! Note on ConPTY output visibility: on some Windows configurations (notably
+//! Note on `ConPTY` output visibility: on some Windows configurations (notably
 //! headless/service contexts and certain preview builds) conhost does not
 //! forward a child's *rendered* output to the read pipe at all — this is an
-//! OS/environment behavior reproducible with other ConPTY libraries, not a
-//! property of this crate. The assertions below only rely on the ConPTY
+//! OS/environment behavior reproducible with other `ConPTY` libraries, not a
+//! property of this crate. The assertions below only rely on the `ConPTY`
 //! *handshake* frame, which conhost always emits, so they are robust to that.
 
 #![cfg(windows)]

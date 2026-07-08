@@ -2434,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "rust-expect"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "bitflags 2.10.0",
  "bytes",
@@ -2465,7 +2465,7 @@ dependencies = [
 
 [[package]]
 name = "rust-expect-macros"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2476,7 +2476,7 @@ dependencies = [
 
 [[package]]
 name = "rust-pty"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "libc",
  "proptest",

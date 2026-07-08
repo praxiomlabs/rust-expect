@@ -7,11 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-08
+
+A pre-1.0 release centered on the correctness of the Unix spawn path: the
+hand-rolled `fork`/`exec` is replaced by `tokio::process` (via `rust-pty`),
+together with a batch of PTY robustness fixes — terminal sizing, close-on-exec,
+PID-reuse-safe signals, resilient allocation, and reliable final-output capture
+on macOS and Windows. Includes low-level breaking API changes; the high-level
+`Session`/`SyncSession` APIs are unchanged.
+
 ### Added
 
 - Re-export `PersistentPattern` and `HandlerAction` at the crate root (they were
   previously reachable only via `rust_expect::expect::…`), so before/after
   ambient patterns can be built and registered without the longer module path.
+  (#41)
 
 ### Changed
 
@@ -24,11 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   async-signal-safe `setsid` + `TIOCSCTTY`. This deletes a large block of
   `unsafe` and resolves intermittent empty-output spawns observed under
   multi-threaded load. `Session`/`SyncSession` public APIs are unchanged.
-- **API (Unix, pre-1.0):** the low-level re-exported `PtyHandle` now wraps
-  rust-pty's master/child instead of a raw fd; its `wait()` method was removed
-  (wait via `Session`/`SyncSession`). A null byte in the command or an argument
-  is still rejected, now with std's "nul byte found in provided data" message
-  rather than "... contains null byte".
+- **API (Unix, pre-1.0 breaking):** the low-level re-exported `PtyHandle` now
+  wraps rust-pty's master/child instead of a raw fd, and its `wait()` method was
+  removed (wait via `Session`/`SyncSession`). As part of the PID-reuse guard,
+  `AsyncPty::signal`/`kill` now take `&mut self` (they perform an authoritative
+  reap check), and the unguarded low-level `PtyHandle::signal`/`kill` methods
+  have been removed — signal a child through `Session`/`SyncSession` instead
+  (whose `signal`/`kill` keep their `&self` signatures). A null byte in the
+  command or an argument is still rejected, now with std's "nul byte found in
+  provided data" message rather than "... contains null byte".
 
 ### Fixed
 
@@ -41,25 +55,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for `Respond`/`Return` (both before and after) so it cannot re-fire on the
   next poll or the next `expect` call against the same buffer.
 
+- **`Pattern::Bytes(n)` now matches.** It was unreachable — `Matcher::try_match`,
+  `Matcher::try_match_any`, and `Pattern::matches` all returned `None` for it, so
+  `expect(Pattern::bytes(n))` never matched and blocked until the timeout. It now
+  matches once at least `n` bytes are buffered and consumes the first `n`. (#28)
+
 - **Spawning a non-existent program now returns a spawn error** instead of an
   apparently-successful `Session` whose child immediately exits. The migrated
   `tokio::process` path reports `exec` failures that the old hand-rolled fork
   path silently swallowed (the parent returned a pid before the child's `exec`
   failed).
 
-- **Apply the configured terminal size at spawn.** `openpty` was called with a
-  null `winp`, so a freshly spawned child saw a 0x0 terminal until an explicit
-  `resize` — a full-screen (TUI) child would render into nothing. The PTY is
-  now allocated at the session's configured dimensions, so `stty size` (and
-  curses apps) report the right size from the first byte.
+- **Apply the configured terminal size at spawn.** The PTY was allocated with no
+  initial window size, so a freshly spawned child saw a 0x0 terminal until an
+  explicit `resize` — a full-screen (TUI) child would render into nothing. The
+  PTY is now allocated at the session's configured dimensions, so `stty size`
+  (and curses apps) report the right size from the first byte.
 
-- **Set close-on-exec on the PTY master.** The master fd lacked `FD_CLOEXEC`,
-  so under concurrent spawning it could leak into an unrelated child forked by
-  another session. The master is now marked close-on-exec immediately after
-  allocation. This is best-effort: a small `openpty`→`fcntl` window remains on
-  the hand-rolled Unix path (`openpty` offers no `O_CLOEXEC`), and it guards
-  the master only. It reduces the leak; it cannot eliminate the race on this
-  path.
+- **Set close-on-exec on the PTY master.** The master fd lacked `FD_CLOEXEC`, so
+  under concurrent spawning it could leak into an unrelated child forked by
+  another session. The master is now marked close-on-exec at allocation: atomic
+  on Linux (`openpt` with `CLOEXEC`), and best-effort on macOS/BSD, whose
+  `posix_openpt` has no atomic `O_CLOEXEC`, so a follow-up `fcntl` leaves a small
+  open→`fcntl` window. It guards the master only.
 
 - **Guard `signal()`/`kill()` against PID reuse.** After a child exits and is
   reaped, the OS can recycle its PID; the previous code called `libc::kill`
@@ -70,25 +88,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still surfaced as `Io`. Signalling a live child is unchanged.
 
 - **Resilient PTY allocation on macOS/BSD.** macOS caps system-wide PTYs at
-  `kern.tty.ptmx_max` (511 by default), far below Linux's dynamic allocation,
-  so under heavy concurrent spawning `openpty` can transiently fail (the BSD
+  `kern.tty.ptmx_max` (511 by default), far below Linux's dynamic allocation, so
+  under heavy concurrent spawning PTY allocation can transiently fail (the BSD
   PTY-exhaustion code is `ENXIO`, "Device not configured") even though a slot
-  frees moments later. `Session::spawn` now retries PTY allocation with a short
+  frees moments later. `Session::spawn` now retries allocation with a short
   bounded backoff and, on a genuine failure, surfaces the underlying OS error
   instead of the opaque "Failed to open PTY". This removes intermittent
   `PtyAllocation` failures seen when running the test suite — or an app driving
-  many sessions — in parallel on macOS. The retry fires on any `openpty`
+  many sessions — in parallel on macOS. The retry fires on any allocation
   failure rather than a specific errno: our arguments are always valid, so the
   only realistic failure is exhaustion, and retrying unconditionally is simpler
   and more robust.
 
-### Changed
+- **Recover a fast-exiting child's final output on Windows.** The ConPTY read
+  path short-circuited to EOF as soon as the shared `open` flag was cleared,
+  which the exit watcher does the instant the child exits — so bytes conhost had
+  already written to the output pipe but that had not yet been read were
+  discarded. Reads no longer gate on `open`; the pipe is drained until `ReadFile`
+  reports `ERROR_BROKEN_PIPE`. Writes still fail with `BrokenPipe` after exit.
+  (#28)
 
-- **API (Unix, pre-1.0 breaking):** as part of the PID-reuse guard,
-  `AsyncPty::signal`/`kill` now take `&mut self` (they perform an authoritative
-  reap check). `Session::signal`/`kill` keep their `&self` signatures. The
-  unguarded low-level `PtyHandle::signal`/`kill` methods have been removed;
-  signal a child through `Session`/`SyncSession` instead.
+- **Capture a fast-exiting child's final PTY output on macOS.** A child spawned
+  via `tokio::process` could lose its final output — `expect` returned
+  `Eof { buffer: "" }` — because macOS discards the master's still-buffered bytes
+  when the last slave fd closes around child exit, before the session's first
+  read observes them. A dedicated drain (in `rust-pty`), started before the child
+  spawns, reads the master into a userspace buffer the instant bytes arrive, so
+  the output survives teardown. macOS-only; Linux and Windows are unaffected.
+  (#40)
 
 ## [0.4.0] - 2026-07-02
 

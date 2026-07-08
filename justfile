@@ -10,7 +10,7 @@
 
 # Project metadata (from Cargo.toml)
 project_name := "rust-expect"
-version := "0.4.0"
+version := `grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/'`
 msrv := "1.88"
 edition := "2024"
 

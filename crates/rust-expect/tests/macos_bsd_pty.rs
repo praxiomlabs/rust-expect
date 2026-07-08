@@ -20,6 +20,58 @@ use std::time::Duration;
 use rust_expect::Session;
 use rust_expect::types::ProcessExitStatus;
 
+/// Regression for #40: on macOS, reaping the child (`waitpid`) tears down the
+/// terminal and discards any output still buffered on the PTY master. A fast
+/// exiting child's final output must therefore survive a reap that happens
+/// before the session's first read.
+///
+/// This reaps deterministically (`is_running()` reaps through the child handle)
+/// *before* the first `expect`, which pre-fix loses the output and yields
+/// `Eof { buffer: "" }` — the exact intermittent CI symptom, made deterministic.
+/// The fix salvages the buffered bytes ahead of every reap, so they remain
+/// matchable.
+#[tokio::test]
+async fn output_survives_reap_before_first_read() {
+    let mut session = Session::spawn("/bin/echo", &["hello"])
+        .await
+        .expect("spawn should succeed");
+
+    // Let the child write "hello\n" and exit, then reap it (is_running ->
+    // try_wait) before ever reading the master.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    while session.is_running() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+
+    let m = session
+        .expect_timeout("hello", Duration::from_secs(5))
+        .await
+        .expect("final output must survive a reap-before-read on macOS");
+    assert!(m.matched.contains("hello"));
+}
+
+/// Regression for #40, looped: hammer the fast-exit-then-expect path to catch
+/// the reap/read race under scheduling jitter. Each iteration spawns
+/// `echo hello`, forces a reap before reading (as above), and requires the
+/// output to survive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn fast_exit_output_survives_reap_looped() {
+    for i in 0..100 {
+        let mut session = Session::spawn("/bin/echo", &["hello"])
+            .await
+            .expect("spawn should succeed");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        while session.is_running() {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        let m = session
+            .expect_timeout("hello", Duration::from_secs(5))
+            .await
+            .unwrap_or_else(|e| panic!("iter {i}: output lost after reap: {e:?}"));
+        assert!(m.matched.contains("hello"), "iter {i}");
+    }
+}
+
 /// The child's final chunk (no trailing newline, printed right before exit)
 /// must survive the EOF transition and still be matchable.
 #[tokio::test]

@@ -102,6 +102,17 @@ impl PtySystem for UnixPtySystem {
         // Open master PTY (retrying briefly on transient macOS ptmx exhaustion)
         let (master, slave_path) = open_master_with_retry().await?;
 
+        // macOS (#40): start draining the master into userspace *before* the
+        // child is spawned, so its output is captured the instant it is written
+        // and cannot be discarded when a fast-exiting child exits. Only macOS
+        // needs this (see `UnixPtyMaster::start_read_drain`).
+        #[cfg(target_os = "macos")]
+        let master = {
+            let mut master = master;
+            master.start_read_drain()?;
+            master
+        };
+
         // Open slave for child.
         //
         // This must precede `set_window_size`: on macOS, `TIOCSWINSZ` on the

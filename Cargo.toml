@@ -42,10 +42,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # OpenTelemetry for distributed tracing
-opentelemetry = "0.31"
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.31", features = ["tonic", "grpc-tonic"] }
-tracing-opentelemetry = "0.32"
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["tonic", "grpc-tonic"] }
+tracing-opentelemetry = "0.33"
 
 # Prometheus metrics export
 prometheus = "0.14"
@@ -57,7 +57,7 @@ thiserror = "2.0"
 bitflags = "2.9"
 
 # SSH support (optional)
-russh = "0.61"
+russh = "0.62"
 
 # Serialization
 serde_json = "1.0"
@@ -71,13 +71,13 @@ proc-macro2 = "1.0"
 proptest = "1.9"
 
 # Benchmarking
-criterion = { version = "0.7", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 # Comparative benchmarking (expectrl alternative)
-expectrl = "0.8"
+expectrl = "0.9"
 
 # Random number generation (for human typing simulation)
-rand = "0.9"
+rand = "0.10"
 
 # Futures utilities for async combinators
 futures = "0.3"

@@ -128,6 +128,16 @@ fn main() {
                 writeln!(f, "{}=type:{} console:{}", label, ft, console).unwrap();
             }
         }
+        // Block on one line of stdin and reflect exactly what arrived. The
+        // terminator is recorded via `{:?}` so the test can see whether it was
+        // CR, LF or CRLF rather than only that a line was read at all.
+        "readline" => {
+            let mut line = String::new();
+            match std::io::stdin().read_line(&mut line) {
+                Ok(n) => writeln!(f, "read={} line={:?}", n, line).unwrap(),
+                Err(e) => writeln!(f, "error={}", e).unwrap(),
+            }
+        }
         other => {
             eprintln!("unknown mode: {}", other);
             std::process::exit(3);
@@ -453,4 +463,59 @@ async fn std_handles_are_conpty_not_parents() {
              instead of the pseudoconsole (issue #46). Full report: {contents:?}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// input direction (issue #50)
+// ---------------------------------------------------------------------------
+
+/// `send_line` must actually submit a line that a `ConPTY` child's blocking read
+/// completes on.
+///
+/// Regression test for issue #50. `LineEnding::default()` was `Lf` on every
+/// platform, and `ConPTY` does not merely disagree with a bare LF — it discards it,
+/// completing no read and queuing nothing. `send_line` therefore sent a payload
+/// with an inert terminator and this child would block until the timeout.
+///
+/// This asserts the whole public path rather than the terminator byte: reverting
+/// the Windows default to `Lf` makes it fail. It is also the first automated cover
+/// for the input direction at all — until now nothing wrote to a master and checked
+/// that the child received it, so only the output direction was protected.
+///
+/// The child reflects the terminator it saw, which is expected to be `\r\n` no
+/// matter which working terminator was sent: console cooked mode synthesizes the
+/// CRLF rather than passing through the bytes written to the master.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn send_line_reaches_the_child() {
+    const MARKER: &str = "PING-51724";
+
+    let out = unique_outfile("readline");
+    let exe = reflector().to_str().unwrap().to_string();
+    let out_arg = out.to_str().unwrap().to_string();
+
+    let mut session =
+        Session::spawn_with_config(&exe, &["readline", &out_arg], SessionConfig::default())
+            .await
+            .expect("spawn reflector");
+
+    session
+        .send_line(MARKER)
+        .await
+        .expect("writing a line to the ConPTY master should succeed");
+
+    let status = session.wait_timeout(Duration::from_secs(20)).await.expect(
+        "the child should complete its read and exit; a timeout here means the line was \
+             never submitted (issue #50)",
+    );
+    assert!(status.success(), "reflector exited non-zero: {status}");
+
+    let contents = std::fs::read_to_string(&out).unwrap_or_default();
+    assert!(
+        contents.contains(MARKER),
+        "the child's read_line should have received {MARKER:?}, got {contents:?}"
+    );
+    assert!(
+        !contents.starts_with("read=0"),
+        "the child saw EOF rather than a line, so input did not reach it: {contents:?}"
+    );
 }

@@ -21,6 +21,12 @@
 //! let (master, child) = WindowsPtySystem::spawn("cmd.exe", &[], &config).await?;
 //! ```
 
+#![expect(
+    unsafe_code,
+    reason = "ConPTY and the Win32 process APIs are raw FFI; unsafe is confined to \
+              this module tree, so it still warns everywhere else in the crate"
+)]
+
 mod async_adapter;
 mod child;
 mod conpty;

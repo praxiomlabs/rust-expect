@@ -94,6 +94,42 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+  # Lint Windows-only code. The `clippy` job above runs on Linux, where
+  # `#[cfg(windows)]` items do not compile and so are never linted — that blind
+  # spot let a lint backlog accumulate unnoticed (see #51). Clippy does not link,
+  # so the MSVC target can be linted from a Linux runner without a Windows one.
+  clippy-windows:
+    name: Clippy (Windows target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: clippy-windows
+
+      # NOTE: `--all-features` cannot be used here. The `ssh` feature pulls
+      # russh -> aws-lc-sys, whose C build requires an MSVC toolchain that a
+      # Linux runner does not have. Every other feature cross-lints fine.
+      #
+      # Consequence: the `#[cfg(windows)]` block in
+      # crates/rust-expect/src/backend/ssh/session.rs (Pageant agent support) is
+      # NOT covered by this job. Linting it would require a windows-latest
+      # runner; that one block was judged not worth the cost.
+      - name: Clippy (Windows target, all features except ssh)
+        run: |
+          cargo clippy --workspace --all-targets \
+            --target x86_64-pc-windows-msvc \
+            --features "mock,screen,pii-redaction,metrics,legacy-encoding,test-utils" \
+            -- -D warnings
+
   docs:
     name: Documentation
     runs-on: ubuntu-latest

@@ -380,6 +380,10 @@ async fn exit_code_zero_is_success() {
 // ---------------------------------------------------------------------------
 
 /// Whether this process's own stdout is a console handle.
+#[expect(
+    unsafe_code,
+    reason = "GetStdHandle/GetConsoleMode are raw Win32 FFI with no safe wrapper here"
+)]
 fn own_stdout_is_console() -> bool {
     use windows_sys::Win32::System::Console::{GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE};
 

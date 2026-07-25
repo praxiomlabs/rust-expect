@@ -7,12 +7,13 @@
 //!      instead of truncating as soon as the exit watcher clears the `open`
 //!      flag — so a child's buffered output is not discarded on exit.
 //!
-//! Note on `ConPTY` output visibility: on some Windows configurations (notably
-//! headless/service contexts and certain preview builds) conhost does not
-//! forward a child's *rendered* output to the read pipe at all — this is an
-//! OS/environment behavior reproducible with other `ConPTY` libraries, not a
-//! property of this crate. The assertions below only rely on the `ConPTY`
-//! *handshake* frame, which conhost always emits, so they are robust to that.
+//! Note on `ConPTY` output visibility: these tests once asserted only on the
+//! `ConPTY` *handshake* frame, because a child's rendered output did not reach
+//! the read pipe and that was believed to be an OS/environment behavior of
+//! conhost. It was not. It was issue #46 — `STARTF_USESTDHANDLES` was unset when
+//! spawning, so the child was handed *this process's* redirected stdout (a pipe,
+//! under `cargo test`) and wrote there instead of to the pseudoconsole. With that
+//! fixed, real child output is observable and is asserted on directly.
 
 #![cfg(windows)]
 
@@ -76,9 +77,13 @@ async fn bytes_pattern_waits_for_enough_data() {
 /// handshake frame survived. After the fix the reader drains until `ReadFile`
 /// reports `ERROR_BROKEN_PIPE`, recovering the full frame (~85 bytes, including
 /// conhost's clear-screen and title sequences).
+///
+/// The child echoes a marker, so this asserts the child's *own* output survived
+/// the drain rather than merely that the handshake frame did — a payload written
+/// after the handshake is the stronger evidence.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn drains_buffered_output_on_exit() {
-    let mut session = Session::spawn("cmd.exe", &["/c", "exit 0"])
+    let mut session = Session::spawn("cmd.exe", &["/c", "echo DRAIN-MARKER-4711"])
         .await
         .expect("spawn cmd.exe");
 
@@ -92,10 +97,11 @@ async fn drains_buffered_output_on_exit() {
         .expect("child should exit");
 
     let bytes = captured.lock().unwrap().clone();
+    let text = String::from_utf8_lossy(&bytes);
     assert!(
-        bytes.len() > 40,
-        "buffered ConPTY output was truncated on exit: drained only {} bytes ({:?})",
-        bytes.len(),
-        String::from_utf8_lossy(&bytes)
+        text.contains("DRAIN-MARKER-4711"),
+        "the child's output was truncated on exit: drained {} bytes without the \
+         marker ({text:?})",
+        bytes.len()
     );
 }

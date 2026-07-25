@@ -99,8 +99,8 @@ jobs:
   # spot let a lint backlog accumulate unnoticed (see #51). Clippy does not link,
   # so the MSVC target can be linted from a Linux runner without a Windows one.
   clippy-windows:
-    name: Clippy (Windows target)
-    runs-on: ubuntu-latest
+    name: Clippy (Windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
 
@@ -109,33 +109,37 @@ jobs:
         with:
           components: clippy
 
-      # Add the target to the *active* toolchain, not to `stable`. rust-toolchain.toml
-      # pins this repo to 1.92, so cargo runs 1.92 regardless of what the action above
-      # installs; passing `targets:` to the action adds the std library to `stable`
-      # instead and cargo then fails with `E0463: can't find crate for core`. `rustup
-      # target add` honours the pin, so it stays correct if the pin moves.
-      - name: Add Windows target to the pinned toolchain
-        run: rustup target add x86_64-pc-windows-msvc
-
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: clippy-windows
 
-      # NOTE: `--all-features` cannot be used here. The `ssh` feature pulls
-      # russh -> aws-lc-sys, whose C build requires an MSVC toolchain that a
-      # Linux runner does not have. Every other feature cross-lints fine.
+      # The `clippy` job runs on Linux, where `#[cfg(windows)]` items do not compile
+      # and so are never linted — that blind spot let a lint backlog accumulate
+      # unnoticed (see #51). This job closes it.
       #
-      # Consequence: the `#[cfg(windows)]` block in
-      # crates/rust-expect/src/backend/ssh/session.rs (Pageant agent support) is
-      # NOT covered by this job. Linting it would require a windows-latest
-      # runner; that one block was judged not worth the cost.
-      - name: Clippy (Windows target, all features except ssh)
-        run: |
-          cargo clippy --workspace --all-targets \
-            --target x86_64-pc-windows-msvc \
-            --features "mock,screen,pii-redaction,metrics,legacy-encoding,test-utils" \
-            -- -D warnings
+      # It runs natively rather than cross-linting the MSVC target from Linux, which
+      # is what #51 originally did. Two reasons, and the second is why the switch
+      # happened: cross-linting cannot use `--all-features`, because `ssh` -> russh ->
+      # aws-lc-sys needs an MSVC C toolchain a Linux runner lacks — so the
+      # `#[cfg(windows)]` Pageant block in backend/ssh/session.rs stayed unlinted; and
+      # criterion 0.8 pulls `alloca`, whose build script also refuses to
+      # cross-compile, which broke the job outright (see #57).
+      #
+      # Standard GitHub-hosted runners are free on public repositories regardless of
+      # OS, so this costs wall-clock only.
+      #
+      # The closest local pre-push equivalent from a non-Windows host is:
+      #
+      #   cargo clippy --workspace --lib --target x86_64-pc-windows-msvc \
+      #     --features "mock,screen,pii-redaction,metrics,legacy-encoding,test-utils" \
+      #     -- -D warnings
+      #
+      # That covers crates/rust-pty/src/windows/ but NOT the #![cfg(windows)] test
+      # files, because `--tests` pulls criterion -> alloca, which will not
+      # cross-compile. Lint findings in those test files surface here, not locally.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   docs:
     name: Documentation

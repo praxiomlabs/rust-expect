@@ -312,7 +312,16 @@ mod russh_impl {
     ) -> Result<bool, russh::Error> {
         let known_hosts_path = get_known_hosts_path();
 
-        // Create .ssh directory if it doesn't exist
+        // Create .ssh directory if it doesn't exist.
+        //
+        // Not collapsible, despite what clippy reports when linting a non-Unix
+        // target. On Unix the outer body holds two items — this `if` and the
+        // `#[cfg(unix)]` permissions block — so the lint does not fire. Elsewhere the
+        // cfg strips that block and the nested `if` looks like the sole statement.
+        // Collapsing would move the permissions logic out of the create-succeeded
+        // branch, which is a control-flow change rather than a style fix, so the lint
+        // is unsatisfiable on both targets at once.
+        #[allow(clippy::collapsible_if)]
         if let Some(parent) = known_hosts_path.parent()
             && !parent.exists()
         {
@@ -644,6 +653,8 @@ mod russh_impl {
                     // Windows: Try Pageant first, then OpenSSH agent via named pipe
                     #[cfg(windows)]
                     {
+                        const OPENSSH_AGENT_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
+
                         // Try Pageant first (PuTTY SSH agent)
                         tracing::debug!(user = %username, "Trying Pageant SSH agent");
                         match russh::keys::agent::client::AgentClient::connect_pageant().await {
@@ -715,7 +726,6 @@ mod russh_impl {
                         }
 
                         // Try Windows OpenSSH agent via named pipe
-                        const OPENSSH_AGENT_PIPE: &str = r"\\.\pipe\openssh-ssh-agent";
                         tracing::debug!(
                             user = %username,
                             pipe = OPENSSH_AGENT_PIPE,

@@ -5,7 +5,10 @@
 
 use std::time::Duration;
 
-use rand::Rng;
+// rand 0.10 split the trait: `rand::Rng` is now the core trait re-exported from
+// `rand_core`, and the convenience methods (`random`, `random_range`) moved to
+// `RngExt`.
+use rand::RngExt;
 
 use crate::config::HumanTypingConfig;
 use crate::error::Result;

@@ -130,10 +130,10 @@ impl TracingConfig {
 /// Error type for tracing initialization.
 #[derive(Debug, thiserror::Error)]
 pub enum TracingError {
-    /// OpenTelemetry trace error.
-    #[error("OpenTelemetry trace error: {0}")]
-    Trace(#[from] opentelemetry_sdk::trace::TraceError),
-
+    // A `Trace(#[from] opentelemetry_sdk::trace::TraceError)` variant used to sit
+    // here. opentelemetry_sdk 0.32 removed that type, and nothing in this crate ever
+    // constructed or matched the variant — it existed only for the `#[from]`
+    // conversion — so it is dropped rather than repointed at a replacement.
     /// OTLP exporter build error.
     #[error("OTLP exporter build error: {0}")]
     ExporterBuild(#[from] opentelemetry_otlp::ExporterBuildError),

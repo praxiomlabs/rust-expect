@@ -412,7 +412,17 @@ async fn std_handles_are_conpty_not_parents() {
     // The leak can only happen when the parent's handles are *not* console
     // handles, so a console stdout would make the assertions pass vacuously.
     // Under `cargo test` stdout is always a pipe, which is the case that matters.
+    //
+    // libtest discards a *passing* test's output, so a skip is indistinguishable
+    // from a real pass in a CI log. On CI an absent precondition is therefore a
+    // hard failure rather than a silent skip: otherwise this test could quietly
+    // stop exercising anything and no run would ever report it.
     if own_stdout_is_console() {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "precondition absent on CI: this process's stdout is a console, so the \
+             parent-handle leak cannot occur and this test would pass vacuously"
+        );
         eprintln!(
             "SKIPPED std_handles_are_conpty_not_parents: this process's stdout is a \
              console, so the parent-handle leak cannot occur here and the assertions \

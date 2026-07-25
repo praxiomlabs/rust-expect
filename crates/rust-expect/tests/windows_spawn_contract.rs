@@ -389,21 +389,38 @@ async fn exit_code_zero_is_success() {
 // standard-handle provenance (issue #46)
 // ---------------------------------------------------------------------------
 
-/// Whether this process's own stdout is a console handle.
+/// Whether *every* one of this process's standard handles is a console handle.
+///
+/// The leak can only be observed through a host handle that is **not** a console:
+/// `ConPTY`'s startup reattaches copied *console* handles to the pseudoconsole, so a
+/// console handle looks correct in the child whether or not the fix is present. A
+/// non-console handle survives and shows up in the child, which is what the
+/// assertions detect.
+///
+/// So the test carries detection power as long as at least one host handle is
+/// non-console, and is only vacuous when all three are consoles. Checking all three
+/// rather than stdout alone means a run with, say, a console stdout but a piped
+/// stdin still exercises the test instead of being skipped.
 #[expect(
     unsafe_code,
     reason = "GetStdHandle/GetConsoleMode are raw Win32 FFI with no safe wrapper here"
 )]
-fn own_stdout_is_console() -> bool {
-    use windows_sys::Win32::System::Console::{GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE};
+fn all_own_std_handles_are_consoles() -> bool {
+    use windows_sys::Win32::System::Console::{
+        GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
 
-    // SAFETY: GetStdHandle returns a borrowed handle we do not close, and
-    // GetConsoleMode only reads through it.
-    unsafe {
-        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
-        let mut mode = 0u32;
-        GetConsoleMode(handle, &raw mut mode) != 0
-    }
+    [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+        .into_iter()
+        .all(|which| {
+            // SAFETY: GetStdHandle returns a borrowed handle we do not close, and
+            // GetConsoleMode only reads through it.
+            unsafe {
+                let handle = GetStdHandle(which);
+                let mut mode = 0u32;
+                GetConsoleMode(handle, &raw mut mode) != 0
+            }
+        })
 }
 
 /// A `ConPTY` child's stdin/stdout/stderr must be the pseudoconsole's handles,
@@ -423,24 +440,26 @@ fn own_stdout_is_console() -> bool {
 /// a real console handle.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn std_handles_are_conpty_not_parents() {
-    // The leak can only happen when the parent's handles are *not* console
-    // handles, so a console stdout would make the assertions pass vacuously.
-    // Under `cargo test` stdout is always a pipe, which is the case that matters.
+    // The leak is only observable through a host handle that is not a console, so
+    // if all three are consoles there is nothing to detect and the assertions would
+    // pass vacuously. Under `cargo test` stdout and stderr are pipes, which is the
+    // case that matters.
     //
     // libtest discards a *passing* test's output, so a skip is indistinguishable
     // from a real pass in a CI log. On CI an absent precondition is therefore a
     // hard failure rather than a silent skip: otherwise this test could quietly
     // stop exercising anything and no run would ever report it.
-    if own_stdout_is_console() {
+    if all_own_std_handles_are_consoles() {
         assert!(
             std::env::var_os("CI").is_none(),
-            "precondition absent on CI: this process's stdout is a console, so the \
-             parent-handle leak cannot occur and this test would pass vacuously"
+            "precondition absent on CI: every standard handle of this process is a \
+             console, so the parent-handle leak cannot occur and this test would pass \
+             vacuously"
         );
         eprintln!(
-            "SKIPPED std_handles_are_conpty_not_parents: this process's stdout is a \
-             console, so the parent-handle leak cannot occur here and the assertions \
-             would pass vacuously. Run under `cargo test` to exercise it."
+            "SKIPPED std_handles_are_conpty_not_parents: every standard handle of this \
+             process is a console, so the parent-handle leak cannot occur here and the \
+             assertions would pass vacuously. Run under `cargo test` to exercise it."
         );
         return;
     }

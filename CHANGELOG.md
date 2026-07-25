@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Windows (behaviour change): `SessionConfig::line_ending` now defaults to `Cr`
+  instead of `Lf`.** `ConPTY` does not merely disagree with a bare LF — it discards
+  it: a lone `\n` written to the pseudoconsole completes no line read, queues
+  nothing, is not echoed, and does not reach the child even as a key event. So
+  `send_line` on Windows previously sent a payload followed by an inert terminator
+  and could never submit a line, against a Rust child, `cmd.exe`, or
+  `powershell.exe` alike. The default now tracks the terminator a terminal sends
+  for the ENTER key, which is not the platform's text-file convention. Unix is
+  unchanged (`Lf`). Callers who were explicitly setting `line_ending` are
+  unaffected; anyone relying on the Windows default to be `Lf` now gets `Cr`. To
+  normalise *text* to CRLF, use `encoding::LineEndingStyle`, which is a separate
+  concern and unchanged. (#50)
+
+- **Windows (behaviour change): `SessionBuilder::windows_line_endings()` now sets
+  `Cr` instead of `CrLf`**, and therefore so do `QuickSession::cmd()` and
+  `QuickSession::powershell()`. Its sibling `unix_line_endings()` sets `Lf`, which
+  is the Unix ENTER rather than a text convention, so the pair means "the
+  terminator this platform's terminal sends for ENTER" and `CrLf` was the
+  inconsistent member. `CrLf` does submit a line today, but only because conhost
+  swallows the trailing LF; against a child with `ENABLE_LINE_INPUT` disabled an LF
+  that did arrive would submit a second ENTER. Ask for CRLF explicitly with
+  `.line_ending(LineEnding::CrLf)` if you need it. (#50)
+
+### Fixed
+
+- **Windows: a `ConPTY` child no longer receives the host's redirected standard
+  handles.** `create_startup_info` left `dwFlags` at `0`, and the `hStd*` fields are
+  honoured only when `STARTF_USESTDHANDLES` is set. Without it Windows *duplicates*
+  the parent's standard handles into a console-subsystem child — a legacy path that
+  `bInheritHandles = FALSE` does not disable, and which `ConPTY`'s startup only
+  undoes for copied *console* handles. A host whose own stdio was redirected to a
+  pipe or file (a service, a daemon, a CI runner, `host.exe > log.txt`, or a test
+  binary under `cargo test`) therefore leaked those handles to the child: its output
+  bypassed the pseudoconsole and never reached `WindowsPtyMaster`, and its input
+  came from the host's stream rather than the PTY. The flag is now set with all
+  three handle fields left NULL, which is how Windows Terminal spawns `ConPTY`
+  children. Reported by @DamoyY. (#46)
+
+  This also explains a symptom previously recorded in this repo's own Windows tests
+  as unavoidable conhost behaviour ("does not forward a child's rendered output to
+  the read pipe on some configurations"). It was this bug; those tests now assert on
+  real child output rather than only the `ConPTY` handshake frame.
+
+- **Windows: `InteractContext::send_line` ignored the configured line ending**,
+  hardcoding `'\n'`. Combined with the above, the interactive path could not submit
+  a line on Windows at all and no configuration could work around it. It now uses
+  the platform default. (#50)
+
 ## [0.5.0] - 2026-07-08
 
 A pre-1.0 release centered on the correctness of the Unix spawn path: the

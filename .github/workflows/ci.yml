@@ -108,7 +108,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-          targets: x86_64-pc-windows-msvc
+
+      # Add the target to the *active* toolchain, not to `stable`. rust-toolchain.toml
+      # pins this repo to 1.92, so cargo runs 1.92 regardless of what the action above
+      # installs; passing `targets:` to the action adds the std library to `stable`
+      # instead and cargo then fails with `E0463: can't find crate for core`. `rustup
+      # target add` honours the pin, so it stays correct if the pin moves.
+      - name: Add Windows target to the pinned toolchain
+        run: rustup target add x86_64-pc-windows-msvc
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2

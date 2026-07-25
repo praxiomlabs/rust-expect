@@ -127,10 +127,22 @@ impl SessionBuilder {
         self.line_ending(LineEnding::Lf)
     }
 
-    /// Use Windows line endings (CRLF).
+    /// Use the Windows line ending for *sending*: CR.
+    ///
+    /// This is deliberately `Cr` and not `CrLf`. Like its
+    /// [`unix_line_endings`](Self::unix_line_endings) sibling — which sets `Lf`, the
+    /// Unix ENTER — this selects the terminator the platform's terminal sends for the
+    /// ENTER key, not the platform's text-file convention. `\r` is what Windows
+    /// Terminal sends to `ConPTY` for ENTER.
+    ///
+    /// `CrLf` also submits a line today, but only because conhost swallows the
+    /// trailing LF; against a child with `ENABLE_LINE_INPUT` disabled an LF that did
+    /// arrive would submit a second ENTER. To normalize *text* to CRLF, use
+    /// [`LineEndingStyle`](crate::encoding::LineEndingStyle) instead — that is a
+    /// separate concern from the send terminator.
     #[must_use]
     pub const fn windows_line_endings(self) -> Self {
-        self.line_ending(LineEnding::CrLf)
+        self.line_ending(LineEnding::Cr)
     }
 
     /// Set the encoding configuration.
@@ -838,7 +850,7 @@ mod tests {
     fn quick_session_cmd() {
         let config = QuickSession::cmd();
         assert_eq!(config.command, "cmd.exe");
-        assert_eq!(config.line_ending, LineEnding::CrLf);
+        assert_eq!(config.line_ending, LineEnding::Cr);
     }
 
     #[test]

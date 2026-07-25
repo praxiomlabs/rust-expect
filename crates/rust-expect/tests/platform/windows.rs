@@ -141,7 +141,7 @@ fn quick_session_windows() {
     // cmd.exe helper
     let cmd_config = QuickSession::cmd();
     assert_eq!(cmd_config.command, "cmd.exe");
-    assert_eq!(cmd_config.line_ending, LineEnding::CrLf);
+    assert_eq!(cmd_config.line_ending, LineEnding::Cr);
 
     // PowerShell helper
     let ps_config = QuickSession::powershell();

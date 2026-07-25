@@ -25,7 +25,7 @@ mod cross_platform {
             .windows_line_endings()
             .build();
 
-        assert_eq!(config.line_ending, LineEnding::CrLf);
+        assert_eq!(config.line_ending, LineEnding::Cr);
     }
 
     /// Verify CRLF normalization works on any platform.
@@ -49,7 +49,7 @@ mod cross_platform {
         // cmd.exe config should work on any platform
         let cmd = QuickSession::cmd();
         assert_eq!(cmd.command, "cmd.exe");
-        assert_eq!(cmd.line_ending, LineEnding::CrLf);
+        assert_eq!(cmd.line_ending, LineEnding::Cr);
 
         // PowerShell config (uses platform-specific binary name)
         let ps = QuickSession::powershell();
@@ -156,6 +156,6 @@ mod cross_platform {
         assert!(config.args.contains(&"/c".to_string()));
         assert!(config.args.contains(&"dir".to_string()));
         assert_eq!(config.env.get("PROMPT"), Some(&"$P$G".to_string()));
-        assert_eq!(config.line_ending, LineEnding::CrLf);
+        assert_eq!(config.line_ending, LineEnding::Cr);
     }
 }

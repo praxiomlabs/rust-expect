@@ -306,7 +306,7 @@ fn session_builder_line_endings() {
         .command("test")
         .windows_line_endings()
         .build();
-    assert!(matches!(config_windows.line_ending, LineEnding::CrLf));
+    assert!(matches!(config_windows.line_ending, LineEnding::Cr));
 }
 
 /// Test `SessionBuilder` buffer configuration.

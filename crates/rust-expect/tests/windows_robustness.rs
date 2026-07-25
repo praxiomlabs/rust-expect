@@ -4,10 +4,11 @@
 //! - The `screen` feature's VT100 emulator must ingest `ConPTY`'s escape-heavy
 //!   handshake frame without panicking and expose a correctly-sized screen.
 //!
-//! Note: on some Windows configurations conhost does not forward a child's
-//! *rendered* text to the read pipe (an OS/environment behavior, reproducible
-//! with other `ConPTY` libraries), so these tests deliberately assert only on
-//! properties that hold regardless of whether child output is forwarded.
+//! Note: these tests once deliberately avoided asserting on child output,
+//! because a child's rendered text did not reach the read pipe and that was
+//! believed to be an OS/environment behavior of conhost. It was actually issue
+//! #46 — the child was handed this process's redirected stdout instead of the
+//! pseudoconsole. Child output is now observable and asserted on.
 
 #![cfg(windows)]
 
@@ -67,11 +68,12 @@ async fn kill_live_child_terminates_it() {
 
 /// The VT100 screen emulator must ingest ConPTY's escape-heavy handshake frame
 /// (cursor-visibility, win32-input-mode, clear-screen, OSC title, etc.) without
-/// panicking, and expose the configured dimensions.
+/// panicking, expose the configured dimensions, and render the child's actual
+/// text onto the screen.
 #[cfg(feature = "screen")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn screen_ingests_conpty_escapes_without_panic() {
-    let mut session = Session::spawn("cmd.exe", &["/c", "exit 0"])
+    let mut session = Session::spawn("cmd.exe", &["/c", "echo SCREEN-MARKER-8823"])
         .await
         .expect("spawn cmd.exe");
 
@@ -88,8 +90,11 @@ async fn screen_ingests_conpty_escapes_without_panic() {
     let guard = screen.lock().unwrap();
     assert_eq!(guard.cols(), 80, "default screen width");
     assert_eq!(guard.rows(), 24, "default screen height");
-    // text() must render the (mostly blank) screen without panicking.
-    let _ = guard.text();
+    let rendered = guard.text();
+    assert!(
+        rendered.contains("SCREEN-MARKER-8823"),
+        "the VT parser should render the child's text onto the screen, got {rendered:?}"
+    );
 }
 
 /// `attach_screen_with_scrollback` + `on_screen_line_scrolled_out` must wire up

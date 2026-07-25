@@ -2,8 +2,10 @@
 //!
 //! Peer libraries have shipped real Windows bugs where the spawn contract was
 //! silently broken: arguments dropped (expectrl #63), environment modes ignored
-//! (expectrl #69), the pseudo console created at 0x0, or exit codes lost. These
-//! tests spawn real `ConPTY` processes and assert each contract end-to-end.
+//! (expectrl #69), the pseudo console created at 0x0, exit codes lost, or the
+//! child handed the parent's standard handles instead of the pseudoconsole's
+//! (#46). These tests spawn real `ConPTY` processes and assert each contract
+//! end-to-end.
 //!
 //! To make assertions deterministic and immune to `ConPTY` escape-sequence
 //! pollution, the child is a tiny purpose-built helper (`reflector.exe`,
@@ -45,6 +47,9 @@ extern "system" {
         template: *mut core::ffi::c_void,
     ) -> *mut core::ffi::c_void;
     fn GetConsoleScreenBufferInfo(h: *mut core::ffi::c_void, info: *mut Csbi) -> i32;
+    fn GetStdHandle(which: u32) -> *mut core::ffi::c_void;
+    fn GetFileType(h: *mut core::ffi::c_void) -> u32;
+    fn GetConsoleMode(h: *mut core::ffi::c_void, mode: *mut u32) -> i32;
 }
 
 fn main() {
@@ -77,8 +82,9 @@ fn main() {
             let cwd = std::env::current_dir().unwrap();
             writeln!(f, "{}", cwd.display()).unwrap();
         }
-        // Reflect the ConPTY window size via the console API. Under ConPTY the
-        // std handles are pipes, so query the console buffer via CONOUT$.
+        // Reflect the ConPTY window size via the console API. CONOUT$ always
+        // resolves to the active console buffer, so it is queried directly
+        // rather than relying on whatever the std handles happen to be.
         "winsize" => {
             const GENERIC_READ: u32 = 0x8000_0000;
             const GENERIC_WRITE: u32 = 0x4000_0000;
@@ -105,6 +111,21 @@ fn main() {
                 writeln!(f, "cols={} rows={}", cols, rows).unwrap();
             } else {
                 writeln!(f, "cols=ERR rows=ERR").unwrap();
+            }
+        }
+        // Reflect the provenance of each standard handle. A correctly spawned
+        // ConPTY child gets console handles; the parent's pipes/files reaching
+        // the child is the issue #46 leak. `type` is GetFileType (2 =
+        // FILE_TYPE_CHAR), `console` is whether GetConsoleMode succeeds —
+        // needed because NUL is also a character device.
+        "stdio" => {
+            let handles = [("stdin", -10i32), ("stdout", -11i32), ("stderr", -12i32)];
+            for &(label, id) in handles.iter() {
+                let h = unsafe { GetStdHandle(id as u32) };
+                let ft = unsafe { GetFileType(h) };
+                let mut mode: u32 = 0;
+                let console = unsafe { GetConsoleMode(h, &mut mode) } != 0;
+                writeln!(f, "{}=type:{} console:{}", label, ft, console).unwrap();
             }
         }
         other => {
@@ -352,4 +373,80 @@ async fn exit_code_zero_is_success() {
         .expect("child should exit");
     assert_eq!(status, rust_expect::ProcessExitStatus::Exited(0));
     assert!(status.success());
+}
+
+// ---------------------------------------------------------------------------
+// standard-handle provenance (issue #46)
+// ---------------------------------------------------------------------------
+
+/// Whether this process's own stdout is a console handle.
+fn own_stdout_is_console() -> bool {
+    use windows_sys::Win32::System::Console::{GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE};
+
+    // SAFETY: GetStdHandle returns a borrowed handle we do not close, and
+    // GetConsoleMode only reads through it.
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut mode = 0u32;
+        GetConsoleMode(handle, &raw mut mode) != 0
+    }
+}
+
+/// A `ConPTY` child's stdin/stdout/stderr must be the pseudoconsole's handles,
+/// never the parent's.
+///
+/// Regression test for issue #46. `create_startup_info` did not set
+/// `STARTF_USESTDHANDLES`, so Windows duplicated *this* process's standard
+/// handles into the child — a legacy path that `bInheritHandles = FALSE` does
+/// not disable and that `ConPTY` only undoes for copied *console* handles. The
+/// child then wrote to the test binary's stdout pipe instead of the
+/// pseudoconsole, so its output never reached the master. That is also the real
+/// cause of what this suite once recorded as conhost "not forwarding rendered
+/// output" on some configurations.
+///
+/// `FILE_TYPE_CHAR` alone would be insufficient evidence, because `NUL` is also
+/// a character device. `GetConsoleMode` succeeding is what proves the handle is
+/// a real console handle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn std_handles_are_conpty_not_parents() {
+    // The leak can only happen when the parent's handles are *not* console
+    // handles, so a console stdout would make the assertions pass vacuously.
+    // Under `cargo test` stdout is always a pipe, which is the case that matters.
+    //
+    // libtest discards a *passing* test's output, so a skip is indistinguishable
+    // from a real pass in a CI log. On CI an absent precondition is therefore a
+    // hard failure rather than a silent skip: otherwise this test could quietly
+    // stop exercising anything and no run would ever report it.
+    if own_stdout_is_console() {
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "precondition absent on CI: this process's stdout is a console, so the \
+             parent-handle leak cannot occur and this test would pass vacuously"
+        );
+        eprintln!(
+            "SKIPPED std_handles_are_conpty_not_parents: this process's stdout is a \
+             console, so the parent-handle leak cannot occur here and the assertions \
+             would pass vacuously. Run under `cargo test` to exercise it."
+        );
+        return;
+    }
+
+    let out = unique_outfile("stdio");
+    let (status, contents) = run_reflector("stdio", &out, &[], SessionConfig::default()).await;
+
+    assert!(status.success(), "reflector exited non-zero: {status}");
+    assert_eq!(
+        contents.lines().count(),
+        3,
+        "expected one line each for stdin/stdout/stderr, got {contents:?}"
+    );
+
+    for line in contents.lines() {
+        assert!(
+            line.contains("type:2") && line.contains("console:true"),
+            "every standard handle of a ConPTY child must be a console handle, but \
+             {line:?} is not: the child received this process's redirected handle \
+             instead of the pseudoconsole (issue #46). Full report: {contents:?}"
+        );
+    }
 }

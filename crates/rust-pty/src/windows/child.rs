@@ -22,7 +22,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTUPINFOEXW,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
     UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
@@ -554,6 +554,27 @@ fn create_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>)> {
     let mut startup_info: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     startup_info.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     startup_info.lpAttributeList = attr_list.as_mut_ptr() as *mut _;
+
+    // Opt out of receiving this process's standard handles.
+    //
+    // Without STARTF_USESTDHANDLES, Windows *duplicates* the parent's standard
+    // handles into a console-subsystem child — a legacy convenience path that
+    // `bInheritHandles = FALSE` does not disable. ConPTY's startup only undoes
+    // that for copied *console* handles, so a parent whose own stdio is
+    // redirected to a pipe or file (a service, a daemon, a CI runner,
+    // `host.exe > log.txt`) leaks those handles to the child: its output
+    // bypasses the pseudoconsole entirely and its input comes from the parent's
+    // stream rather than the PTY.
+    //
+    // Setting the flag with all three handle fields left NULL is how Windows
+    // Terminal spawns ConPTY children. `bInheritHandles` stays FALSE because no
+    // real handles are supplied; the pseudoconsole attribute set above is what
+    // gives the child its console.
+    //
+    // See https://github.com/microsoft/terminal/issues/11276 and the
+    // `std_handles_are_conpty_not_parents` regression test.
+    startup_info.StartupInfo.dwFlags |= STARTF_USESTDHANDLES;
+    // hStdInput/hStdOutput/hStdError intentionally remain NULL from zeroed().
 
     Ok((startup_info, attr_list))
 }

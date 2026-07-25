@@ -84,10 +84,16 @@ impl InteractContext<'_> {
         InteractAction::send(data)
     }
 
-    /// Create a send action with line ending.
+    /// Create a send action with the platform's default line ending.
+    ///
+    /// This previously hardcoded `\n`, which `ConPTY` discards, so the action could
+    /// never submit a line on Windows. It uses the platform default rather than the
+    /// session's configured [`LineEnding`](crate::LineEnding) because
+    /// `InteractContext` carries only match data and has no access to the config;
+    /// threading it through would mean adding a public field.
     pub fn send_line(&self, data: impl Into<String>) -> InteractAction {
         let mut s = data.into();
-        s.push('\n');
+        s.push_str(crate::LineEnding::default().as_str());
         InteractAction::send(s)
     }
 }

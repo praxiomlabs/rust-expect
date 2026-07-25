@@ -238,12 +238,12 @@ impl PtySpawner {
         })
     }
 
-    /// Spawn a command on Windows using ConPTY.
+    /// Spawn a command on Windows using `ConPTY`.
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - ConPTY is not available (Windows version too old)
+    /// - `ConPTY` is not available (Windows version too old)
     /// - PTY allocation fails
     /// - Process spawning fails
     #[cfg(windows)]
@@ -288,14 +288,17 @@ impl PtySpawner {
         };
 
         // Spawn using rust-pty's Windows implementation
-        let (master, child) =
-            WindowsPtySystem::spawn(command, args.iter().map(|s| s.as_str()), &pty_config)
-                .await
-                .map_err(|e| {
-                    ExpectError::Spawn(SpawnError::PtyAllocation {
-                        reason: format!("Windows ConPTY spawn failed: {e}"),
-                    })
-                })?;
+        let (master, child) = WindowsPtySystem::spawn(
+            command,
+            args.iter().map(std::string::String::as_str),
+            &pty_config,
+        )
+        .await
+        .map_err(|e| {
+            ExpectError::Spawn(SpawnError::PtyAllocation {
+                reason: format!("Windows ConPTY spawn failed: {e}"),
+            })
+        })?;
 
         Ok(WindowsPtyHandle {
             master,
@@ -377,7 +380,7 @@ impl PtyHandle {
 impl WindowsPtyHandle {
     /// Get the process ID.
     #[must_use]
-    pub fn pid(&self) -> u32 {
+    pub const fn pid(&self) -> u32 {
         self.child.pid()
     }
 
@@ -580,10 +583,10 @@ impl ChildExit for AsyncPty {
     }
 }
 
-/// Async wrapper around Windows ConPTY for use with Tokio.
+/// Async wrapper around Windows `ConPTY` for use with Tokio.
 ///
-/// This wraps the rust-pty WindowsPtyMaster and provides the same interface
-/// as the Unix AsyncPty for consistent cross-platform Session usage.
+/// This wraps the rust-pty `WindowsPtyMaster` and provides the same interface
+/// as the Unix `AsyncPty` for consistent cross-platform Session usage.
 #[cfg(windows)]
 pub struct WindowsAsyncPty {
     /// The underlying Windows PTY master.
@@ -598,9 +601,10 @@ pub struct WindowsAsyncPty {
 
 #[cfg(windows)]
 impl WindowsAsyncPty {
-    /// Create a new Windows async PTY wrapper from a WindowsPtyHandle.
+    /// Create a new Windows async PTY wrapper from a `WindowsPtyHandle`.
     ///
     /// Takes ownership of the handle.
+    #[must_use]
     pub fn from_handle(handle: WindowsPtyHandle) -> Self {
         let pid = handle.child.pid();
         let dimensions = handle.dimensions;

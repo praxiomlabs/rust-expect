@@ -187,7 +187,7 @@ impl PtyConfigBuilder {
     /// Set whether to allocate a console (Windows only).
     #[cfg(windows)]
     #[must_use]
-    pub fn allocate_console(mut self, value: bool) -> Self {
+    pub const fn allocate_console(mut self, value: bool) -> Self {
         self.config.allocate_console = value;
         self
     }

@@ -32,7 +32,7 @@ pub struct SyncSession {
 /// A synchronous session wrapper (Windows).
 ///
 /// This wraps an async session and provides blocking methods for
-/// use in synchronous contexts using Windows ConPTY.
+/// use in synchronous contexts using Windows `ConPTY`.
 #[cfg(windows)]
 pub struct SyncSession {
     /// The tokio runtime.
@@ -241,7 +241,7 @@ impl SyncSession {
 
     /// Check if the session is active.
     #[must_use]
-    pub fn is_active(&self) -> bool {
+    pub const fn is_active(&self) -> bool {
         !self.inner.is_eof()
     }
 

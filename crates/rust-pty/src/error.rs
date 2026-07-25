@@ -89,7 +89,7 @@ pub enum PtyError {
         code: u32,
     },
 
-    /// ConPTY is not available (Windows version too old).
+    /// `ConPTY` is not available (Windows version too old).
     #[cfg(windows)]
     #[error("ConPTY is not available on this Windows version")]
     ConPtyNotAvailable,

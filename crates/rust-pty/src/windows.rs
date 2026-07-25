@@ -1,11 +1,11 @@
 //! Windows platform implementation for PTY operations.
 //!
-//! This module provides the Windows-specific PTY implementation using ConPTY
+//! This module provides the Windows-specific PTY implementation using `ConPTY`
 //! (Console Pseudo Terminal), introduced in Windows 10 version 1809.
 //!
 //! # Platform Support
 //!
-//! ConPTY is only available on:
+//! `ConPTY` is only available on:
 //! - Windows 10 version 1809 (build 17763) and later
 //! - Windows Server 2019 and later
 //!
@@ -27,7 +27,6 @@ mod conpty;
 mod pipes;
 
 use std::ffi::OsStr;
-use std::future::Future;
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -43,7 +42,7 @@ use crate::config::{PtyConfig, WindowSize};
 use crate::error::{PtyError, Result};
 use crate::traits::PtySystem;
 
-/// Windows PTY system implementation using ConPTY.
+/// Windows PTY system implementation using `ConPTY`.
 ///
 /// This struct provides the factory methods for creating PTY sessions on Windows.
 #[derive(Debug, Clone, Copy, Default)]
@@ -53,79 +52,74 @@ impl PtySystem for WindowsPtySystem {
     type Master = WindowsPtyMaster;
     type Child = WindowsPtyChild;
 
-    fn spawn<S, I>(
+    async fn spawn<S, I>(
         program: S,
         args: I,
         config: &PtyConfig,
-    ) -> impl Future<Output = Result<(Self::Master, Self::Child)>> + Send
+    ) -> Result<(Self::Master, Self::Child)>
     where
         S: AsRef<OsStr> + Send,
         I: IntoIterator + Send,
         I::Item: AsRef<OsStr>,
     {
-        async move {
-            // Check ConPTY availability
-            if !is_conpty_available() {
-                return Err(PtyError::ConPtyNotAvailable);
-            }
-
-            // Create pipes
-            let input_pipe = create_input_pipe()?;
-            let output_pipe = create_output_pipe()?;
-
-            // Create ConPTY
-            let window_size = WindowSize::from(config.window_size);
-            let mut conpty = ConPty::new(
-                window_size,
-                input_pipe.read,
-                output_pipe.write,
-                input_pipe.write,
-                output_pipe.read,
-            )?;
-
-            // Spawn child process
-            let child = spawn_child(conpty.handle(), program, args, config)?;
-
-            // Close the PTY pipe handles after CreateProcess per Microsoft docs.
-            // This signals to ConPTY that no other handles exist on the "other side"
-            // of the pipes, enabling proper channel detection.
-            conpty.close_pty_pipes();
-
-            // Duplicate handles for the master (Windows requires explicit handle duplication)
-            let input_handle = conpty.input().try_clone().map_err(|e| PtyError::Spawn(e))?;
-            let output_handle = conpty
-                .output()
-                .try_clone()
-                .map_err(|e| PtyError::Spawn(e))?;
-
-            // Now wrap in Arc for shared ownership
-            let conpty = Arc::new(conpty);
-            let conpty_for_resize = Arc::clone(&conpty);
-
-            // Create master wrapper
-            let master = WindowsPtyMaster::new(
-                input_handle,
-                output_handle,
-                move |size| conpty_for_resize.resize(size),
-                window_size,
-            );
-
-            // Wire up exit detection.
-            //
-            // ConPTY keeps the output pipe open for the lifetime of the pseudo
-            // console (held here by `conpty`), so the child's exit is *not*
-            // observable by reading the pipe — a reader would block forever and
-            // `wait()`/`expect_eof()` would never return. Spawn a watcher thread
-            // that blocks on the child process handle and, once the child exits,
-            // closes the pseudo console (delivering EOF to readers and unblocking
-            // any in-flight `ReadFile`) and clears the master's open flag (so
-            // post-exit writes fail with `BrokenPipe` rather than being silently
-            // buffered into a dead PTY).
-            let watch_handle = child.duplicate_process_handle()?;
-            spawn_exit_watcher(watch_handle, Arc::clone(&conpty), master.open_flag());
-
-            Ok((master, child))
+        // Check ConPTY availability
+        if !is_conpty_available() {
+            return Err(PtyError::ConPtyNotAvailable);
         }
+
+        // Create pipes
+        let input_pipe = create_input_pipe()?;
+        let output_pipe = create_output_pipe()?;
+
+        // Create ConPTY
+        let window_size = WindowSize::from(config.window_size);
+        let mut conpty = ConPty::new(
+            window_size,
+            input_pipe.read,
+            output_pipe.write,
+            input_pipe.write,
+            output_pipe.read,
+        )?;
+
+        // Spawn child process
+        let child = spawn_child(conpty.handle(), program, args, config)?;
+
+        // Close the PTY pipe handles after CreateProcess per Microsoft docs.
+        // This signals to ConPTY that no other handles exist on the "other side"
+        // of the pipes, enabling proper channel detection.
+        conpty.close_pty_pipes();
+
+        // Duplicate handles for the master (Windows requires explicit handle duplication)
+        let input_handle = conpty.input().try_clone().map_err(PtyError::Spawn)?;
+        let output_handle = conpty.output().try_clone().map_err(PtyError::Spawn)?;
+
+        // Now wrap in Arc for shared ownership
+        let conpty = Arc::new(conpty);
+        let conpty_for_resize = Arc::clone(&conpty);
+
+        // Create master wrapper
+        let master = WindowsPtyMaster::new(
+            input_handle,
+            output_handle,
+            move |size| conpty_for_resize.resize(size),
+            window_size,
+        );
+
+        // Wire up exit detection.
+        //
+        // ConPTY keeps the output pipe open for the lifetime of the pseudo
+        // console (held here by `conpty`), so the child's exit is *not*
+        // observable by reading the pipe — a reader would block forever and
+        // `wait()`/`expect_eof()` would never return. Spawn a watcher thread
+        // that blocks on the child process handle and, once the child exits,
+        // closes the pseudo console (delivering EOF to readers and unblocking
+        // any in-flight `ReadFile`) and clears the master's open flag (so
+        // post-exit writes fail with `BrokenPipe` rather than being silently
+        // buffered into a dead PTY).
+        let watch_handle = child.duplicate_process_handle()?;
+        spawn_exit_watcher(watch_handle, Arc::clone(&conpty), master.open_flag());
+
+        Ok((master, child))
     }
 }
 

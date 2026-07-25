@@ -66,7 +66,7 @@ async fn kill_live_child_terminates_it() {
     assert!(!session.is_running());
 }
 
-/// The VT100 screen emulator must ingest ConPTY's escape-heavy handshake frame
+/// The VT100 screen emulator must ingest `ConPTY`'s escape-heavy handshake frame
 /// (cursor-visibility, win32-input-mode, clear-screen, OSC title, etc.) without
 /// panicking, expose the configured dimensions, and render the child's actual
 /// text onto the screen.
@@ -87,10 +87,12 @@ async fn screen_ingests_conpty_escapes_without_panic() {
         .expect("child should exit");
 
     let screen = session.screen().expect("screen should be attached");
-    let guard = screen.lock().unwrap();
-    assert_eq!(guard.cols(), 80, "default screen width");
-    assert_eq!(guard.rows(), 24, "default screen height");
-    let rendered = guard.text();
+    let (cols, rows, rendered) = {
+        let guard = screen.lock().unwrap();
+        (guard.cols(), guard.rows(), guard.text())
+    };
+    assert_eq!(cols, 80, "default screen width");
+    assert_eq!(rows, 24, "default screen height");
     assert!(
         rendered.contains("SCREEN-MARKER-8823"),
         "the VT parser should render the child's text onto the screen, got {rendered:?}"

@@ -327,10 +327,9 @@ pub enum LogFormat {
 }
 
 /// Line ending styles.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
     /// Unix-style line ending (LF).
-    #[default]
     Lf,
 
     /// Windows-style line ending (CRLF).
@@ -338,6 +337,32 @@ pub enum LineEnding {
 
     /// Classic Mac line ending (CR).
     Cr,
+}
+
+/// The default is whatever the platform's terminal actually sends for ENTER, which
+/// is not the same as the platform's text-file convention.
+///
+/// On Windows this is [`LineEnding::Cr`], not `CrLf`. `ConPTY` **discards a bare LF
+/// entirely** — measured on Windows 11 26200.8893, a lone `\n` completes no line
+/// read, queues nothing, and is not even echoed — so an LF default makes
+/// [`send_line`](crate::Session::send_line) unable to submit a line at all. `\r` is
+/// the byte a terminal sends for the Enter key.
+///
+/// `CrLf` also works today, but only because conhost happens to swallow the
+/// trailing LF; that is undocumented, and against a child with `ENABLE_LINE_INPUT`
+/// disabled an LF that *did* arrive would submit a second Enter. `Cr` cannot
+/// double-submit on any build.
+impl Default for LineEnding {
+    fn default() -> Self {
+        #[cfg(windows)]
+        {
+            Self::Cr
+        }
+        #[cfg(not(windows))]
+        {
+            Self::Lf
+        }
+    }
 }
 
 impl LineEnding {

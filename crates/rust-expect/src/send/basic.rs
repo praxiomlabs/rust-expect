@@ -33,9 +33,13 @@ pub trait BasicSend: Send {
         }
     }
 
-    /// Send a line with LF ending.
+    /// Send a line with the platform's default line ending.
+    ///
+    /// Implementors that carry a configured [`LineEnding`] should override this and
+    /// use it; this default only knows the platform. It must not hardcode LF, which
+    /// `ConPTY` discards outright.
     fn send_line(&mut self, line: &str) -> impl std::future::Future<Output = Result<()>> + Send {
-        self.send_line_with(line, LineEnding::Lf)
+        self.send_line_with(line, LineEnding::default())
     }
 
     /// Send a control character.

@@ -91,9 +91,17 @@ fn line_ending_values() {
     assert_eq!(LineEnding::Cr.as_str(), "\r");
 }
 
+/// The default tracks what the platform's terminal sends for ENTER, not the
+/// platform's text-file convention: `Cr` on Windows, because `ConPTY` discards a
+/// bare LF and would never submit the line.
 #[test]
 fn line_ending_default() {
     let default = LineEnding::default();
+
+    #[cfg(windows)]
+    assert_eq!(default, LineEnding::Cr);
+
+    #[cfg(not(windows))]
     assert_eq!(default, LineEnding::Lf);
 }
 

@@ -1,7 +1,7 @@
-//! Windows child process management for ConPTY.
+//! Windows child process management for `ConPTY`.
 //!
 //! This module provides child process spawning and management for Windows
-//! ConPTY sessions, including Job Object integration for process lifetime management.
+//! `ConPTY` sessions, including Job Object integration for process lifetime management.
 
 use std::ffi::OsStr;
 use std::future::Future;
@@ -27,6 +27,9 @@ use windows_sys::Win32::System::Threading::{
 };
 
 /// Windows BOOL type (i32 in windows-sys 0.61+)
+// Deliberately mirrors the Win32 spelling; renaming it to `Bool` would obscure
+// which platform type these FFI signatures are modelling.
+#[allow(clippy::upper_case_acronyms)]
 type BOOL = i32;
 /// Windows FALSE constant
 const FALSE: BOOL = 0;
@@ -57,6 +60,7 @@ pub struct WindowsPtyChild {
 
 impl WindowsPtyChild {
     /// Create a new child process handle.
+    #[must_use]
     pub fn new(process: OwnedHandle, pid: u32, job: Option<OwnedHandle>) -> Self {
         Self {
             process,
@@ -69,7 +73,7 @@ impl WindowsPtyChild {
 
     /// Get the process ID.
     #[must_use]
-    pub fn pid(&self) -> u32 {
+    pub const fn pid(&self) -> u32 {
         self.pid
     }
 
@@ -110,7 +114,7 @@ impl WindowsPtyChild {
                 GetCurrentProcess(),
                 self.process.as_raw_handle() as HANDLE,
                 GetCurrentProcess(),
-                &mut dup,
+                &raw mut dup,
                 0,
                 FALSE,
                 DUPLICATE_SAME_ACCESS,
@@ -143,7 +147,7 @@ impl WindowsPtyChild {
 
             let mut exit_code: u32 = 0;
             // SAFETY: handle is valid and exit_code is a valid pointer
-            if unsafe { GetExitCodeProcess(handle, &mut exit_code) } == FALSE {
+            if unsafe { GetExitCodeProcess(handle, &raw mut exit_code) } == FALSE {
                 return Err(io::Error::last_os_error());
             }
 
@@ -174,7 +178,7 @@ impl WindowsPtyChild {
         if wait_result == WAIT_OBJECT_0 {
             let mut exit_code: u32 = 0;
             // SAFETY: handle is valid
-            if unsafe { GetExitCodeProcess(handle, &mut exit_code) } == FALSE {
+            if unsafe { GetExitCodeProcess(handle, &raw mut exit_code) } == FALSE {
                 return Err(PtyError::Wait(io::Error::last_os_error()));
             }
 
@@ -253,31 +257,31 @@ impl WindowsPtyChild {
 
 impl PtyChild for WindowsPtyChild {
     fn pid(&self) -> u32 {
-        WindowsPtyChild::pid(self)
+        Self::pid(self)
     }
 
     fn is_running(&self) -> bool {
-        WindowsPtyChild::is_running(self)
+        Self::is_running(self)
     }
 
     fn wait(&mut self) -> Pin<Box<dyn Future<Output = Result<ExitStatus>> + Send + '_>> {
-        Box::pin(WindowsPtyChild::wait(self))
+        Box::pin(Self::wait(self))
     }
 
     fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
-        WindowsPtyChild::try_wait(self)
+        Self::try_wait(self)
     }
 
     fn signal(&self, signal: PtySignal) -> Result<()> {
-        WindowsPtyChild::signal(self, signal)
+        Self::signal(self, signal)
     }
 
     fn kill(&mut self) -> Result<()> {
-        WindowsPtyChild::kill(self)
+        Self::kill(self)
     }
 }
 
-/// Spawn a child process attached to a ConPTY.
+/// Spawn a child process attached to a `ConPTY`.
 pub fn spawn_child<S, I>(
     hpc: HPCON,
     program: S,
@@ -293,7 +297,7 @@ where
     // The program name is escaped the same way as arguments
     let mut cmdline = escape_argument(program.as_ref());
     for arg in args {
-        cmdline.push(b' ' as u16);
+        cmdline.push(u16::from(b' '));
         cmdline.extend(escape_argument(arg.as_ref()));
     }
     cmdline.push(0); // Null terminator
@@ -309,7 +313,7 @@ where
     });
 
     // Create job object for process management
-    let job = create_job_object()?;
+    let job = create_job_object();
 
     // Set up startup info with pseudo console
     let (startup_info, _attr_list) = create_startup_info(hpc)?;
@@ -330,11 +334,13 @@ where
             if env_block.is_empty() {
                 ptr::null()
             } else {
-                env_block.as_ptr() as *const _
+                env_block.as_ptr().cast()
             },
-            working_dir.as_ref().map_or(ptr::null(), |w| w.as_ptr()),
-            &startup_info.StartupInfo,
-            &mut process_info,
+            working_dir
+                .as_ref()
+                .map_or(ptr::null(), std::vec::Vec::as_ptr),
+            &raw const startup_info.StartupInfo,
+            &raw mut process_info,
         )
     };
 
@@ -367,7 +373,7 @@ where
     Ok(WindowsPtyChild::new(process, process_info.dwProcessId, job))
 }
 
-/// Convert an OsStr to a wide string (UTF-16).
+/// Convert an `OsStr` to a wide string (UTF-16).
 fn to_wide_string(s: &OsStr) -> Vec<u16> {
     s.encode_wide().collect()
 }
@@ -399,7 +405,7 @@ fn escape_argument(arg: &OsStr) -> Vec<u16> {
     }
 
     let mut result = Vec::new();
-    result.push(b'"' as u16); // Opening quote
+    result.push(u16::from(b'"')); // Opening quote
 
     let chars: Vec<char> = arg_str.chars().collect();
     let mut i = 0;
@@ -418,26 +424,26 @@ fn escape_argument(arg: &OsStr) -> Vec<u16> {
             if i < chars.len() && chars[i] == '"' {
                 // Backslashes before a quote: double them and escape the quote
                 for _ in 0..(num_backslashes * 2) {
-                    result.push(b'\\' as u16);
+                    result.push(u16::from(b'\\'));
                 }
-                result.push(b'\\' as u16);
-                result.push(b'"' as u16);
+                result.push(u16::from(b'\\'));
+                result.push(u16::from(b'"'));
                 i += 1;
             } else if i >= chars.len() {
                 // Trailing backslashes: double them (they'll precede closing quote)
                 for _ in 0..(num_backslashes * 2) {
-                    result.push(b'\\' as u16);
+                    result.push(u16::from(b'\\'));
                 }
             } else {
                 // Backslashes not before a quote: keep them as-is
                 for _ in 0..num_backslashes {
-                    result.push(b'\\' as u16);
+                    result.push(u16::from(b'\\'));
                 }
             }
         } else if c == '"' {
             // Quote without preceding backslash: escape it
-            result.push(b'\\' as u16);
-            result.push(b'"' as u16);
+            result.push(u16::from(b'\\'));
+            result.push(u16::from(b'"'));
             i += 1;
         } else {
             // Regular character
@@ -448,11 +454,11 @@ fn escape_argument(arg: &OsStr) -> Vec<u16> {
         }
     }
 
-    result.push(b'"' as u16); // Closing quote
+    result.push(u16::from(b'"')); // Closing quote
     result
 }
 
-/// Build a Windows environment block from a HashMap.
+/// Build a Windows environment block from a `HashMap`.
 fn build_environment_block(
     env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>,
 ) -> Vec<u16> {
@@ -460,7 +466,7 @@ fn build_environment_block(
 
     for (key, value) in env {
         block.extend(to_wide_string(key));
-        block.push(b'=' as u16);
+        block.push(u16::from(b'='));
         block.extend(to_wide_string(value));
         block.push(0);
     }
@@ -470,12 +476,15 @@ fn build_environment_block(
 }
 
 /// Create a job object for process management.
-fn create_job_object() -> Result<Option<OwnedHandle>> {
+///
+/// Returns `None` when the job object cannot be created or configured; job
+/// assignment is best-effort and a child still spawns without one.
+fn create_job_object() -> Option<OwnedHandle> {
     // SAFETY: null parameters create an unnamed job
     let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
 
     if job.is_null() {
-        return Ok(None);
+        return None;
     }
 
     // Configure job to kill child processes when job handle is closed.
@@ -489,7 +498,7 @@ fn create_job_object() -> Result<Option<OwnedHandle>> {
         SetInformationJobObject(
             job,
             JobObjectExtendedLimitInformation,
-            &info as *const _ as *const _,
+            (&raw const info).cast(),
             std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         )
     };
@@ -499,14 +508,12 @@ fn create_job_object() -> Result<Option<OwnedHandle>> {
         unsafe {
             CloseHandle(job);
         }
-        return Ok(None);
+        return None;
     }
 
     // SAFETY: `job` is the handle returned by CreateJobObjectW above and is non-null
-    // (early return on null at line 427). Wrapping it in OwnedHandle transfers ownership.
-    Ok(Some(unsafe {
-        OwnedHandle::from_raw_handle(job as RawHandle)
-    }))
+    // (early return on null above). Wrapping it in OwnedHandle transfers ownership.
+    Some(unsafe { OwnedHandle::from_raw_handle(job as RawHandle) })
 }
 
 /// Create extended startup info with pseudo console attribute.
@@ -515,7 +522,7 @@ fn create_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>)> {
     let mut size: usize = 0;
     // SAFETY: Getting size with null buffer
     unsafe {
-        InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, &mut size);
+        InitializeProcThreadAttributeList(ptr::null_mut(), 1, 0, &raw mut size);
     }
 
     // Allocate attribute list
@@ -524,7 +531,7 @@ fn create_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>)> {
     // Initialize attribute list
     // SAFETY: buffer is properly sized
     let result = unsafe {
-        InitializeProcThreadAttributeList(attr_list.as_mut_ptr() as *mut _, 1, 0, &mut size)
+        InitializeProcThreadAttributeList(attr_list.as_mut_ptr().cast(), 1, 0, &raw mut size)
     };
 
     if result == FALSE {
@@ -535,7 +542,7 @@ fn create_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>)> {
     // SAFETY: attribute list is initialized
     let result = unsafe {
         UpdateProcThreadAttribute(
-            attr_list.as_mut_ptr() as *mut _,
+            attr_list.as_mut_ptr().cast(),
             0,
             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
             hpc as *mut _,
@@ -553,7 +560,7 @@ fn create_startup_info(hpc: HPCON) -> Result<(STARTUPINFOEXW, Vec<u8>)> {
     // baseline. cb and lpAttributeList are set on the next two lines.
     let mut startup_info: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
     startup_info.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-    startup_info.lpAttributeList = attr_list.as_mut_ptr() as *mut _;
+    startup_info.lpAttributeList = attr_list.as_mut_ptr().cast();
 
     // Opt out of receiving this process's standard handles.
     //
@@ -590,11 +597,11 @@ mod tests {
         assert_eq!(
             wide,
             vec![
-                b'h' as u16,
-                b'e' as u16,
-                b'l' as u16,
-                b'l' as u16,
-                b'o' as u16
+                u16::from(b'h'),
+                u16::from(b'e'),
+                u16::from(b'l'),
+                u16::from(b'l'),
+                u16::from(b'o')
             ]
         );
     }

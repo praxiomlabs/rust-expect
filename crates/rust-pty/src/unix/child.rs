@@ -306,7 +306,6 @@ fn convert_exit_status(status: StdExitStatus) -> ExitStatus {
 ///
 /// This sets up the child's stdin/stdout/stderr to use the slave PTY
 /// and executes the specified program.
-#[allow(unsafe_code)]
 pub async fn spawn_child<S, I>(
     slave_fd: OwnedFd,
     program: S,
@@ -413,7 +412,6 @@ where
 
 /// Duplicate the slave fd for a child stdio stream, returning an error rather
 /// than a `-1` on failure.
-#[allow(unsafe_code)]
 fn dup_slave(slave_raw: RawFd) -> Result<RawFd> {
     // SAFETY: slave_raw is a valid, open slave fd for the duration of the call.
     let fd = unsafe { libc::dup(slave_raw) };

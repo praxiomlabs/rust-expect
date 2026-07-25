@@ -194,7 +194,6 @@ impl UnixPtyMaster {
 
             // SAFETY: ioctl with TIOCSWINSZ is the standard way to set terminal window size.
             // We're passing a valid winsize struct to a valid file descriptor.
-            #[allow(unsafe_code)]
             let result = unsafe {
                 libc::ioctl(
                     self.async_fd.as_raw_fd(),
@@ -450,7 +449,6 @@ pub(crate) mod macos_drain {
 
     impl Drain {
         /// Start draining a `dup` of `master_fd` on a dedicated OS thread.
-        #[allow(unsafe_code)]
         pub(crate) fn start(master_fd: RawFd) -> io::Result<Self> {
             // A private read-only handle to the same master, so the reader thread
             // never contends with `poll_write` on the original fd.
@@ -556,7 +554,6 @@ pub(crate) mod macos_drain {
         }
     }
 
-    #[allow(unsafe_code)]
     fn drain_loop(fd: RawFd, shared: &Arc<Mutex<Shared>>, stop: &Arc<AtomicBool>) {
         use std::cmp::Ordering as CmpOrdering;
 

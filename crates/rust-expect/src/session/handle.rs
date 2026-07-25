@@ -1405,7 +1405,7 @@ impl Session<AsyncPty> {
 impl Session<WindowsAsyncPty> {
     /// Spawn a new process with the given command.
     ///
-    /// This creates a new PTY using Windows ConPTY, spawns a child process,
+    /// This creates a new PTY using Windows `ConPTY`, spawns a child process,
     /// and returns a Session connected to the child's terminal.
     ///
     /// # Example
@@ -1426,7 +1426,7 @@ impl Session<WindowsAsyncPty> {
     /// # Errors
     ///
     /// Returns an error if:
-    /// - ConPTY is not available (Windows version too old)
+    /// - `ConPTY` is not available (Windows version too old)
     /// - PTY allocation fails
     /// - The command cannot be executed
     pub async fn spawn(command: &str, args: &[&str]) -> Result<Self> {
@@ -1447,7 +1447,7 @@ impl Session<WindowsAsyncPty> {
         let spawner = PtySpawner::with_config(pty_config);
 
         // Convert &[&str] to Vec<String> for the spawner
-        let args_owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let args_owned: Vec<String> = args.iter().map(std::string::ToString::to_string).collect();
 
         // Spawn the process
         let handle = spawner.spawn(command, &args_owned).await?;
@@ -1456,7 +1456,7 @@ impl Session<WindowsAsyncPty> {
         let async_pty = WindowsAsyncPty::from_handle(handle);
 
         // Create the session
-        let mut session = Session::new(async_pty, config);
+        let mut session = Self::new(async_pty, config);
         session.state = SessionState::Running;
 
         Ok(session)

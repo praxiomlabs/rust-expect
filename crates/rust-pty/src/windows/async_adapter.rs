@@ -1,7 +1,7 @@
 //! Async I/O adapter for Windows pipes.
 //!
 //! This module provides async read/write operations for Windows pipes used
-//! with ConPTY, bridging the gap between synchronous Windows I/O and Tokio's
+//! with `ConPTY`, bridging the gap between synchronous Windows I/O and Tokio's
 //! async runtime.
 
 use std::io;
@@ -33,10 +33,10 @@ enum PendingReadState {
     Ready(io::Result<Vec<u8>>),
 }
 
-/// Async wrapper for Windows ConPTY I/O.
+/// Async wrapper for Windows `ConPTY` I/O.
 ///
 /// This struct provides async read/write operations by using blocking I/O
-/// in spawn_blocking tasks, since Windows named pipes don't integrate well
+/// in `spawn_blocking` tasks, since Windows named pipes don't integrate well
 /// with async runtimes.
 pub struct WindowsPtyMaster {
     /// Handle for writing to the PTY (input to child).
@@ -91,6 +91,7 @@ impl WindowsPtyMaster {
     }
 
     /// Create without resize support.
+    #[must_use]
     pub fn without_resize(input: OwnedHandle, output: OwnedHandle) -> Self {
         Self {
             input: Arc::new(input),
@@ -104,6 +105,12 @@ impl WindowsPtyMaster {
 }
 
 impl AsyncRead for WindowsPtyMaster {
+    // The `pending_read` guard's lifetime here is load-bearing: it is held across
+    // the state transition and released explicitly before spawning the blocking
+    // read (see the `drop(state)` below). Letting clippy tighten the drop points
+    // risks reordering that against the EOF/drain behaviour documented below,
+    // which this code has already been bitten by once.
+    #[allow(clippy::significant_drop_tightening)]
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -156,7 +163,7 @@ impl AsyncRead for WindowsPtyMaster {
                                 raw_handle as HANDLE,
                                 buffer.as_mut_ptr(),
                                 buffer.len() as u32,
-                                &mut bytes_read,
+                                &raw mut bytes_read,
                                 std::ptr::null_mut(),
                             )
                         };
@@ -205,15 +212,14 @@ impl AsyncRead for WindowsPtyMaster {
                 // Leave state as Idle (already set by mem::replace)
                 match result {
                     Ok(data) => {
-                        if data.is_empty() {
-                            Poll::Ready(Ok(())) // EOF
-                        } else {
+                        // An empty read is EOF: leave `buf` untouched.
+                        if !data.is_empty() {
                             let unfilled = buf.initialize_unfilled();
                             let to_copy = data.len().min(unfilled.len());
                             unfilled[..to_copy].copy_from_slice(&data[..to_copy]);
                             buf.advance(to_copy);
-                            Poll::Ready(Ok(()))
                         }
+                        Poll::Ready(Ok(()))
                     }
                     Err(e) => Poll::Ready(Err(e)),
                 }
@@ -243,7 +249,7 @@ impl AsyncWrite for WindowsPtyMaster {
                 handle.as_raw_handle() as HANDLE,
                 buf.as_ptr(),
                 buf.len() as u32,
-                &mut bytes_written,
+                &raw mut bytes_written,
                 std::ptr::null_mut(),
             )
         };

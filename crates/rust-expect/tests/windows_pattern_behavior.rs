@@ -24,7 +24,7 @@ use rust_expect::{Pattern, Session};
 
 /// `expect(Pattern::bytes(n))` must resolve once at least `n` bytes have been
 /// received. Previously it returned `None` unconditionally and hung until the
-/// timeout. ConPTY emits its handshake frame (tens of bytes) immediately, so a
+/// timeout. `ConPTY` emits its handshake frame (tens of bytes) immediately, so a
 /// small `n` resolves quickly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bytes_pattern_matches_once_enough_received() {
@@ -67,13 +67,13 @@ async fn bytes_pattern_waits_for_enough_data() {
     session.wait_timeout(Duration::from_secs(5)).await.ok();
 }
 
-/// Regression test for the read-drain fix: buffered ConPTY output must not be
+/// Regression test for the read-drain fix: buffered `ConPTY` output must not be
 /// truncated when the child exits.
 ///
 /// Before the fix, the exit watcher cleared the shared `open` flag the instant
 /// the child exited, and `poll_read` short-circuited to EOF on `!open` — so any
 /// bytes conhost had already written to the pipe but that the reader had not yet
-/// consumed were discarded. Concretely, only the first ~18 bytes of the ConPTY
+/// consumed were discarded. Concretely, only the first ~18 bytes of the `ConPTY`
 /// handshake frame survived. After the fix the reader drains until `ReadFile`
 /// reports `ERROR_BROKEN_PIPE`, recovering the full frame (~85 bytes, including
 /// conhost's clear-screen and title sequences).

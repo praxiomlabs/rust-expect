@@ -221,7 +221,7 @@ async fn argv_arrives_intact_and_in_order() {
 // environment modes (mirrors expectrl #69)
 // ---------------------------------------------------------------------------
 
-/// Inherit mode (inherit_env=true, no explicit env): the child sees the parent's
+/// Inherit mode (`inherit_env=true`, no explicit env): the child sees the parent's
 /// environment. `SystemRoot` always exists in a Windows process env.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn env_inherit_sees_parent() {
@@ -242,7 +242,7 @@ async fn env_inherit_sees_parent() {
     );
 }
 
-/// Extend mode (inherit_env=true + explicit overrides): the child sees the
+/// Extend mode (`inherit_env=true` + explicit overrides): the child sees the
 /// parent's environment AND the overrides.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn env_extend_merges_parent_and_overrides() {
@@ -262,7 +262,7 @@ async fn env_extend_merges_parent_and_overrides() {
     );
 }
 
-/// Clear mode (inherit_env=false + overrides): the child sees ONLY the explicit
+/// Clear mode (`inherit_env=false` + overrides): the child sees ONLY the explicit
 /// variables, not the parent's environment.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn env_clear_hides_parent() {
@@ -310,7 +310,7 @@ async fn working_directory_is_honored() {
 // initial window size (backlog W1)
 // ---------------------------------------------------------------------------
 
-/// The ConPTY must be created at the configured dimensions, NOT 0x0.
+/// The `ConPTY` must be created at the configured dimensions, NOT 0x0.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn conpty_created_at_default_dimensions() {
     let out = unique_outfile("winsize-default");
@@ -325,7 +325,7 @@ async fn conpty_created_at_default_dimensions() {
     );
 }
 
-/// Custom dimensions must be honored by the ConPTY.
+/// Custom dimensions must be honored by the `ConPTY`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn conpty_honors_custom_dimensions() {
     let out = unique_outfile("winsize-custom");
@@ -380,6 +380,10 @@ async fn exit_code_zero_is_success() {
 // ---------------------------------------------------------------------------
 
 /// Whether this process's own stdout is a console handle.
+#[expect(
+    unsafe_code,
+    reason = "GetStdHandle/GetConsoleMode are raw Win32 FFI with no safe wrapper here"
+)]
 fn own_stdout_is_console() -> bool {
     use windows_sys::Win32::System::Console::{GetConsoleMode, GetStdHandle, STD_OUTPUT_HANDLE};
 

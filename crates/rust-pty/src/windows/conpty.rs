@@ -1,6 +1,6 @@
-//! Windows ConPTY (Console Pseudo Terminal) management.
+//! Windows `ConPTY` (Console Pseudo Terminal) management.
 //!
-//! This module provides the core ConPTY functionality, wrapping the Windows
+//! This module provides the core `ConPTY` functionality, wrapping the Windows
 //! Pseudo Console API introduced in Windows 10 1809.
 
 use std::os::windows::io::{AsRawHandle, OwnedHandle};
@@ -14,7 +14,7 @@ use windows_sys::Win32::System::Console::{
 use crate::config::WindowSize;
 use crate::error::{PtyError, Result};
 
-/// A wrapper around a Windows Pseudo Console (ConPTY).
+/// A wrapper around a Windows Pseudo Console (`ConPTY`).
 #[derive(Debug)]
 pub struct ConPty {
     /// The pseudo console handle.
@@ -23,8 +23,8 @@ pub struct ConPty {
     input_write: OwnedHandle,
     /// The output pipe (for reading from the PTY).
     output_read: OwnedHandle,
-    /// Pipe handles passed to CreatePseudoConsole that must be closed after child spawn.
-    /// These are kept alive until close_pty_pipes() is called.
+    /// Pipe handles passed to `CreatePseudoConsole` that must be closed after child spawn.
+    /// These are kept alive until `close_pty_pipes()` is called.
     pty_pipes: Option<(OwnedHandle, OwnedHandle)>,
     /// Whether `ClosePseudoConsole` has already been called for `handle`.
     ///
@@ -39,19 +39,19 @@ unsafe impl Send for ConPty {}
 unsafe impl Sync for ConPty {}
 
 impl ConPty {
-    /// Create a new ConPTY with the specified window size.
+    /// Create a new `ConPTY` with the specified window size.
     ///
     /// # Arguments
     ///
     /// * `size` - The initial window size.
-    /// * `input_read` - The read end of the input pipe (passed to ConPTY).
-    /// * `output_write` - The write end of the output pipe (passed to ConPTY).
+    /// * `input_read` - The read end of the input pipe (passed to `ConPTY`).
+    /// * `output_write` - The write end of the output pipe (passed to `ConPTY`).
     /// * `input_write` - The write end of the input pipe (kept for writing).
     /// * `output_read` - The read end of the output pipe (kept for reading).
     ///
     /// # Errors
     ///
-    /// Returns an error if ConPTY creation fails or is not available.
+    /// Returns an error if `ConPTY` creation fails or is not available.
     pub fn new(
         size: WindowSize,
         input_read: OwnedHandle,
@@ -73,7 +73,7 @@ impl ConPty {
                 input_read.as_raw_handle() as HANDLE,
                 output_write.as_raw_handle() as HANDLE,
                 0, // dwFlags
-                &mut hpc,
+                &raw mut hpc,
             )
         };
 
@@ -104,7 +104,7 @@ impl ConPty {
     /// Calling `ClosePseudoConsole` causes the backing console host to exit,
     /// which closes its end of the output pipe. Any reader blocked in `ReadFile`
     /// on the output pipe is unblocked and observes EOF (`ERROR_BROKEN_PIPE`).
-    /// This is how a child's exit becomes observable at the I/O layer — ConPTY
+    /// This is how a child's exit becomes observable at the I/O layer — `ConPTY`
     /// does not break the output pipe merely because the child process exits.
     ///
     /// Idempotent: the underlying `ClosePseudoConsole` runs at most once, so it
@@ -121,33 +121,33 @@ impl ConPty {
 
     /// Close the PTY pipe handles after child process is spawned.
     ///
-    /// This must be called after CreateProcess to enable proper channel detection.
-    /// Closing these handles signals to ConPTY that no more handles exist on
+    /// This must be called after `CreateProcess` to enable proper channel detection.
+    /// Closing these handles signals to `ConPTY` that no more handles exist on
     /// the "other side" of the pipes.
     pub fn close_pty_pipes(&mut self) {
         // Drop the handles, which closes them
         self.pty_pipes = None;
     }
 
-    /// Get the ConPTY handle.
+    /// Get the `ConPTY` handle.
     #[must_use]
-    pub fn handle(&self) -> HPCON {
+    pub const fn handle(&self) -> HPCON {
         self.handle
     }
 
     /// Get a reference to the input write handle.
     #[must_use]
-    pub fn input(&self) -> &OwnedHandle {
+    pub const fn input(&self) -> &OwnedHandle {
         &self.input_write
     }
 
     /// Get a reference to the output read handle.
     #[must_use]
-    pub fn output(&self) -> &OwnedHandle {
+    pub const fn output(&self) -> &OwnedHandle {
         &self.output_read
     }
 
-    /// Resize the ConPTY window.
+    /// Resize the `ConPTY` window.
     ///
     /// # Errors
     ///
@@ -188,9 +188,9 @@ impl Drop for ConPty {
     }
 }
 
-/// Check if ConPTY is available on this Windows version.
+/// Check if `ConPTY` is available on this Windows version.
 ///
-/// ConPTY was introduced in Windows 10 version 1809 (build 17763).
+/// `ConPTY` was introduced in Windows 10 version 1809 (build 17763).
 #[must_use]
 pub fn is_conpty_available() -> bool {
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};

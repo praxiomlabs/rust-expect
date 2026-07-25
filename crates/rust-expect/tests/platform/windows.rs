@@ -1,13 +1,14 @@
 //! Windows-specific platform tests.
 //!
 //! These tests verify Windows-specific functionality including:
-//! - Windows shell configuration (cmd.exe, PowerShell)
+//! - Windows shell configuration (cmd.exe, `PowerShell`)
 //! - Windows line ending handling (CRLF)
 //! - Windows path handling in patterns
 //! - Windows PTY backend configuration
-//! - Windows-specific QuickSession helpers
-
-#![cfg(windows)]
+//! - Windows-specific `QuickSession` helpers
+//!
+//! `platform/mod.rs` already gates this module behind `#[cfg(windows)]`, so no
+//! inner `#![cfg(windows)]` is needed here.
 
 use std::time::Duration;
 
@@ -45,7 +46,7 @@ fn crlf_normalization() {
     assert_eq!(normalized, crlf_text);
 }
 
-/// Test SessionBuilder with Windows-specific configuration.
+/// Test `SessionBuilder` with Windows-specific configuration.
 #[test]
 fn session_builder_windows() {
     let builder = SessionBuilder::new()
@@ -134,7 +135,7 @@ fn dialog_windows_prompts() {
     assert_eq!(dialog.name, "windows_cmd");
 }
 
-/// Test QuickSession Windows helpers.
+/// Test `QuickSession` Windows helpers.
 #[test]
 fn quick_session_windows() {
     // cmd.exe helper
@@ -155,7 +156,7 @@ fn pty_backend_windows() {
     assert_eq!(BackendType::Pty.name(), "pty");
 }
 
-/// Test PtyConfig for Windows.
+/// Test `PtyConfig` for Windows.
 #[test]
 fn pty_config_windows() {
     let config = PtyConfig::default();

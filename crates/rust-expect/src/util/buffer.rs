@@ -487,7 +487,7 @@ pub fn page_size() -> usize {
 /// Get the system page size.
 #[cfg(windows)]
 #[must_use]
-pub fn page_size() -> usize {
+pub const fn page_size() -> usize {
     4096 // Default for Windows
 }
 

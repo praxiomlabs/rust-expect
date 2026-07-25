@@ -1,7 +1,7 @@
-//! Windows pipe I/O handling for ConPTY.
+//! Windows pipe I/O handling for `ConPTY`.
 //!
 //! This module provides utilities for creating and managing the pipes
-//! used for ConPTY input and output.
+//! used for `ConPTY` input and output.
 
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::{io, ptr};
@@ -29,7 +29,8 @@ impl PipePair {
         let mut write_handle: HANDLE = INVALID_HANDLE_VALUE;
 
         // SAFETY: We're passing valid pointers and the handles are initialized
-        let result = unsafe { CreatePipe(&mut read_handle, &mut write_handle, ptr::null(), 0) };
+        let result =
+            unsafe { CreatePipe(&raw mut read_handle, &raw mut write_handle, ptr::null(), 0) };
 
         if result == 0 {
             return Err(io::Error::last_os_error());
@@ -43,19 +44,19 @@ impl PipePair {
     }
 }
 
-/// Create a pair of pipes for ConPTY input.
+/// Create a pair of pipes for `ConPTY` input.
 ///
-/// Returns (pty_input_write, pty_input_read) where:
+/// Returns (`pty_input_write`, `pty_input_read`) where:
 /// - `pty_input_write` is used by the application to write to the PTY
-/// - `pty_input_read` is passed to ConPTY
+/// - `pty_input_read` is passed to `ConPTY`
 pub fn create_input_pipe() -> io::Result<PipePair> {
     PipePair::new()
 }
 
-/// Create a pair of pipes for ConPTY output.
+/// Create a pair of pipes for `ConPTY` output.
 ///
-/// Returns (pty_output_write, pty_output_read) where:
-/// - `pty_output_write` is passed to ConPTY
+/// Returns (`pty_output_write`, `pty_output_read`) where:
+/// - `pty_output_write` is passed to `ConPTY`
 /// - `pty_output_read` is used by the application to read from the PTY
 pub fn create_output_pipe() -> io::Result<PipePair> {
     PipePair::new()

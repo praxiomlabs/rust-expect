@@ -139,8 +139,12 @@ impl Terminal {
     }
 
     /// Check if stdin is a TTY.
+    // Not `const`: only the `#[cfg(not(unix))]` body below is const-evaluable, so
+    // clippy asks for `const fn` when linting a non-Unix target, but the Unix body
+    // calls `std::io::stdin` and `libc::isatty`, which are not const. The lint is
+    // unsatisfiable across both targets at once.
     #[must_use]
-    #[allow(unsafe_code)]
+    #[allow(unsafe_code, clippy::missing_const_for_fn)]
     pub fn is_tty() -> bool {
         #[cfg(unix)]
         {

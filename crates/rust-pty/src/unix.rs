@@ -28,6 +28,12 @@
 //! # Ok(()) }
 //! ```
 
+#![expect(
+    unsafe_code,
+    reason = "openpt/grantpt/ioctl and post-fork setup are raw libc FFI; unsafe is \
+              confined to this module tree, so it still warns everywhere else in the crate"
+)]
+
 mod buffer;
 mod child;
 mod pty;

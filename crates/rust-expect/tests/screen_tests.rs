@@ -2,6 +2,7 @@
 
 #![cfg(feature = "screen")]
 
+use rust_expect::screen::Screen;
 use rust_expect::screen::buffer::{Color, Cursor};
 use rust_expect::{Attributes, Cell, Dimensions, ScreenBuffer};
 
@@ -309,4 +310,85 @@ fn cursor_move_by_clamps_to_zero() {
     // Should clamp to 0
     assert_eq!(cursor.row, 0);
     assert_eq!(cursor.col, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Deferred wrap at the right margin (VT100/xterm semantics).
+//
+// Filling the last column must leave the cursor on that column with a wrap
+// owed to the *next* printable character. Wrapping eagerly instead makes every
+// exactly-`cols`-wide line consume two rows, which drifts a full-screen TUI's
+// row accounting out of step with the emulator's and corrupts the screen.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn filling_the_last_column_defers_the_wrap() {
+    let mut buffer = ScreenBuffer::new(4, 5);
+    for c in "abcde".chars() {
+        buffer.write_char(c);
+    }
+
+    // Still on row 0, parked on the final column — not advanced to row 1.
+    assert_eq!(buffer.cursor().row, 0);
+    assert_eq!(buffer.cursor().col, 4);
+    assert_eq!(buffer.row_text(0).trim_end(), "abcde");
+    assert_eq!(buffer.row_text(1).trim_end(), "");
+}
+
+#[test]
+fn the_next_printable_char_takes_the_deferred_wrap() {
+    let mut buffer = ScreenBuffer::new(4, 5);
+    for c in "abcdeX".chars() {
+        buffer.write_char(c);
+    }
+
+    assert_eq!(buffer.row_text(0).trim_end(), "abcde");
+    assert_eq!(buffer.row_text(1).trim_end(), "X");
+    assert_eq!(buffer.cursor().row, 1);
+    assert_eq!(buffer.cursor().col, 1);
+}
+
+#[test]
+fn a_full_width_line_plus_newline_uses_exactly_one_row() {
+    let mut screen = Screen::new(4, 5);
+    // Two full-width lines, each followed by CRLF. Under eager wrap the second
+    // line would land on row 2 instead of row 1.
+    screen.process_str("abcde\r\nfghij\r\n");
+
+    assert_eq!(screen.buffer().row_text(0).trim_end(), "abcde");
+    assert_eq!(screen.buffer().row_text(1).trim_end(), "fghij");
+    assert_eq!(screen.buffer().cursor().row, 2);
+    assert_eq!(screen.buffer().cursor().col, 0);
+}
+
+#[test]
+fn explicit_cursor_movement_cancels_the_pending_wrap() {
+    let mut screen = Screen::new(4, 5);
+    // Fill row 0, then home the cursor and write: the pending wrap must be
+    // discarded rather than displacing the new text to row 1.
+    screen.process_str("abcde\x1b[1;1HZ");
+
+    assert_eq!(screen.buffer().row_text(0).trim_end(), "Zbcde");
+    assert_eq!(screen.buffer().row_text(1).trim_end(), "");
+}
+
+#[test]
+fn deferred_wrap_still_scrolls_at_the_bottom_row() {
+    let mut screen = Screen::new(2, 3);
+    // Row 0 = "abc", then the wrap onto row 1 = "def", then "ghi" must scroll.
+    screen.process_str("abcdefghi");
+
+    assert_eq!(screen.buffer().row_text(0).trim_end(), "def");
+    assert_eq!(screen.buffer().row_text(1).trim_end(), "ghi");
+}
+
+#[test]
+fn hiding_the_cursor_preserves_the_pending_wrap() {
+    let mut screen = Screen::new(4, 5);
+    // DECTCEM between the full-width line and its newline must not cancel the
+    // pending wrap (which would put "fghij" on row 0 over "abcde").
+    screen.process_str("abcde\x1b[?25l\r\nfghij");
+
+    assert_eq!(screen.buffer().row_text(0).trim_end(), "abcde");
+    assert_eq!(screen.buffer().row_text(1).trim_end(), "fghij");
 }

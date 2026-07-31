@@ -365,10 +365,11 @@ impl Screen {
                 self.buffer.set_scroll_region(top, bottom);
             }
             AnsiSequence::ShowCursor => {
-                self.buffer.cursor_mut().visible = true;
+                // Visibility only — must not cancel a pending wrap.
+                self.buffer.set_cursor_visible(true);
             }
             AnsiSequence::HideCursor => {
-                self.buffer.cursor_mut().visible = false;
+                self.buffer.set_cursor_visible(false);
             }
             AnsiSequence::InsertLines(n) => {
                 self.buffer.insert_lines(n as usize);

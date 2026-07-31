@@ -253,6 +253,10 @@ pub struct ScreenBuffer {
     cursor: Cursor,
     /// Current style for new characters.
     current_style: Cell,
+    /// Whether the last write filled the right margin, leaving the cursor on
+    /// the final column with a wrap owed to the *next* printable character.
+    /// See [`ScreenBuffer::write_char`].
+    pending_wrap: bool,
     /// Scroll region (top, bottom).
     scroll_region: (usize, usize),
     /// Saved cursor position.
@@ -283,6 +287,7 @@ impl ScreenBuffer {
             cells,
             cursor: Cursor::new(),
             current_style: Cell::default(),
+            pending_wrap: false,
             scroll_region: (0, rows.saturating_sub(1)),
             saved_cursor: None,
             scrollback: VecDeque::new(),
@@ -331,7 +336,33 @@ impl ScreenBuffer {
     }
 
     /// Write a character at the current cursor position.
+    ///
+    /// Wrapping at the right margin is **deferred**, per VT100/xterm: filling
+    /// the last column leaves the cursor *on* that column and raises a pending-
+    /// wrap flag. The cursor only moves to the next row when another printable
+    /// character arrives; any explicit cursor movement in between (CR, LF,
+    /// CUP, …) cancels the pending wrap instead.
+    ///
+    /// This distinction is load-bearing for full-screen TUIs. They emit lines
+    /// exactly `cols` wide (box borders, horizontal rules) followed by CRLF. A
+    /// terminal that wraps *eagerly* — moving to the next row the instant the
+    /// last column fills — burns an extra row on every such line, so its row
+    /// accounting drifts from the application's and subsequent absolute cursor
+    /// addressing lands on the wrong rows, overwriting live content and
+    /// leaving stale text underneath.
     pub fn write_char(&mut self, c: char) {
+        // A pending wrap from the previous character takes effect now, before
+        // this one is placed.
+        if self.pending_wrap {
+            self.pending_wrap = false;
+            self.cursor.col = 0;
+            self.cursor.row += 1;
+            if self.cursor.row >= self.rows {
+                self.scroll_up(1);
+                self.cursor.row = self.rows.saturating_sub(1);
+            }
+        }
+
         if self.cursor.row < self.rows && self.cursor.col < self.cols {
             let idx = self.cursor.row * self.cols + self.cursor.col;
             self.cells[idx] = Cell {
@@ -340,14 +371,11 @@ impl ScreenBuffer {
                 bg: self.current_style.bg,
                 attrs: self.current_style.attrs,
             };
-            self.cursor.col += 1;
-            if self.cursor.col >= self.cols {
-                self.cursor.col = 0;
-                self.cursor.row += 1;
-                if self.cursor.row >= self.rows {
-                    self.scroll_up(1);
-                    self.cursor.row = self.rows - 1;
-                }
+            if self.cursor.col + 1 >= self.cols {
+                // Last column: stay put and defer the wrap.
+                self.pending_wrap = true;
+            } else {
+                self.cursor.col += 1;
             }
         }
     }
@@ -359,12 +387,30 @@ impl ScreenBuffer {
     }
 
     /// Get mutable cursor.
+    ///
+    /// Handing out a mutable cursor is treated as explicit cursor movement, so
+    /// it cancels any pending wrap ([`write_char`](Self::write_char)) — which
+    /// is what VT100 does for CR, LF, and the cursor-positioning sequences that
+    /// reach the cursor through this accessor. Use
+    /// [`set_cursor_visible`](Self::set_cursor_visible) to toggle visibility
+    /// without disturbing the pending-wrap state.
     pub const fn cursor_mut(&mut self) -> &mut Cursor {
+        self.pending_wrap = false;
         &mut self.cursor
+    }
+
+    /// Show or hide the cursor without touching its position.
+    ///
+    /// Unlike [`cursor_mut`](Self::cursor_mut) this preserves any pending wrap,
+    /// so a DECTCEM toggle emitted between a full-width line and its newline
+    /// doesn't perturb wrapping.
+    pub const fn set_cursor_visible(&mut self, visible: bool) {
+        self.cursor.visible = visible;
     }
 
     /// Move cursor to position.
     pub fn goto(&mut self, row: usize, col: usize) {
+        self.pending_wrap = false;
         self.cursor.row = row.min(self.rows.saturating_sub(1));
         self.cursor.col = col.min(self.cols.saturating_sub(1));
     }
@@ -509,6 +555,7 @@ impl ScreenBuffer {
     /// Restore the saved cursor position.
     pub const fn restore_cursor(&mut self) {
         if let Some(cursor) = self.saved_cursor.take() {
+            self.pending_wrap = false;
             self.cursor = cursor;
         }
     }
@@ -707,6 +754,8 @@ impl ScreenBuffer {
         self.cells = new_cells;
         self.cursor.row = self.cursor.row.min(new_rows.saturating_sub(1));
         self.cursor.col = self.cursor.col.min(new_cols.saturating_sub(1));
+        // The margin moved; a wrap owed against the old width is meaningless.
+        self.pending_wrap = false;
         self.scroll_region = (0, new_rows.saturating_sub(1));
     }
 }

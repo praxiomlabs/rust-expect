@@ -25,7 +25,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-expect = "0.5"
+rust-expect = "0.6"
 ```
 
 ### Basic Example
@@ -171,7 +171,7 @@ Enable features in `Cargo.toml`:
 
 ```toml
 [dependencies]
-rust-expect = { version = "0.5", features = ["ssh", "screen"] }
+rust-expect = { version = "0.6", features = ["ssh", "screen"] }
 ```
 
 ## Crates

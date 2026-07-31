@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-31
+
 ### Changed
 
 - **Windows (behaviour change): `SessionConfig::line_ending` now defaults to `Cr`
@@ -56,6 +58,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hardcoding `'\n'`. Combined with the above, the interactive path could not submit
   a line on Windows at all and no configuration could work around it. It now uses
   the platform default. (#50)
+
+- **`screen`: the screen buffer now defers wrapping at the right margin, per
+  VT100/xterm.** `write_char` advanced the cursor to the next row the instant the
+  last column was filled. A real terminal instead raises a pending-wrap flag and
+  leaves the cursor on the final column, taking the wrap only when the next
+  printable character arrives — and any explicit cursor movement in between
+  cancels it. The distinction is invisible for line-oriented output but
+  load-bearing for full-screen TUIs, which emit lines exactly `cols` wide (box
+  borders, horizontal rules) followed by CRLF: wrapping eagerly burned an extra
+  row on every one of them, so the emulated screen's row accounting drifted from
+  the application's and subsequent absolute cursor addressing overwrote the wrong
+  rows, leaving stale text visible underneath a corrupted viewport. Any consumer
+  driving a full-width TUI through `Screen` was affected. `cursor_mut()` clears
+  the flag, covering CR, LF, CUP and the other positioning paths that reach the
+  cursor through it; `goto()`, `restore_cursor()` and `resize()` clear it
+  explicitly. DECTCEM show/hide now routes through a new
+  `ScreenBuffer::set_cursor_visible()` so toggling cursor visibility cannot
+  cancel a pending wrap.
+
+### Added
+
+- **`ScreenBuffer::set_cursor_visible()`** — set cursor visibility without
+  touching its position or the pending-wrap state.
 
 ## [0.5.0] - 2026-07-08
 

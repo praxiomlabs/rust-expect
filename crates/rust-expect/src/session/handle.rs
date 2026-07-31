@@ -258,6 +258,15 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// that. The two should normally match, but it can be useful to set a
     /// larger virtual screen for transcript capture.
     ///
+    /// # Argument order
+    ///
+    /// This takes **`(rows, cols)`** — height first — which is the opposite of
+    /// [`SessionBuilder::dimensions`](crate::SessionBuilder::dimensions) and
+    /// [`resize_pty`](Self::resize_pty), both of which take `(cols, rows)`.
+    /// The orders are inconsistent for historical reasons; transposing them
+    /// silently produces a screen of the wrong shape rather than an error, so
+    /// double-check the call site.
+    ///
     /// Available with the `screen` feature.
     #[cfg(feature = "screen")]
     pub fn attach_screen_with_dims(&mut self, rows: u16, cols: u16) {

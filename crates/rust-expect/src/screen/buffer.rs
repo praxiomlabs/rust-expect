@@ -256,6 +256,17 @@ pub struct ScreenBuffer {
     /// Whether the last write filled the right margin, leaving the cursor on
     /// the final column with a wrap owed to the *next* printable character.
     /// See [`ScreenBuffer::write_char`].
+    ///
+    /// Cleared by cursor movement (via [`ScreenBuffer::cursor_mut`],
+    /// [`ScreenBuffer::goto`], [`ScreenBuffer::restore_cursor`]) and by
+    /// [`ScreenBuffer::resize`]. It is deliberately *not* cleared by the
+    /// in-line editing operations (`insert_chars`, `delete_chars`) or by the
+    /// erase operations: xterm clears the flag on the former, and real
+    /// terminals disagree with each other on the latter. No observed rendering
+    /// defect depends on either, and both are rare mid-line in the TUIs this
+    /// crate drives, so the scope was kept to the paths with evidence behind
+    /// them rather than pursuing xterm parity on speculation. Revisit with a
+    /// reproduction in hand.
     pending_wrap: bool,
     /// Scroll region (top, bottom).
     scroll_region: (usize, usize),

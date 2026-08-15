@@ -129,7 +129,20 @@ impl ExpectResult {
 }
 
 /// The state of a session.
+///
+/// Transitions are owned by the session itself; there is no public setter.
+/// The legal transitions are:
+///
+/// ```text
+/// Starting --(first successful read or write)--> Running
+/// Running  --(interact() entered / exited)-----> Interacting
+/// Running | Interacting --(read returns 0/EIO)-> Eof
+/// Eof      --(reap succeeds)-------------------> Exited(status)
+/// any      --(close() requested)---------------> Closing --> Closed
+/// any      --(unrecoverable I/O error)---------> Failed(kind)
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SessionState {
     /// Session is starting up.
     Starting,
@@ -140,6 +153,10 @@ pub enum SessionState {
     /// Session is in interact mode.
     Interacting,
 
+    /// The child closed its output; buffered data is still readable, but the
+    /// exit status has not been collected yet.
+    Eof,
+
     /// Session is closing.
     Closing,
 
@@ -148,6 +165,9 @@ pub enum SessionState {
 
     /// Process has exited with status.
     Exited(ProcessExitStatus),
+
+    /// An unrecoverable I/O error ended the session.
+    Failed(std::io::ErrorKind),
 }
 
 impl SessionState {
@@ -180,9 +200,11 @@ impl fmt::Display for SessionState {
             Self::Starting => "starting".to_string(),
             Self::Running => "running".to_string(),
             Self::Interacting => "interacting".to_string(),
+            Self::Eof => "at end of output".to_string(),
             Self::Closing => "closing".to_string(),
             Self::Closed => "closed".to_string(),
             Self::Exited(status) => format!("exited ({status})"),
+            Self::Failed(kind) => format!("failed ({kind})"),
         };
         write!(f, "{s}")
     }

@@ -24,6 +24,7 @@ use crate::expect::{
 use crate::interact::InteractBuilder;
 #[cfg(feature = "screen")]
 use crate::screen::Screen;
+use crate::session::state::SessionLifecycle;
 use crate::session::transport::SharedTransport;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
 
@@ -95,12 +96,14 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     matcher: Matcher,
     /// Pattern manager for before/after patterns.
     pattern_manager: PatternManager,
-    /// Current session state.
-    state: SessionState,
+    /// Session state and the transitions between states.
+    ///
+    /// The single writer: state and EOF used to be two independent fields
+    /// updated at separate call sites, which let them disagree. See
+    /// [`SessionLifecycle`].
+    lifecycle: SessionLifecycle,
     /// Unique session identifier.
     id: SessionId,
-    /// EOF flag.
-    eof: bool,
     /// Output taps invoked on every chunk of bytes read from the transport,
     /// stored as (id, callback) so they can be removed individually.
     output_taps: Vec<(TapId, OutputTap)>,
@@ -159,9 +162,8 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             config,
             matcher,
             pattern_manager: PatternManager::new(),
-            state: SessionState::Starting,
+            lifecycle: SessionLifecycle::new(),
             id: SessionId::new(),
-            eof: false,
             output_taps: Vec::new(),
             next_tap_id: 0,
             #[cfg(feature = "screen")]
@@ -386,7 +388,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Get the current session state.
     #[must_use]
     pub const fn state(&self) -> SessionState {
-        self.state
+        self.lifecycle.state()
     }
 
     /// Get the session configuration.
@@ -398,7 +400,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Check if EOF has been detected.
     #[must_use]
     pub const fn is_eof(&self) -> bool {
-        self.eof
+        self.lifecycle.is_eof()
     }
 
     /// Get the current buffer contents.
@@ -423,21 +425,21 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         &mut self.pattern_manager
     }
 
-    /// Set the session state.
-    pub const fn set_state(&mut self, state: SessionState) {
-        self.state = state;
-    }
-
     /// Send bytes to the process.
     ///
     /// # Errors
     ///
-    /// Returns [`ExpectError::SessionClosed`] if the child has already exited
-    /// (so the write would go to a dead PTY), or an I/O error if the write
-    /// otherwise fails.
+    /// Returns [`ExpectError::SessionClosed`] if the session is no longer
+    /// writable — the child has exited, closed its output, or the session
+    /// failed — or an I/O error if the write otherwise fails.
     #[allow(clippy::significant_drop_tightening)]
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
-        if matches!(self.state, SessionState::Closed | SessionState::Exited(_)) {
+        // Checked against the state machine rather than against the transport,
+        // so a write to a child that has closed its output is rejected the same
+        // way on every backend. A PTY happens to fail such a write with EIO,
+        // but a transport that keeps accepting writes would otherwise swallow
+        // it silently.
+        if !self.lifecycle.can_send() {
             return Err(ExpectError::SessionClosed);
         }
 
@@ -458,7 +460,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             // clean SessionClosed rather than a raw OS error, and mark the
             // session closed so subsequent sends short-circuit immediately.
             Err(e) if write_error_means_closed(&e) => {
-                self.state = SessionState::Closed;
+                self.lifecycle.closed();
                 Err(ExpectError::SessionClosed)
             }
             Err(e) => Err(ExpectError::io_context("writing to process", e)),
@@ -597,7 +599,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             }
 
             // Check for EOF
-            if self.eof {
+            if self.lifecycle.is_eof() {
                 if state.expects_eof() {
                     return Ok(Match::new(
                         0,
@@ -713,7 +715,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             if lock_screen(&screen).query().contains(needle) {
                 return Ok(());
             }
-            if self.eof {
+            if self.lifecycle.is_eof() {
                 return Err(ExpectError::Eof {
                     buffer: lock_screen(&screen).text(),
                 });
@@ -768,7 +770,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             if !lock_screen(&screen).query().contains(needle) {
                 return Ok(());
             }
-            if self.eof {
+            if self.lifecycle.is_eof() {
                 return Ok(());
             }
             let elapsed = start.elapsed();
@@ -827,7 +829,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             if last_change.elapsed() >= quiet_period {
                 return Ok(());
             }
-            if self.eof {
+            if self.lifecycle.is_eof() {
                 return Ok(());
             }
             if start.elapsed() >= max_wait {
@@ -853,7 +855,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
         match tokio::time::timeout(timeout, transport.read(&mut buf)).await {
             Ok(Ok(0)) => {
-                self.eof = true;
+                self.lifecycle.reached_eof();
                 Ok(0)
             }
             Ok(Ok(n)) => {
@@ -881,9 +883,13 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 // (i.e., the child process has terminated). Treat this as EOF.
                 // See: https://bugs.python.org/issue5380
                 if is_pty_eof_error(&e) {
-                    self.eof = true;
+                    self.lifecycle.reached_eof();
                     Ok(0)
                 } else {
+                    // Not EOF dressed up as an error: the session cannot read
+                    // past this, so it ends here rather than leaving the state
+                    // reporting a healthy session the caller can retry.
+                    self.lifecycle.failed(e.kind());
                     Err(ExpectError::io_context("reading from process", e))
                 }
             }
@@ -1266,14 +1272,16 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
     /// Returns an error if waiting fails due to I/O error.
     pub async fn wait(&mut self) -> Result<ProcessExitStatus> {
         // Read until EOF (child closed the PTY slave / terminated).
-        while !self.eof {
-            if self.read_with_timeout(Duration::from_millis(100)).await? == 0 && !self.eof {
+        while !self.lifecycle.is_eof() {
+            if self.read_with_timeout(Duration::from_millis(100)).await? == 0
+                && !self.lifecycle.is_eof()
+            {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
 
         let status = self.reap_exit_status().await;
-        self.state = SessionState::Exited(status);
+        self.lifecycle.exited(status);
         Ok(status)
     }
 
@@ -1289,7 +1297,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
     pub async fn wait_timeout(&mut self, timeout: Duration) -> Result<ProcessExitStatus> {
         let deadline = tokio::time::Instant::now() + timeout;
 
-        while !self.eof {
+        while !self.lifecycle.is_eof() {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 return Err(ExpectError::timeout(
@@ -1301,13 +1309,13 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
 
             // Use smaller of remaining time or 100ms for polling
             let poll_timeout = remaining.min(Duration::from_millis(100));
-            if self.read_with_timeout(poll_timeout).await? == 0 && !self.eof {
+            if self.read_with_timeout(poll_timeout).await? == 0 && !self.lifecycle.is_eof() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
 
         let status = self.reap_exit_status().await;
-        self.state = SessionState::Exited(status);
+        self.lifecycle.exited(status);
         Ok(status)
     }
 
@@ -1368,8 +1376,8 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> std::fmt::Debug for Session
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
             .field("id", &self.id)
-            .field("state", &self.state)
-            .field("eof", &self.eof)
+            .field("state", &self.state())
+            .field("eof", &self.lifecycle.is_eof())
             .finish_non_exhaustive()
     }
 }
@@ -1435,7 +1443,7 @@ impl Session<AsyncPty> {
         // is reachable while a read holds the transport lock.
         let control = async_pty.process_handle();
         let mut session = Self::new(async_pty, config).with_process_control(control);
-        session.state = SessionState::Running;
+        session.lifecycle.started();
 
         Ok(session)
     }
@@ -1500,7 +1508,7 @@ impl Session<WindowsAsyncPty> {
         // is reachable while a read holds the transport lock.
         let control = async_pty.process_handle();
         let mut session = Self::new(async_pty, config).with_process_control(control);
-        session.state = SessionState::Running;
+        session.lifecycle.started();
 
         Ok(session)
     }
@@ -1864,6 +1872,164 @@ mod ambient_pattern_tests {
             second.matched.contains("data"),
             "after Return re-triggered across calls; got {:?}",
             second.matched
+        );
+    }
+}
+
+/// Regression tests for AR-004: session state must be authoritative.
+///
+/// Before design stage 3, `SessionState` was advisory. EOF set a private
+/// `eof: bool` and left the state at `Running`, so a session whose child had
+/// closed its output still reported itself usable and still accepted writes.
+/// On a PTY those writes then failed at the syscall with `EIO`, which `send`
+/// translated to `SessionClosed` by accident — the right error for the wrong
+/// reason, and only on transports whose writes happen to fail after EOF. Over a
+/// transport that still accepts writes, the send simply succeeded.
+///
+/// `set_state` was also public, so any caller could put a session into any
+/// state, and `Interacting` was never assigned by anything.
+#[cfg(test)]
+mod state_machine_tests {
+    #[cfg(unix)]
+    use std::time::Duration;
+
+    use super::Session;
+    use crate::types::SessionState;
+
+    /// A session over a mock transport, plus a handle for driving it and
+    /// reading back what the session wrote.
+    #[cfg(feature = "mock")]
+    fn mock_session() -> (
+        Session<crate::mock::MockTransport>,
+        crate::mock::MockTransport,
+    ) {
+        let transport = crate::mock::MockTransport::new();
+        let handle = transport.clone();
+        let session = Session::new(transport, crate::config::SessionConfig::default());
+        (session, handle)
+    }
+
+    /// A child that writes one line and exits, for the EOF cases.
+    #[cfg(unix)]
+    async fn echoer() -> Session<crate::backend::AsyncPty> {
+        Session::spawn("/bin/echo", &["hi"])
+            .await
+            .expect("spawn echo")
+    }
+
+    /// Guard, not a control: `spawn` already set `Running`. This pins that it
+    /// stays set once transitions move behind the state machine.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_spawned_session_reports_running() {
+        let mut session = Session::spawn("/bin/cat", &[]).await.expect("spawn cat");
+        session.send_line("hello").await.expect("send");
+        session.expect("hello").await.expect("expect");
+
+        assert_eq!(session.state(), SessionState::Running);
+        assert!(
+            session.state().is_usable(),
+            "a working session must not report itself unusable"
+        );
+
+        session.kill().ok();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn eof_is_a_state_transition_not_only_a_flag() {
+        let mut session = echoer().await;
+        session.expect_eof().await.expect("read to EOF");
+
+        assert!(session.is_eof(), "the flag still reports EOF");
+        assert_eq!(
+            session.state(),
+            SessionState::Eof,
+            "EOF must move the state machine, not only set a private flag"
+        );
+    }
+
+    /// The honest form of "writes are rejected after EOF".
+    ///
+    /// A PTY cannot show this: after EOF its writes fail with `EIO` anyway, so
+    /// the test passes whether or not the session checks its own state. The
+    /// mock keeps accepting writes after EOF, so the rejection can only come
+    /// from the state machine — and `take_input` proves no bytes reached the
+    /// transport.
+    #[cfg(feature = "mock")]
+    #[tokio::test]
+    async fn send_after_eof_is_rejected_by_the_session_not_the_transport() {
+        let (mut session, handle) = mock_session();
+        handle.queue_output_str("hi");
+        session.expect("hi").await.expect("read the queued output");
+        handle.signal_eof();
+        session.expect_eof().await.expect("read to EOF");
+
+        let err = session
+            .send_line("too late")
+            .await
+            .expect_err("a write after EOF must be rejected");
+
+        assert!(
+            matches!(err, crate::error::ExpectError::SessionClosed),
+            "expected SessionClosed, got {err:?}"
+        );
+        assert!(
+            handle.take_input().is_empty(),
+            "the rejected write must never reach the transport"
+        );
+    }
+
+    #[cfg(feature = "mock")]
+    #[tokio::test]
+    async fn an_unrecoverable_read_error_moves_the_session_to_failed() {
+        let (mut session, handle) = mock_session();
+        handle.set_error("device fell off the bus");
+
+        let err = session
+            .expect_timeout("anything", std::time::Duration::from_millis(200))
+            .await
+            .expect_err("the read must surface the error");
+        assert!(
+            !matches!(err, crate::error::ExpectError::Timeout { .. }),
+            "expected the I/O error, not a timeout"
+        );
+
+        assert!(
+            matches!(session.state(), SessionState::Failed(_)),
+            "an unrecoverable read error must end the session, got {:?}",
+            session.state()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn buffered_output_is_still_readable_after_eof() {
+        let mut session = echoer().await;
+        session.expect_eof().await.expect("read to EOF");
+
+        assert!(
+            session.buffer().contains("hi"),
+            "EOF must not discard already-buffered output"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reaping_moves_from_eof_to_exited() {
+        let mut session = echoer().await;
+        session.expect_eof().await.expect("read to EOF");
+        assert_eq!(session.state(), SessionState::Eof);
+
+        let status = session
+            .wait_timeout(Duration::from_secs(5))
+            .await
+            .expect("wait");
+
+        assert_eq!(
+            session.state(),
+            SessionState::Exited(status),
+            "reaping must move Eof -> Exited"
         );
     }
 }

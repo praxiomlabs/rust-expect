@@ -97,6 +97,7 @@ mod builder;
 mod handle;
 mod lifecycle;
 mod screen;
+pub(crate) mod transport;
 
 pub use builder::{QuickSession, SessionBuilder};
 pub use handle::{OutputTap, Session, SessionExt, TapId};

@@ -27,17 +27,16 @@
 //! }
 //! ```
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Mutex;
 
 use super::hooks::{HookManager, InteractionEvent};
 use super::mode::InteractionMode;
 use super::terminal::TerminalSize;
 use crate::error::{ExpectError, Result};
 use crate::expect::Pattern;
+use crate::session::transport::SharedTransport;
 
 /// Action to take after a pattern match in interactive mode.
 #[derive(Debug, Clone)]
@@ -130,8 +129,8 @@ pub struct InteractBuilder<'a, T>
 where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
-    /// Reference to the transport.
-    transport: &'a Arc<Mutex<T>>,
+    /// Reference to the session's transport handle.
+    transport: &'a SharedTransport<T>,
     /// Output pattern hooks.
     output_hooks: Vec<OutputPatternHook>,
     /// Input pattern hooks.
@@ -161,7 +160,7 @@ where
 {
     /// Create a new interact builder.
     pub(crate) fn new(
-        transport: &'a Arc<Mutex<T>>,
+        transport: &'a SharedTransport<T>,
         output_taps: Vec<crate::session::OutputTap>,
     ) -> Self {
         Self {
@@ -323,7 +322,7 @@ where
     /// Returns an error if I/O fails or a pattern callback returns an error.
     pub async fn start(self) -> Result<InteractResult> {
         let mut runner = InteractRunner::new(
-            Arc::clone(self.transport),
+            self.transport.clone(),
             self.output_hooks,
             self.input_hooks,
             self.resize_hook,
@@ -370,7 +369,7 @@ struct InteractRunner<T>
 where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
-    transport: Arc<Mutex<T>>,
+    transport: SharedTransport<T>,
     output_hooks: Vec<OutputPatternHook>,
     input_hooks: Vec<InputPatternHook>,
     /// Resize hook - used on Unix via SIGWINCH signal handling.
@@ -398,7 +397,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        transport: Arc<Mutex<T>>,
+        transport: SharedTransport<T>,
         output_hooks: Vec<OutputPatternHook>,
         input_hooks: Vec<InputPatternHook>,
         resize_hook: Option<ResizeHook>,
@@ -487,13 +486,16 @@ where
             }
 
             let read_timeout = self.mode.read_timeout;
-            let mut transport = self.transport.lock().await;
+            // A clone, not a guard: `SharedTransport` takes the lock inside
+            // each poll, so parking here on a quiet child holds nothing. The
+            // previous `lock().await` was held for the whole `select!` —
+            // including while waiting on stdin — which is what made process
+            // control unreachable for the length of an interactive session.
+            let mut transport = self.transport.clone();
 
             tokio::select! {
                 // Handle SIGWINCH (window resize)
                 _ = sigwinch.recv() => {
-                    drop(transport); // Release lock before processing
-
                     if let Some(result) = self.handle_resize().await? {
                         return Ok(result);
                     }
@@ -501,7 +503,6 @@ where
 
                 // Read from session output
                 result = transport.read(&mut output_buf) => {
-                    drop(transport); // Release lock before processing
                     match result {
                         Ok(0) => {
                             self.hook_manager.notify(&InteractionEvent::Ended);
@@ -549,7 +550,6 @@ where
 
                 // Read from stdin (user input)
                 result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)) => {
-                    drop(transport); // Release lock
 
                     if let Ok(Ok(n)) = result {
                         if n == 0 {
@@ -586,7 +586,7 @@ where
                         }
 
                         // Send to session
-                        let mut transport = self.transport.lock().await;
+                        let mut transport = self.transport.clone();
                         transport.write_all(&processed).await.map_err(ExpectError::Io)?;
                         transport.flush().await.map_err(ExpectError::Io)?;
                     }
@@ -623,12 +623,16 @@ where
             }
 
             let read_timeout = self.mode.read_timeout;
-            let mut transport = self.transport.lock().await;
+            // A clone, not a guard: `SharedTransport` takes the lock inside
+            // each poll, so parking here on a quiet child holds nothing. The
+            // previous `lock().await` was held for the whole `select!` —
+            // including while waiting on stdin — which is what made process
+            // control unreachable for the length of an interactive session.
+            let mut transport = self.transport.clone();
 
             tokio::select! {
                 // Read from session output
                 result = transport.read(&mut output_buf) => {
-                    drop(transport); // Release lock before processing
                     match result {
                         Ok(0) => {
                             self.hook_manager.notify(&InteractionEvent::Ended);
@@ -673,7 +677,6 @@ where
 
                 // Read from stdin (user input)
                 result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)) => {
-                    drop(transport); // Release lock
 
                     if let Ok(Ok(n)) = result {
                         if n == 0 {
@@ -710,7 +713,7 @@ where
                         }
 
                         // Send to session
-                        let mut transport = self.transport.lock().await;
+                        let mut transport = self.transport.clone();
                         transport.write_all(&processed).await.map_err(ExpectError::Io)?;
                         transport.flush().await.map_err(ExpectError::Io)?;
                     }
@@ -741,7 +744,7 @@ where
                         self.buffer = after.to_string();
                     }
                     InteractAction::Send(data) => {
-                        let mut transport = self.transport.lock().await;
+                        let mut transport = self.transport.clone();
                         transport.write_all(&data).await.map_err(ExpectError::Io)?;
                         transport.flush().await.map_err(ExpectError::Io)?;
                         // Clear matched portion
@@ -790,7 +793,7 @@ where
                 match (hook.callback)(&ctx) {
                     InteractAction::Continue => {}
                     InteractAction::Send(data) => {
-                        let mut transport = self.transport.lock().await;
+                        let mut transport = self.transport.clone();
                         transport.write_all(&data).await.map_err(ExpectError::Io)?;
                         transport.flush().await.map_err(ExpectError::Io)?;
                     }
@@ -846,7 +849,7 @@ where
             match hook(&ctx) {
                 InteractAction::Continue => {}
                 InteractAction::Send(data) => {
-                    let mut transport = self.transport.lock().await;
+                    let mut transport = self.transport.clone();
                     transport.write_all(&data).await.map_err(ExpectError::Io)?;
                     transport.flush().await.map_err(ExpectError::Io)?;
                 }

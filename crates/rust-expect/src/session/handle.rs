@@ -9,7 +9,6 @@ use std::sync::{Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Mutex;
 
 #[cfg(unix)]
 use crate::backend::{AsyncPty, PtyConfig, PtySpawner};
@@ -25,6 +24,7 @@ use crate::expect::{
 use crate::interact::InteractBuilder;
 #[cfg(feature = "screen")]
 use crate::screen::Screen;
+use crate::session::transport::SharedTransport;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
 
 /// Callback invoked for every chunk of bytes read from the transport.
@@ -77,7 +77,11 @@ fn lock_screen(screen: &Arc<StdMutex<Screen>>) -> MutexGuard<'_, Screen> {
 /// and manage the lifecycle of the process.
 pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     /// The underlying transport (PTY, SSH channel, etc.).
-    transport: Arc<Mutex<T>>,
+    ///
+    /// Held behind a per-poll lock rather than one taken across the read's
+    /// await, so a parked read leaves the session writable. See
+    /// [`SharedTransport`].
+    transport: SharedTransport<T>,
     /// Control over the child process, held separately from the transport so
     /// that killing or signalling never waits on a read.
     ///
@@ -150,7 +154,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let mut matcher = Matcher::new(buffer_size);
         matcher.set_default_timeout(config.timeout.default);
         Self {
-            transport: Arc::new(Mutex::new(transport)),
+            transport: SharedTransport::new(transport),
             control: None,
             config,
             matcher,
@@ -440,7 +444,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         // Perform the write under the lock, then release it before touching
         // session state so the error-handling path can take `&mut self`.
         let result = {
-            let mut transport = self.transport.lock().await;
+            let mut transport = self.transport.clone();
             match transport.write_all(data).await {
                 Ok(()) => transport.flush().await,
                 Err(e) => Err(e),
@@ -845,7 +849,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Read data from the transport with timeout.
     async fn read_with_timeout(&mut self, timeout: Duration) -> Result<usize> {
         let mut buf = [0u8; 4096];
-        let mut transport = self.transport.lock().await;
+        let mut transport = self.transport.clone();
 
         match tokio::time::timeout(timeout, transport.read(&mut buf)).await {
             Ok(Ok(0)) => {
@@ -1319,7 +1323,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
         const ATTEMPTS: u32 = 20;
         for _ in 0..ATTEMPTS {
             // Lock released at the end of this statement, before the sleep.
-            let status = self.transport.lock().await.try_exit_status();
+            let status = self.transport.with(ChildExit::try_exit_status);
             if let Some(status) = status {
                 return status;
             }
@@ -1342,11 +1346,13 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Resizable> Session<T> {
     /// # Errors
     ///
     /// Returns an error if the resize ioctl fails.
+    // Stays `async` despite no longer awaiting: it is the implementation of
+    // the async `SessionExt::resize`, and a resize is only synchronous because
+    // every current backend resizes with an ioctl. An SSH channel resize is a
+    // request/reply and would await.
+    #[allow(clippy::unused_async)]
     pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
-        {
-            let mut transport = self.transport.lock().await;
-            transport.resize(cols, rows)?;
-        }
+        self.transport.with(|t| t.resize(cols, rows))?;
         self.config.dimensions = (cols, rows);
         #[cfg(feature = "screen")]
         if let Some(screen) = self.screen.as_ref()
@@ -1549,11 +1555,16 @@ fn is_pty_eof_error(e: &std::io::Error) -> bool {
 
 /// Process control must not contend with transport I/O (AR-002).
 ///
-/// Each test holds the transport lock — standing in for a read parked on it —
-/// and then exercises a control operation. Before the capability split every
-/// one of these went through `transport.try_lock()` and so failed: `signal`
-/// and `kill` returned `WouldBlock`, `is_running` answered `true` without
-/// checking, and `pid` answered `0`.
+/// Most of these hold the transport lock directly and then exercise a control
+/// operation. Before the capability split every one went through
+/// `transport.try_lock()` and so failed: `signal` and `kill` returned
+/// `WouldBlock`, `is_running` answered `true` without checking, and `pid`
+/// answered `0`.
+///
+/// Holding the lock is now a structural stand-in rather than a literal
+/// simulation — since the transport moved behind a per-poll lock, a parked
+/// read holds nothing. `kill_reaches_a_child_while_a_read_is_parked` is the
+/// end-to-end version, which only became expressible once that was true.
 #[cfg(all(test, unix))]
 mod process_control_tests {
     use std::time::Duration;
@@ -1571,7 +1582,7 @@ mod process_control_tests {
     #[tokio::test]
     async fn kill_succeeds_while_the_transport_lock_is_held() {
         let session = sleeper().await;
-        let guard = session.transport.lock().await;
+        let guard = session.transport.lock();
 
         session.kill().expect("kill must not wait on the transport");
 
@@ -1581,7 +1592,7 @@ mod process_control_tests {
     #[tokio::test]
     async fn signal_succeeds_while_the_transport_lock_is_held() {
         let session = sleeper().await;
-        let guard = session.transport.lock().await;
+        let guard = session.transport.lock();
 
         session
             .signal(libc::SIGTERM)
@@ -1594,7 +1605,7 @@ mod process_control_tests {
     async fn liveness_and_pid_are_answered_while_the_transport_lock_is_held() {
         let session = sleeper().await;
         let expected_pid = session.pid().expect("a spawned session has a pid");
-        let guard = session.transport.lock().await;
+        let guard = session.transport.lock();
 
         assert_eq!(session.is_running(), Some(true));
         assert_eq!(session.pid(), Some(expected_pid));
@@ -1618,6 +1629,49 @@ mod process_control_tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("killed child still reported as running");
+    }
+
+    /// The end-to-end property: a real `expect` parked on a quiet child must
+    /// not stop that child being killed, and the kill must be visible to the
+    /// parked read as EOF.
+    ///
+    /// This is the end-to-end form of what the structural tests above assert.
+    /// It passes as of the capability split, not the transport split — a
+    /// control run against the pre-transport-split tree confirmed it already
+    /// passed there, because the kill no longer travels through the transport
+    /// lock at all. Kept because it exercises the EOF path the structural
+    /// tests do not, but it is not evidence for the transport split; the
+    /// evidence for that lives in `session::transport::tests`.
+    #[tokio::test]
+    async fn kill_reaches_a_child_while_a_read_is_parked() {
+        let mut session = sleeper().await;
+        let control = session
+            .control
+            .clone()
+            .expect("a spawned session has process control");
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            control.with(|c| c.kill()).expect("kill from another task");
+        });
+
+        // `sleep 30` never writes, so this read parks until the kill closes
+        // the PTY. If control were still behind the transport lock the kill
+        // would never land and this would run the full 10 s timeout.
+        let start = tokio::time::Instant::now();
+        let result = session
+            .expect_timeout("never appears", Duration::from_secs(10))
+            .await;
+
+        assert!(
+            result.is_err(),
+            "expect should end at EOF, not match: {result:?}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "the parked read outlived the kill by {:?}; control did not reach the child",
+            start.elapsed()
+        );
     }
 
     /// A transport with no child process says so, instead of pretending.

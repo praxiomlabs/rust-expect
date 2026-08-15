@@ -73,10 +73,20 @@ mod timeout;
 ///     "literal pattern",
 ///     name: "named pattern",
 ///     regex(r"regex\s+pattern"),
+///     re(r"same as regex"),
 ///     glob("glob*pattern"),
-///     "pattern" => action_expression,
 /// }
 /// ```
+///
+/// Patterns may be written braced (above) or bare: `patterns!["a", "b"]`.
+///
+/// # Actions are not supported
+///
+/// `"pattern" => action` parses but does not expand: a
+/// `PatternSet` holds patterns and has no slot for a
+/// handler. Register handlers through `Session::pattern_manager_mut()` with
+/// `PersistentPattern`. Writing an action here is a compile error naming that
+/// alternative.
 ///
 /// # Examples
 ///
@@ -87,8 +97,8 @@ mod timeout;
 ///     prompt: regex(r"\$\s*$"),
 /// };
 ///
-/// // Use with session.expect()
-/// let matched = session.expect(&login_patterns).await?;
+/// // Use with session.expect_any()
+/// let matched = session.expect_any(&login_patterns).await?;
 /// ```
 #[proc_macro]
 pub fn patterns(input: TokenStream) -> TokenStream {
@@ -98,8 +108,10 @@ pub fn patterns(input: TokenStream) -> TokenStream {
 
 /// Compile-time validated regex pattern.
 ///
-/// Creates a lazily-initialized `regex::Regex` that is validated at compile time.
-/// Invalid regex patterns will cause a compilation error.
+/// Creates a lazily-initialized `regex::Regex` that is validated at compile
+/// time. Invalid regex patterns will cause a compilation error. The expansion
+/// reaches the regex crate through rust-expect's own re-export, so the calling
+/// crate does not need a `regex` dependency of its own.
 ///
 /// # Examples
 ///
@@ -126,16 +138,26 @@ pub fn regex(input: TokenStream) -> TokenStream {
 /// # Commands
 ///
 /// - `send "text"` - Send text without newline
-/// - `sendln "text"` - Send text with newline
-/// - `expect "pattern"` - Wait for literal pattern
-/// - `expect_re "regex"` - Wait for regex pattern (validated at compile time)
-/// - `wait duration` - Wait for a duration
-/// - `timeout duration` - Set timeout for subsequent operations
+/// - `sendln "text"` - Send text followed by a newline
+/// - `expect "pattern"` - Wait for a literal pattern
+/// - `expect "pattern", duration` - Wait for it with a step timeout
+/// - `timeout duration` - Timeout for every expectation after this point
+///
+/// `sendln` appends a bare LF rather than the session's configured line
+/// ending, because a dialog step carries only the text to send.
+///
+/// # Commands with no runtime equivalent
+///
+/// `expect_re`/`expect_regex` and `wait`/`sleep` parse but do not expand.
+/// Dialog steps match their pattern literally and a dialog has no timing of
+/// its own, so both are compile errors naming what to do instead: match a
+/// regex with `session.expect(Pattern::regex(..))`, and sleep around
+/// `run_dialog`.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// use rust_expect_macros::dialog;
+/// use rust_expect::dialog;
 /// use std::time::Duration;
 ///
 /// let login_script = dialog! {
@@ -144,7 +166,6 @@ pub fn regex(input: TokenStream) -> TokenStream {
 ///     sendln "admin";
 ///     expect "password:";
 ///     sendln "secret123";
-///     expect_re r"\$\s*$"
 /// };
 ///
 /// // Execute the dialog

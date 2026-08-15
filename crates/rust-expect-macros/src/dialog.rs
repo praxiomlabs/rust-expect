@@ -144,62 +144,74 @@ impl Parse for DialogInput {
 }
 
 /// Generate code for the dialog! macro.
+///
+/// Expands to a `rust_expect::Dialog` built through its real builders. The
+/// previous expansion treated `DialogStep` as an enum with `Send`, `Expect`,
+/// `Wait` and `SetTimeout` variants and handed `Dialog::new` a vector; the
+/// runtime type is a struct and `Dialog::new` takes no arguments, so nothing
+/// this macro produced had ever compiled.
+///
+/// Two constructs the parser accepts have no runtime equivalent and are
+/// rejected here rather than expanded into something that does not mean what
+/// it says.
 pub fn expand(input: DialogInput) -> TokenStream {
-    let steps: Vec<_> = input
-        .steps
-        .into_iter()
-        .map(|step| match step {
+    let mut steps = Vec::with_capacity(input.steps.len());
+    // `timeout <duration>;` applies to every expectation after it, until
+    // another one replaces it. A step's own `, <duration>` still wins.
+    let mut standing_timeout: Option<Expr> = None;
+
+    for step in input.steps {
+        match step {
             DialogStep::Send(send) => {
                 let data = &send.data;
-                if send.newline {
-                    quote! {
-                        rust_expect::dialog::DialogStep::SendLine(#data.to_string())
-                    }
+                // `sendln` appends a bare LF: a dialog step carries the text to
+                // send and nothing else, so it cannot defer to the session's
+                // configured line ending the way `Session::send_line` does.
+                let text = if send.newline {
+                    quote! { concat!(#data, "\n") }
                 } else {
-                    quote! {
-                        rust_expect::dialog::DialogStep::Send(#data.to_string())
-                    }
-                }
+                    quote! { #data }
+                };
+                steps.push(quote! { .step(::rust_expect::DialogStep::send(#text)) });
             }
             DialogStep::Expect(expect) => {
-                let pattern = &expect.pattern;
-                let timeout = expect
-                    .timeout
-                    .map_or_else(|| quote! { None }, |t| quote! { Some(#t) });
-
                 if expect.is_regex {
+                    return syn::Error::new(
+                        expect.pattern.span(),
+                        "`dialog!` cannot express a regex expectation: dialog steps match their \
+                         pattern literally. Match the regex directly with \
+                         `session.expect(Pattern::regex(..))`.",
+                    )
+                    .to_compile_error();
+                }
+
+                let pattern = &expect.pattern;
+                let timeout = expect.timeout.as_ref().or(standing_timeout.as_ref());
+                steps.push(if let Some(timeout) = timeout {
                     quote! {
-                        rust_expect::dialog::DialogStep::ExpectRegex {
-                            pattern: #pattern.to_string(),
-                            timeout: #timeout,
-                        }
+                        .step(::rust_expect::DialogStep::expect(#pattern).timeout(#timeout))
                     }
                 } else {
-                    quote! {
-                        rust_expect::dialog::DialogStep::Expect {
-                            pattern: #pattern.to_string(),
-                            timeout: #timeout,
-                        }
-                    }
-                }
+                    quote! { .step(::rust_expect::DialogStep::expect(#pattern)) }
+                });
             }
             DialogStep::Wait(wait) => {
-                let duration = &wait.duration;
-                quote! {
-                    rust_expect::dialog::DialogStep::Wait(#duration)
-                }
+                return syn::Error::new_spanned(
+                    &wait.duration,
+                    "`dialog!` has no wait step: a dialog is a sequence of expectations and \
+                     sends, with no timing of its own. Sleep around `run_dialog`, or give the \
+                     next expectation a timeout.",
+                )
+                .to_compile_error();
             }
             DialogStep::Timeout(timeout) => {
-                let duration = &timeout.duration;
-                quote! {
-                    rust_expect::dialog::DialogStep::SetTimeout(#duration)
-                }
+                standing_timeout = Some(timeout.duration);
             }
-        })
-        .collect();
+        }
+    }
 
     quote! {
-        rust_expect::dialog::Dialog::new(vec![#(#steps),*])
+        ::rust_expect::Dialog::new() #(#steps)*
     }
 }
 

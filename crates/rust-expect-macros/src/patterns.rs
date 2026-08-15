@@ -109,52 +109,58 @@ impl Parse for PatternsInput {
 }
 
 /// Generate code for the patterns! macro.
+///
+/// Expands to a `rust_expect::PatternSet` built through its real
+/// constructors. The previous expansion named a `rust_expect::pattern` module,
+/// a `PatternType` enum and a struct-shaped `Pattern`, none of which exist —
+/// so nothing this macro produced had ever compiled.
 pub fn expand(input: PatternsInput) -> TokenStream {
-    let patterns: Vec<_> = input
-        .patterns
-        .into_iter()
-        .enumerate()
-        .map(|(idx, pattern)| {
-            let name = pattern
-                .name
-                .map_or_else(|| quote! { None }, |n| quote! { Some(#n.to_string()) });
+    let mut adds = Vec::with_capacity(input.patterns.len());
 
-            let pattern_expr = match pattern.kind {
-                PatternKind::Literal(lit) => {
-                    quote! { rust_expect::pattern::PatternType::Literal(#lit.to_string()) }
-                }
-                PatternKind::Regex(lit) => {
-                    let pattern_str = lit.value();
-                    // Validate regex at compile time
-                    if let Err(e) = regex::Regex::new(&pattern_str) {
-                        return syn::Error::new(lit.span(), format!("invalid regex: {e}"))
-                            .to_compile_error();
-                    }
-                    quote! { rust_expect::pattern::PatternType::Regex(#lit.to_string()) }
-                }
-                PatternKind::Glob(lit) => {
-                    quote! { rust_expect::pattern::PatternType::Glob(#lit.to_string()) }
-                }
-            };
+    for pattern in input.patterns {
+        // A pattern set holds patterns and nothing else — there is no slot for
+        // a handler — so an action has nowhere to go. Say that at the call
+        // site instead of emitting code that cannot compile.
+        if let Some(action) = pattern.action.as_ref() {
+            return syn::Error::new_spanned(
+                action,
+                "`patterns!` does not support actions: a PatternSet carries patterns only. \
+                 Register a handler with `Session::pattern_manager_mut()` and \
+                 `PersistentPattern` instead.",
+            )
+            .to_compile_error();
+        }
 
-            let action_expr = pattern.action.map_or_else(
-                || quote! { None::<Box<dyn Fn(&str)>> },
-                |a| quote! { Some(Box::new(move |_| { #a })) },
-            );
-
-            quote! {
-                rust_expect::pattern::Pattern {
-                    name: #name,
-                    index: #idx,
-                    pattern: #pattern_expr,
-                    action: #action_expr,
+        let pattern_expr = match &pattern.kind {
+            PatternKind::Literal(lit) => quote! { ::rust_expect::Pattern::literal(#lit) },
+            PatternKind::Regex(lit) => {
+                // Validate regex at compile time
+                if let Err(e) = regex::Regex::new(&lit.value()) {
+                    return syn::Error::new(lit.span(), format!("invalid regex: {e}"))
+                        .to_compile_error();
+                }
+                quote! {
+                    ::rust_expect::Pattern::regex(#lit)
+                        .expect("regex was validated when `patterns!` expanded")
                 }
             }
-        })
-        .collect();
+            PatternKind::Glob(lit) => quote! { ::rust_expect::Pattern::glob(#lit) },
+        };
+
+        adds.push(if let Some(name) = pattern.name.as_ref() {
+            let name = name.to_string();
+            quote! { set.add_named(#name, #pattern_expr); }
+        } else {
+            quote! { set.add(#pattern_expr); }
+        });
+    }
 
     quote! {
-        rust_expect::pattern::PatternSet::new(vec![#(#patterns),*])
+        {
+            let mut set = ::rust_expect::PatternSet::new();
+            #(#adds)*
+            set
+        }
     }
 }
 

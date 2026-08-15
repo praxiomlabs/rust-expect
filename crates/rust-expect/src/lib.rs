@@ -28,6 +28,11 @@
 //! }
 //! ```
 
+/// Re-exported so the [`regex!`] macro's expansion resolves in any crate that
+/// depends on rust-expect. It named a bare `regex::Regex`, which only resolves
+/// where the caller happens to depend on the regex crate directly.
+#[doc(hidden)]
+pub use ::regex;
 // Re-export macros
 pub use rust_expect_macros::{dialog, patterns, regex, timeout};
 

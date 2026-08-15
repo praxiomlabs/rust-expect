@@ -402,7 +402,7 @@ session.send(&[ctrl_c.as_byte()]).await?;
 ### Managing Multiple Sessions
 
 ```rust
-use rust_expect::multi::{MultiSessionManager, SessionGroup};
+use rust_expect::multi::MultiSessionManager;
 use rust_expect::prelude::*;
 
 // Create sessions
@@ -441,26 +441,6 @@ println!("Session {} responded first", first.session_id);
 ```rust
 // Broadcast a command to all sessions
 manager.send_all(b"uptime\n").await;
-```
-
-### Session Groups
-
-```rust
-use rust_expect::multi::{GroupBuilder, GroupManager};
-
-// Create groups for different server types
-let mut gm = GroupManager::new();
-
-let web_group = gm.create("web");
-web_group.add("nginx-1");
-web_group.add("nginx-2");
-
-let db_group = gm.create("database");
-db_group.add("postgres-primary");
-db_group.add("postgres-replica");
-
-println!("Groups: {:?}", gm.names());
-println!("Total sessions: {}", gm.total_sessions());
 ```
 
 ---

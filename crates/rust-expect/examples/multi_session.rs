@@ -7,69 +7,16 @@
 
 use std::time::Duration;
 
-use rust_expect::multi::{
-    GroupBuilder, GroupManager, MultiSessionManager, PatternSelector, SessionGroup,
-};
+use rust_expect::multi::{MultiSessionManager, PatternSelector};
 use rust_expect::prelude::*;
 
 #[tokio::main]
-#[allow(clippy::too_many_lines)]
 async fn main() -> Result<()> {
     println!("rust-expect Multi-Session Example");
     println!("==================================\n");
 
-    // Example 1: Session groups
-    println!("1. Managing session groups...");
-
-    let mut group = SessionGroup::new("servers");
-    let web1 = group.add("web-server-1");
-    let web2 = group.add("web-server-2");
-    let db1 = group.add("database-1");
-
-    println!(
-        "   Created group '{}' with {} sessions",
-        group.name(),
-        group.len()
-    );
-    println!("   Sessions: web1={web1}, web2={web2}, db1={db1}");
-
-    // Mark a session as inactive
-    group.set_active(db1, false);
-    println!("   Active sessions: {}", group.active_count());
-
-    // Example 2: Group builder pattern
-    println!("\n2. Using GroupBuilder...");
-
-    let group = GroupBuilder::new("production")
-        .timeout(Duration::from_secs(60))
-        .add("app-server-1")
-        .add("app-server-2")
-        .add("cache-server")
-        .build();
-
-    println!("   Built group: {}", group.name());
-    println!("   Sessions: {}", group.len());
-
-    // Example 3: Group manager for multiple groups
-    println!("\n3. Managing multiple groups...");
-
-    let mut manager = GroupManager::new();
-
-    // Create web servers group
-    let web_group = manager.create("web");
-    web_group.add("nginx-1");
-    web_group.add("nginx-2");
-
-    // Create database group
-    let db_group = manager.create("database");
-    db_group.add("postgres-primary");
-    db_group.add("postgres-replica");
-
-    println!("   Groups: {:?}", manager.names());
-    println!("   Total sessions: {}", manager.total_sessions());
-
-    // Example 4: PatternSelector for per-session patterns
-    println!("\n4. Using PatternSelector...");
+    // Example 1: PatternSelector for per-session patterns
+    println!("1. Using PatternSelector...");
 
     let selector = PatternSelector::new()
         .session(0, "login:")
@@ -90,20 +37,8 @@ async fn main() -> Result<()> {
         selector.patterns_for(99).len()
     );
 
-    // Example 5: Iterating over group sessions
-    println!("\n5. Iterating over sessions...");
-
-    let mut group = SessionGroup::new("test-group");
-    group.add("session-a");
-    group.add("session-b");
-    group.add("session-c");
-
-    group.for_each(|id, label| {
-        println!("   Session {id}: {label}");
-    });
-
-    // Example 6: Real concurrent sessions with MultiSessionManager
-    println!("\n6. Running concurrent shell sessions...");
+    // Example 2: Real concurrent sessions with MultiSessionManager
+    println!("\n2. Running concurrent shell sessions...");
 
     // Spawn multiple shell sessions
     let mut session1 = Session::spawn("/bin/sh", &[]).await?;
@@ -137,8 +72,8 @@ async fn main() -> Result<()> {
     session1.wait().await?;
     session2.wait().await?;
 
-    // Example 7: MultiSessionManager for expect_any/expect_all
-    println!("\n7. Using MultiSessionManager for concurrent expect...");
+    // Example 3: MultiSessionManager for expect_any/expect_all
+    println!("\n3. Using MultiSessionManager for concurrent expect...");
 
     // Create new sessions for the manager demo
     let s1 = Session::spawn("/bin/sh", &[]).await?;

@@ -101,10 +101,7 @@ pub use metrics::{Counter, Gauge, Histogram, MetricsRegistry, SessionMetrics};
 // Conditional re-exports
 #[cfg(feature = "mock")]
 pub use mock::{MockBuilder, MockSession, MockTransport, Scenario};
-pub use multi::{
-    GroupBuilder, GroupManager, GroupResult, MultiSessionManager, PatternSelector, ReadyType,
-    SelectResult, SendResult, SessionGroup,
-};
+pub use multi::{MultiSessionManager, PatternSelector, ReadyType, SelectResult, SendResult};
 #[cfg(feature = "pii-redaction")]
 pub use pii::{PiiDetector, PiiRedactor, PiiType};
 #[cfg(feature = "screen")]

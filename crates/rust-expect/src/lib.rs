@@ -78,10 +78,7 @@ pub mod pii;
 pub use auto_config::{LocaleInfo, ShellType, detect_shell};
 // Re-export commonly used items from Phase 5
 pub use backend::{BackendType, PtyConfig, PtySpawner};
-pub use config::{
-    BufferConfig, EncodingConfig, HumanTypingConfig, InteractConfig, LineEnding, LogFormat,
-    LoggingConfig, SessionConfig, TimeoutConfig,
-};
+pub use config::{BufferConfig, HumanTypingConfig, LineEnding, SessionConfig, TimeoutConfig};
 pub use dialog::{Dialog, DialogBuilder, DialogStep};
 pub use encoding::{
     DetectedEncoding, EncodedText, LineEndingStyle, decode_utf8_lossy, detect_encoding_from_env,

@@ -2,16 +2,12 @@
 
 use std::time::Duration;
 
-use rust_expect::{
-    BufferConfig, HumanTypingConfig, LineEnding, LogFormat, LoggingConfig, SessionConfig,
-    TimeoutConfig,
-};
+use rust_expect::{BufferConfig, HumanTypingConfig, LineEnding, SessionConfig, TimeoutConfig};
 
 #[test]
 fn session_config_default() {
     let config = SessionConfig::default();
     assert_eq!(config.timeout.default, Duration::from_secs(30));
-    assert!(!config.logging.log_user);
 }
 
 #[test]
@@ -64,7 +60,6 @@ fn timeout_config_builder() {
 fn buffer_config_default() {
     let buffer = BufferConfig::default();
     assert_eq!(buffer.max_size, 100 * 1024 * 1024); // 100 MB
-    assert!(buffer.ring_buffer);
 }
 
 #[test]
@@ -75,13 +70,10 @@ fn buffer_config_new() {
 
 #[test]
 fn buffer_config_builder() {
-    let buffer = BufferConfig::new(4096)
-        .search_window(1024)
-        .ring_buffer(false);
+    let buffer = BufferConfig::new(4096).search_window(1024);
 
     assert_eq!(buffer.max_size, 4096);
     assert_eq!(buffer.search_window, Some(1024));
-    assert!(!buffer.ring_buffer);
 }
 
 #[test]
@@ -120,33 +112,4 @@ fn human_typing_config_builder() {
 
     assert_eq!(config.base_delay, Duration::from_millis(50));
     assert_eq!(config.variance, Duration::from_millis(25));
-}
-
-#[test]
-fn logging_config_default() {
-    let config = LoggingConfig::default();
-    assert!(!config.log_user);
-    assert_eq!(config.format, LogFormat::Raw);
-}
-
-#[test]
-fn logging_config_builder() {
-    let config = LoggingConfig::new()
-        .log_file("/tmp/test.log")
-        .log_user(true)
-        .format(LogFormat::Ndjson)
-        .redact("password");
-
-    assert!(config.log_file.is_some());
-    assert!(config.log_user);
-    assert_eq!(config.format, LogFormat::Ndjson);
-    assert_eq!(config.redact_patterns, vec!["password"]);
-}
-
-#[test]
-const fn log_format_variants() {
-    let _ = LogFormat::Raw;
-    let _ = LogFormat::Timestamped;
-    let _ = LogFormat::Ndjson;
-    let _ = LogFormat::Asciicast;
 }

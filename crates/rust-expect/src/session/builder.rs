@@ -6,9 +6,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::config::{
-    BufferConfig, EncodingConfig, LineEnding, LoggingConfig, SessionConfig, TimeoutConfig,
-};
+use crate::config::{BufferConfig, LineEnding, SessionConfig, TimeoutConfig};
 
 /// Builder for creating session configurations.
 #[derive(Debug, Clone)]
@@ -143,27 +141,6 @@ impl SessionBuilder {
     #[must_use]
     pub const fn windows_line_endings(self) -> Self {
         self.line_ending(LineEnding::Cr)
-    }
-
-    /// Set the encoding configuration.
-    #[must_use]
-    pub const fn encoding(mut self, config: EncodingConfig) -> Self {
-        self.config.encoding = config;
-        self
-    }
-
-    /// Set the logging configuration.
-    #[must_use]
-    pub fn logging(mut self, config: LoggingConfig) -> Self {
-        self.config.logging = config;
-        self
-    }
-
-    /// Enable logging to a file.
-    #[must_use]
-    pub fn log_to_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.config.logging.log_file = Some(path.into());
-        self
     }
 
     /// Build the session configuration.

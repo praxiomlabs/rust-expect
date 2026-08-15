@@ -320,17 +320,6 @@ fn session_builder_buffer_size() {
     assert_eq!(config.buffer.max_size, 1024 * 1024);
 }
 
-/// Test `SessionBuilder` logging.
-#[test]
-fn session_builder_logging() {
-    let config = SessionBuilder::new()
-        .command("test")
-        .log_to_file("/tmp/test.log")
-        .build();
-
-    assert_eq!(config.logging.log_file, Some("/tmp/test.log".into()));
-}
-
 // =============================================================================
 // End-to-end spawn tests (require actual process spawning)
 // =============================================================================

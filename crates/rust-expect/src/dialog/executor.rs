@@ -105,42 +105,6 @@ impl DialogExecutor {
         self
     }
 
-    /// Execute a single step (synchronously - for testing).
-    ///
-    /// This method prepares a step for execution by:
-    /// - Substituting variables in the send text
-    /// - Determining the next step to execute
-    ///
-    /// Note: This is a synchronous helper primarily for testing. For actual
-    /// dialog execution, use the async session-based execution methods.
-    #[must_use]
-    pub fn execute_step_sync(
-        &self,
-        step: &DialogStep,
-        dialog: &Dialog,
-        _buffer: &str,
-    ) -> StepResult {
-        let substituted_send = step.send.as_ref().map(|s| dialog.substitute(s));
-
-        StepResult {
-            step_name: step.name.clone(),
-            success: true,
-            output: String::new(),
-            matched: step.expect.clone(),
-            send: substituted_send,
-            error: None,
-            next_step: step.next.clone().or_else(|| {
-                // Find next step in sequence
-                dialog
-                    .steps
-                    .iter()
-                    .position(|s| s.name == step.name)
-                    .and_then(|i| dialog.steps.get(i + 1))
-                    .map(|s| s.name.clone())
-            }),
-        }
-    }
-
     /// Get the pattern for a step.
     #[must_use]
     pub fn step_pattern(&self, step: &DialogStep, dialog: &Dialog) -> Option<Pattern> {
@@ -412,26 +376,6 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.send, Some("hello".to_string()));
     }
-
-    #[test]
-    fn step_result_with_substitution() {
-        use super::super::definition::{Dialog, DialogStep};
-
-        let dialog = Dialog::named("test_dialog")
-            .variable("username", "admin")
-            .step(
-                DialogStep::new("login")
-                    .with_expect("Username:")
-                    .with_send("${username}"),
-            );
-
-        let executor = DialogExecutor::new();
-        let step = &dialog.steps[0];
-        let result = executor.execute_step_sync(step, &dialog, "");
-
-        assert_eq!(result.step_name, "login");
-        assert_eq!(result.send, Some("admin".to_string()));
-    }
 }
 
 /// Dialog execution driven through the real expect loop over a mock
@@ -555,6 +499,57 @@ mod execution_tests {
             "error should name the missing step, got {:?}",
             result.error
         );
+    }
+
+    /// Variables in a step's send text are substituted on the way out, which
+    /// used to be checked through a sync helper that only *prepared* a step.
+    /// Assert it against what actually reaches the transport.
+    #[tokio::test]
+    async fn send_text_is_variable_substituted() {
+        let (mut session, handle) = session_with("Username: ");
+
+        let dialog = Dialog::named("login").variable("username", "admin").step(
+            DialogStep::new("login")
+                .with_expect("Username:")
+                .with_send("${username}\n"),
+        );
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(result.success, "dialog failed: {:?}", result.error);
+        assert_eq!(handle.take_input_str(), "admin\n");
+    }
+
+    /// Execution begins at the first step. It used to begin at the first
+    /// *named* one, so a dialog whose opening steps were unnamed skipped them.
+    #[tokio::test]
+    async fn execution_begins_at_the_first_step() {
+        let (mut session, handle) = session_with("one two three ");
+
+        let dialog = Dialog::named("mixed")
+            .step(DialogStep::expect("one").then_send("a\n"))
+            .step(DialogStep::expect("two").then_send("b\n"))
+            .step(
+                DialogStep::new("named")
+                    .with_expect("three")
+                    .with_send("c\n"),
+            );
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(result.success, "dialog failed: {:?}", result.error);
+        assert_eq!(
+            result.steps.len(),
+            3,
+            "the unnamed steps must not be skipped"
+        );
+        assert_eq!(handle.take_input_str(), "a\nb\nc\n");
     }
 
     /// Same defect on the entry point: it used to fall back to step 0 and run

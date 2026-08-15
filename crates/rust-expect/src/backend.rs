@@ -168,18 +168,6 @@ impl std::fmt::Debug for ProcessHandle {
     }
 }
 
-/// Trait for session backends.
-pub trait Backend {
-    /// The transport type produced by this backend.
-    type Transport;
-
-    /// Check if the backend is available.
-    fn is_available(&self) -> bool;
-
-    /// Get the backend name.
-    fn name(&self) -> &'static str;
-}
-
 /// Available backend types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendType {

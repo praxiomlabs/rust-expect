@@ -372,7 +372,7 @@ impl PtyHandle {
 
     // NB: no `signal`/`kill` here. The unguarded low-level signal path was
     // removed for the PID-reuse guard (S1); signal a child through
-    // `Session`/`SyncSession`, whose `AsyncPty::signal` performs the
+    // `Session`/`SyncSession`, whose `ProcessHandle` performs the
     // authoritative reap-before-kill check.
 }
 
@@ -399,19 +399,6 @@ impl WindowsPtyHandle {
             .map_err(|e| ExpectError::Io(io::Error::other(format!("resize failed: {e}"))))?;
         self.dimensions = (cols, rows);
         Ok(())
-    }
-
-    /// Check if the child process is still running.
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        self.child.is_running()
-    }
-
-    /// Kill the process.
-    pub fn kill(&mut self) -> Result<()> {
-        self.child
-            .kill()
-            .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
     }
 }
 
@@ -639,23 +626,6 @@ impl AsyncPty {
         self.process.clone()
     }
 
-    /// Non-blocking reap of the child process.
-    ///
-    /// Returns `Some(status)` once the child has exited (rust-pty caches the
-    /// status), or `None` while it is still running or its status cannot be
-    /// determined.
-    pub fn try_wait(&mut self) -> Option<ProcessExitStatus> {
-        self.process.with(|c| c.try_exit_status())
-    }
-
-    /// Check whether the child process is still running.
-    ///
-    /// Non-blocking: reaps through tokio's child handle, so it reports the truth
-    /// immediately after the child exits. Mirrors `WindowsAsyncPty::is_running`.
-    pub fn is_running(&mut self) -> bool {
-        self.process.with(|c| c.is_running())
-    }
-
     /// Get the process ID.
     #[must_use]
     pub const fn pid(&self) -> u32 {
@@ -676,29 +646,6 @@ impl AsyncPty {
             .map_err(|e| ExpectError::Io(io::Error::other(format!("resize failed: {e}"))))?;
         self.dimensions = (cols, rows);
         Ok(())
-    }
-
-    /// Send a signal to the child process.
-    ///
-    /// Delegates to [`PtyProcess`], which owns the child and the PID-reuse
-    /// guard. Prefer `Session::signal`, which reaches the same handle without
-    /// touching the transport at all.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ExpectError::SessionClosed`] if the child has already exited,
-    /// or an I/O error if delivery fails.
-    pub fn signal(&mut self, signal: i32) -> Result<()> {
-        self.process.with(|c| c.signal(signal))
-    }
-
-    /// Kill the child process.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the child cannot be killed.
-    pub fn kill(&mut self) -> Result<()> {
-        self.process.with(|c| c.kill())
     }
 }
 
@@ -749,7 +696,7 @@ impl std::fmt::Debug for AsyncPty {
 #[cfg(unix)]
 impl ChildExit for AsyncPty {
     fn try_exit_status(&mut self) -> Option<ProcessExitStatus> {
-        self.try_wait()
+        self.process.with(|c| c.try_exit_status())
     }
 }
 
@@ -886,21 +833,6 @@ impl WindowsAsyncPty {
             .map_err(|e| ExpectError::Io(io::Error::other(format!("resize failed: {e}"))))?;
         self.dimensions = (cols, rows);
         Ok(())
-    }
-
-    /// Check if the child process is still running.
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        self.process.with(|c| c.is_running())
-    }
-
-    /// Kill the child process.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the child cannot be killed.
-    pub fn kill(&mut self) -> Result<()> {
-        self.process.with(|c| c.kill())
     }
 }
 

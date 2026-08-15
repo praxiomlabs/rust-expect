@@ -82,6 +82,21 @@ pub enum SessionEvent<'a> {
         to: SessionState,
     },
 
+    /// A pattern matched and was consumed from the buffer.
+    ///
+    /// `pattern_index` is the index within the pattern set the match came
+    /// from — the same number [`Match::pattern_index`] reports — and is `0` for
+    /// a single-pattern expect. It identifies the match within its own call,
+    /// not across calls: the crate has no stable pattern identity, and a
+    /// counter does not need one.
+    ///
+    /// [`Match::pattern_index`]: crate::types::Match::pattern_index
+    Matched {
+        /// Index of the pattern that matched, within the set it was matched
+        /// against.
+        pattern_index: usize,
+    },
+
     /// An I/O error ended a read.
     Error(&'a ExpectError),
 }

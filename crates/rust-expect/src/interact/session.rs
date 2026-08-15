@@ -791,7 +791,7 @@ where
             // handled it, so it must not fire again on the next chunk — and now
             // that this is the session's own buffer, a later `expect()` must not
             // match it a second time either.
-            let m = self.session.matcher_mut().consume_match(&found);
+            let m = self.session.consume_and_announce(&found);
             let buffer = format!("{}{}{}", m.before, m.matched, m.after);
 
             let action = {

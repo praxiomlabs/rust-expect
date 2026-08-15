@@ -4,7 +4,7 @@
 //! to control spawned processes, send input, and expect output.
 
 use std::sync::Arc;
-#[cfg(feature = "screen")]
+#[cfg(any(feature = "screen", feature = "pii-redaction"))]
 use std::sync::{Mutex as StdMutex, MutexGuard};
 use std::time::Duration;
 
@@ -22,12 +22,16 @@ use crate::expect::{
     ExpectState, HandlerAction, MatchResult, Matcher, Pattern, PatternManager, PatternSet,
 };
 use crate::interact::InteractBuilder;
+use crate::metrics::SessionMetrics;
+#[cfg(feature = "pii-redaction")]
+use crate::pii::StreamingRedactor;
 #[cfg(feature = "screen")]
 use crate::screen::Screen;
 pub use crate::session::events::{OutputTap, TapId};
 use crate::session::events::{SessionEvent, Subscribers};
 use crate::session::state::SessionLifecycle;
 use crate::session::transport::SharedTransport;
+use crate::transcript::Recorder;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
 
 /// Lock the screen mutex, recovering from poisoning.
@@ -44,6 +48,19 @@ fn lock_screen(screen: &Arc<StdMutex<Screen>>) -> MutexGuard<'_, Screen> {
         Ok(g) => g,
         Err(poison) => {
             tracing::warn!("screen mutex was poisoned; recovering inner state");
+            poison.into_inner()
+        }
+    }
+}
+
+/// Lock a redactor, recovering from poisoning as [`lock_screen`] does: a panic
+/// in one subscriber must not silently stop redacting the transcript.
+#[cfg(feature = "pii-redaction")]
+fn lock_redactor(redactor: &Arc<StdMutex<StreamingRedactor>>) -> MutexGuard<'_, StreamingRedactor> {
+    match redactor.lock() {
+        Ok(g) => g,
+        Err(poison) => {
+            tracing::warn!("redactor mutex was poisoned; recovering inner state");
             poison.into_inner()
         }
     }
@@ -300,6 +317,110 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     pub fn attach_screen(&mut self) {
         let (cols, rows) = self.config.dimensions;
         self.attach_screen_with_dims(rows, cols);
+    }
+
+    /// Record this session to a transcript.
+    ///
+    /// The recorder observes output, input and resizes — the three things it
+    /// already knows how to record. Input in particular had no route to it
+    /// before the event stream existed: `send()` had no hook, so
+    /// `Recorder::record_input` was unreachable from a session even though the
+    /// recorder implemented it.
+    ///
+    /// The returned [`TapId`] removes the recorder via
+    /// [`remove_output_tap`](Self::remove_output_tap). The caller keeps the
+    /// `Arc` and reads the result with [`Recorder::transcript`].
+    ///
+    /// Records what the child actually sent. To keep secrets out of the
+    /// transcript, use [`attach_redacted_recorder`](Self::attach_redacted_recorder).
+    pub fn attach_recorder(&mut self, recorder: &Arc<Recorder>) -> TapId {
+        let recorder = Arc::clone(recorder);
+        self.add_event_subscriber(move |event| match event {
+            SessionEvent::Output(chunk) => recorder.record_output(chunk),
+            SessionEvent::Input(chunk) => recorder.record_input(chunk),
+            SessionEvent::Resize { cols, rows } => recorder.record_resize(*cols, *rows),
+            _ => {}
+        })
+    }
+
+    /// Record this session to a transcript, redacting PII on the way in.
+    ///
+    /// # Where redaction sits
+    ///
+    /// Between the event stream and the transcript, and **nowhere else**. The
+    /// matcher has already seen the raw bytes by the time subscribers run, so
+    /// redaction here cannot affect what [`expect`](Self::expect) matches: a
+    /// caller expecting on a password prompt still matches it, and the password
+    /// still does not reach the transcript. That ordering is the whole point,
+    /// and it is structural rather than documented — this method has no way to
+    /// install a redactor anywhere else.
+    ///
+    /// [`StreamingRedactor`] holds back a partial trailing line so a secret
+    /// split across two reads is still caught. The remainder is flushed when
+    /// the session reaches a terminal state, so nothing is left buffered.
+    ///
+    /// Available with the `pii-redaction` feature.
+    #[cfg(feature = "pii-redaction")]
+    pub fn attach_redacted_recorder(
+        &mut self,
+        recorder: &Arc<Recorder>,
+        redactor: StreamingRedactor,
+    ) -> TapId {
+        let recorder = Arc::clone(recorder);
+        let redactor = Arc::new(StdMutex::new(redactor));
+        self.add_event_subscriber(move |event| match event {
+            SessionEvent::Output(chunk) => {
+                let safe = lock_redactor(&redactor).process(&String::from_utf8_lossy(chunk));
+                if !safe.is_empty() {
+                    recorder.record_output(safe.as_bytes());
+                }
+            }
+            SessionEvent::Input(chunk) => {
+                // Input is redacted with the same detector but not buffered
+                // across events: a keystroke chunk is not a stream, and holding
+                // input back would misorder it against the output it produced.
+                let safe = lock_redactor(&redactor)
+                    .redactor()
+                    .redact(&String::from_utf8_lossy(chunk));
+                recorder.record_input(safe.as_bytes());
+            }
+            SessionEvent::Resize { cols, rows } => recorder.record_resize(*cols, *rows),
+            // No more output is coming, so nothing may stay buffered.
+            SessionEvent::StateChanged {
+                to:
+                    SessionState::Eof
+                    | SessionState::Exited(_)
+                    | SessionState::Closed
+                    | SessionState::Failed(_),
+                ..
+            } => {
+                let tail = lock_redactor(&redactor).flush();
+                if !tail.is_empty() {
+                    recorder.record_output(tail.as_bytes());
+                }
+            }
+            _ => {}
+        })
+    }
+
+    /// Feed session metrics from the event stream.
+    ///
+    /// Wires the counters the stream can honestly supply: bytes in and out,
+    /// pattern matches, and errors. `timeouts` and the duration histograms are
+    /// not fed — a timeout is the *absence* of an event, and the durations
+    /// belong to whoever is timing the operation.
+    ///
+    /// The returned [`TapId`] removes it via
+    /// [`remove_output_tap`](Self::remove_output_tap).
+    pub fn attach_metrics(&mut self, metrics: &Arc<SessionMetrics>) -> TapId {
+        let metrics = Arc::clone(metrics);
+        self.add_event_subscriber(move |event| match event {
+            SessionEvent::Output(chunk) => metrics.bytes_received.add(chunk.len() as u64),
+            SessionEvent::Input(chunk) => metrics.bytes_sent.add(chunk.len() as u64),
+            SessionEvent::Matched { .. } => metrics.pattern_matches.inc(),
+            SessionEvent::Error(_) => metrics.errors.inc(),
+            _ => {}
+        })
     }
 
     /// Attach a screen with custom dimensions.
@@ -619,7 +740,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
             // Check for pattern match
             if let Some(result) = self.matcher.try_match_any(patterns) {
-                return Ok(self.matcher.consume_match(&result));
+                return Ok(self.consume_and_announce(&result));
             }
 
             // After patterns run only as a fallback, once the explicit patterns
@@ -707,7 +828,20 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// pattern still matches, else `None`.
     fn consume_ambient(&mut self, pattern: &Pattern) -> Option<Match> {
         let result = self.matcher.try_match(pattern)?;
-        Some(self.matcher.consume_match(&result))
+        Some(self.consume_and_announce(&result))
+    }
+
+    /// Consume a match from the buffer and tell subscribers it happened.
+    ///
+    /// Every match a session makes goes through here, so a match cannot reach a
+    /// caller without also reaching metrics — the same rule `transition`
+    /// enforces for state changes.
+    pub(crate) fn consume_and_announce(&mut self, result: &MatchResult) -> Match {
+        let matched = self.matcher.consume_match(result);
+        self.emit(&SessionEvent::Matched {
+            pattern_index: result.pattern_index,
+        });
+        matched
     }
 
     /// Expect with a specific timeout.
@@ -2223,6 +2357,7 @@ mod event_stream_tests {
                 SessionEvent::Input(bytes) => format!("input:{}", String::from_utf8_lossy(bytes)),
                 SessionEvent::Resize { cols, rows } => format!("resize:{cols}x{rows}"),
                 SessionEvent::StateChanged { from, to } => format!("state:{from}->{to}"),
+                SessionEvent::Matched { pattern_index } => format!("matched:{pattern_index}"),
                 SessionEvent::Error(e) => format!("error:{e}"),
             };
             sink.lock().unwrap().push(label);
@@ -2372,6 +2507,189 @@ mod event_stream_tests {
         assert!(
             !log.lock().unwrap().is_empty(),
             "the other subscriber is unaffected"
+        );
+    }
+}
+
+/// Stage 6 of the event-pump design: the built-in observers.
+///
+/// `Recorder`, `SessionMetrics` and `StreamingRedactor` were all
+/// subscriber-shaped already — `&self` methods with interior mutability — and
+/// none of them was referenced anywhere under `src/session/`. These tests pin
+/// the wiring, and above all the rule that redaction sits between the stream
+/// and the transcript and never in front of the matcher.
+#[cfg(all(test, feature = "mock"))]
+mod subscriber_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use super::Session;
+    use crate::config::SessionConfig;
+    use crate::expect::Pattern;
+    use crate::metrics::SessionMetrics;
+    use crate::mock::MockTransport;
+    use crate::transcript::Recorder;
+
+    fn session_with(output: &str) -> (Session<MockTransport>, MockTransport) {
+        let transport = MockTransport::new();
+        let handle = transport.clone();
+        handle.queue_output_str(output);
+        (Session::new(transport, SessionConfig::default()), handle)
+    }
+
+    fn transcript_of(recorder: &Arc<Recorder>) -> crate::transcript::Transcript {
+        recorder
+            .transcript()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn a_recorder_sees_output_and_input() {
+        let (mut session, _handle) = session_with("hello\n");
+        let recorder = Arc::new(Recorder::new(80, 24));
+        session.attach_recorder(&recorder);
+
+        session
+            .expect_timeout(Pattern::literal("hello"), Duration::from_secs(2))
+            .await
+            .expect("match");
+        session.send(b"who\n").await.expect("send");
+
+        let transcript = transcript_of(&recorder);
+        assert!(
+            transcript.output_text().contains("hello"),
+            "output missing: {:?}",
+            transcript.output_text()
+        );
+        assert_eq!(
+            transcript.input_text(),
+            "who\n",
+            "input had no route to the recorder before the event stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_removed_recorder_stops_recording() {
+        let (mut session, handle) = session_with("first\n");
+        let recorder = Arc::new(Recorder::new(80, 24));
+        let id = session.attach_recorder(&recorder);
+
+        session
+            .expect_timeout(Pattern::literal("first"), Duration::from_secs(2))
+            .await
+            .expect("match");
+        assert!(session.remove_output_tap(id));
+
+        handle.queue_output_str("second\n");
+        session
+            .expect_timeout(Pattern::literal("second"), Duration::from_secs(2))
+            .await
+            .expect("match");
+
+        let text = transcript_of(&recorder).output_text();
+        assert!(text.contains("first"), "lost what it did record: {text:?}");
+        assert!(
+            !text.contains("second"),
+            "kept recording after removal: {text:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn metrics_count_bytes_matches_and_errors() {
+        let (mut session, handle) = session_with("ready\n");
+        let metrics = Arc::new(SessionMetrics::new());
+        session.attach_metrics(&metrics);
+
+        session
+            .expect_timeout(Pattern::literal("ready"), Duration::from_secs(2))
+            .await
+            .expect("match");
+        session.send(b"go\n").await.expect("send");
+
+        assert_eq!(metrics.bytes_received.get(), 6, "\"ready\\n\" is six bytes");
+        assert_eq!(metrics.bytes_sent.get(), 3);
+        assert_eq!(
+            metrics.pattern_matches.get(),
+            1,
+            "a counter that never counts is a false contract"
+        );
+        assert_eq!(metrics.errors.get(), 0);
+
+        handle.set_error("broken");
+        let _ = session
+            .expect_timeout(Pattern::literal("never"), Duration::from_secs(1))
+            .await;
+        assert_eq!(metrics.errors.get(), 1);
+    }
+
+    /// The rule that must not be relaxed. Redaction sits between the event
+    /// stream and the transcript; the matcher has already seen the raw bytes.
+    /// A caller expecting on a secret still matches it, and the secret still
+    /// does not reach the transcript.
+    #[cfg(feature = "pii-redaction")]
+    #[tokio::test]
+    async fn redaction_reaches_the_transcript_but_never_the_matcher() {
+        use crate::pii::{PiiRedactor, StreamingRedactor};
+
+        let (mut session, _handle) = session_with("login for admin@example.com ok\n");
+        let recorder = Arc::new(Recorder::new(80, 24));
+        session.attach_redacted_recorder(&recorder, StreamingRedactor::new(PiiRedactor::new()));
+
+        let matched = session
+            .expect_timeout(
+                Pattern::literal("admin@example.com"),
+                Duration::from_secs(2),
+            )
+            .await
+            .expect("the matcher must still see the raw address");
+        assert_eq!(matched.matched, "admin@example.com");
+
+        let text = transcript_of(&recorder).output_text();
+        assert!(
+            !text.contains("admin@example.com"),
+            "the address reached the transcript unredacted: {text:?}"
+        );
+        assert!(
+            text.contains("login for"),
+            "redaction ate the surrounding output too: {text:?}"
+        );
+    }
+
+    /// `StreamingRedactor` holds back a partial trailing line so a secret split
+    /// across two reads is still caught. Whatever it is holding when the
+    /// session ends must still reach the transcript.
+    #[cfg(feature = "pii-redaction")]
+    #[tokio::test]
+    async fn the_redactors_buffered_tail_is_flushed_at_eof() {
+        use crate::pii::{PiiRedactor, StreamingRedactor};
+
+        // No trailing newline: the redactor has no safe split point and holds
+        // the whole line back.
+        let (mut session, handle) = session_with("tail without a newline");
+        let recorder = Arc::new(Recorder::new(80, 24));
+        session.attach_redacted_recorder(&recorder, StreamingRedactor::new(PiiRedactor::new()));
+
+        session
+            .expect_timeout(Pattern::literal("tail"), Duration::from_secs(2))
+            .await
+            .expect("match");
+        assert_eq!(
+            transcript_of(&recorder).output_text(),
+            "",
+            "the tail should still be buffered at this point"
+        );
+
+        handle.signal_eof();
+        let _ = session.expect_eof_timeout(Duration::from_secs(2)).await;
+
+        assert!(
+            transcript_of(&recorder)
+                .output_text()
+                .contains("tail without a newline"),
+            "the buffered tail was never flushed: {:?}",
+            transcript_of(&recorder).output_text()
         );
     }
 }

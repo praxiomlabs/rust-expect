@@ -192,6 +192,15 @@ impl StreamingRedactor {
         }
     }
 
+    /// The underlying redactor.
+    ///
+    /// For callers that need a one-shot redaction with the same detector and
+    /// placeholders, without going through this type's buffering.
+    #[must_use]
+    pub const fn redactor(&self) -> &PiiRedactor {
+        &self.redactor
+    }
+
     /// Flush any remaining data.
     pub fn flush(&mut self) -> String {
         let remaining = std::mem::take(&mut self.buffer);

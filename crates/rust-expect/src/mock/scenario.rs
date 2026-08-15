@@ -163,6 +163,15 @@ impl Scenario {
 
         // Add steps
         for step in &self.steps {
+            // Gate the rest of the step on the client actually writing what
+            // the step expects. Without this the step's `expect` was dropped on
+            // the floor and every response was emitted unconditionally, so a
+            // scenario could not distinguish a client that answered correctly
+            // from one that sent nothing at all.
+            if let Some(expected) = &step.expect {
+                events.push(MockEvent::input_str(expected));
+            }
+
             // Add delay if specified
             if !step.delay.is_zero() {
                 events.push(MockEvent::delay(step.delay));

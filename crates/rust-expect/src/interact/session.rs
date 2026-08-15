@@ -29,7 +29,7 @@
 
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use super::hooks::{HookManager, InteractionEvent};
 use super::mode::InteractionMode;
@@ -321,6 +321,19 @@ where
     ///
     /// Returns an error if I/O fails or a pattern callback returns an error.
     pub async fn start(self) -> Result<InteractResult> {
+        self.start_with_io(tokio::io::stdin(), tokio::io::stdout())
+            .await
+    }
+
+    /// Start the interaction against an arbitrary terminal pair.
+    ///
+    /// [`start`](Self::start) is this with the process's own stdin and stdout.
+    /// Tests use it to drive the loop without a terminal.
+    pub(crate) async fn start_with_io(
+        self,
+        input: impl AsyncRead + Unpin + Send,
+        output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
         let mut runner = InteractRunner::new(
             self.transport.clone(),
             self.output_hooks,
@@ -333,7 +346,7 @@ where
             self.timeout,
             self.output_taps,
         );
-        runner.run().await
+        runner.run(input, output).await
     }
 }
 
@@ -362,6 +375,18 @@ pub enum InteractEndReason {
     Eof,
     /// An error occurred in a pattern callback.
     Error(String),
+}
+
+/// Wait until `deadline`, or forever if there is none.
+///
+/// The interaction's deadline has to be something the loop can park on. A
+/// check at the top of the loop only runs once some other branch has completed,
+/// which leaves the timeout at the mercy of whether anything else is happening.
+async fn wait_until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
 }
 
 /// Internal runner for the interaction loop.
@@ -434,31 +459,51 @@ where
         crate::session::events::emit_output(&self.output_taps, chunk);
     }
 
-    async fn run(&mut self) -> Result<InteractResult> {
+    /// Run the interaction loop over `input`/`output`.
+    ///
+    /// The terminal ends of the loop are parameters rather than direct calls to
+    /// `tokio::io::stdin`/`stdout` so the loop can be driven by a test. Nothing
+    /// else constructs an `InteractRunner`, so before this the loop could not be
+    /// exercised at all — which is why the defects below survived.
+    async fn run(
+        &mut self,
+        input: impl AsyncRead + Unpin + Send,
+        output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
         #[cfg(unix)]
         {
-            self.run_with_signals().await
+            self.run_with_signals(input, output).await
         }
         #[cfg(not(unix))]
         {
-            self.run_without_signals().await
+            self.run_without_signals(input, output).await
         }
     }
 
     /// Run the interaction loop with Unix signal handling (SIGWINCH).
     #[cfg(unix)]
     #[allow(clippy::significant_drop_tightening)]
-    async fn run_with_signals(&mut self) -> Result<InteractResult> {
-        use tokio::io::{BufReader, stdin, stdout};
-
+    async fn run_with_signals(
+        &mut self,
+        input: impl AsyncRead + Unpin + Send,
+        mut output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
         self.hook_manager.notify(&InteractionEvent::Started);
 
-        let mut stdin = BufReader::new(stdin());
+        let mut stdin = BufReader::new(input);
         let mut input_buf = [0u8; 1024];
         let mut output_buf = [0u8; 4096];
         let mut escape_buf: Vec<u8> = Vec::new();
 
-        let deadline = self.timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = self.timeout.map(|t| tokio::time::Instant::now() + t);
+
+        // The terminal's input is a branch of the loop, not a guarantee. It can
+        // be closed before the interaction starts — `interact()` with stdin
+        // redirected from `/dev/null` or from an exhausted pipe — or close
+        // partway through. Reading a closed input returns EOF instantly, so a
+        // loop that keeps polling it never parks: measured at 3.2 million reads
+        // in 300ms before this flag existed.
+        let mut input_open = true;
 
         // Set up SIGWINCH signal handler
         let mut sigwinch =
@@ -468,7 +513,7 @@ where
         loop {
             // Check timeout
             if let Some(deadline) = deadline
-                && std::time::Instant::now() >= deadline
+                && tokio::time::Instant::now() >= deadline
             {
                 self.hook_manager.notify(&InteractionEvent::Ended);
                 return Ok(InteractResult {
@@ -486,6 +531,17 @@ where
             let mut transport = self.transport.clone();
 
             tokio::select! {
+                // End the interaction at its deadline. Without this branch the
+                // timeout is only observed between other completions, so a
+                // quiet session with a closed terminal input never reaches it.
+                () = wait_until(deadline) => {
+                    self.hook_manager.notify(&InteractionEvent::Ended);
+                    return Ok(InteractResult {
+                        reason: InteractEndReason::Timeout,
+                        buffer: self.buffer.clone(),
+                    });
+                }
+
                 // Handle SIGWINCH (window resize)
                 _ = sigwinch.recv() => {
                     if let Some(result) = self.handle_resize().await? {
@@ -504,32 +560,9 @@ where
                             });
                         }
                         Ok(n) => {
-                            let data = &output_buf[..n];
-                            // Fire session-registered output taps on the raw
-                            // chunk before any hook-manager rewriting, so
-                            // taps see exactly what the PTY emitted.
-                            self.fire_taps(data);
-                            let processed = self.hook_manager.process_output(data.to_vec());
-
-                            self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));
-
-                            // Write to stdout
-                            let mut stdout = stdout();
-                            let _ = stdout.write_all(&processed).await;
-                            let _ = stdout.flush().await;
-
-                            // Append to buffer for pattern matching
-                            if let Ok(s) = std::str::from_utf8(&processed) {
-                                self.buffer.push_str(s);
-                                // Trim buffer if too large
-                                if self.buffer.len() > self.buffer_size {
-                                    let start = self.buffer.len() - self.buffer_size;
-                                    self.buffer = self.buffer[start..].to_string();
-                                }
-                            }
-
-                            // Check output patterns
-                            if let Some(result) = self.check_output_patterns().await? {
+                            if let Some(result) =
+                                self.handle_output(&output_buf[..n], &mut output).await?
+                            {
                                 return Ok(result);
                             }
                         }
@@ -540,47 +573,25 @@ where
                     }
                 }
 
-                // Read from stdin (user input)
-                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)) => {
+                // Read from the terminal (user input)
+                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)), if input_open => {
 
                     if let Ok(Ok(n)) = result {
                         if n == 0 {
+                            // The terminal's input closed. The child is still
+                            // running, so the interaction continues — but this
+                            // branch has nothing left to report and polling it
+                            // again would spin.
+                            input_open = false;
                             continue;
                         }
 
-                        let data = &input_buf[..n];
-
-                        // Check for escape sequence
-                        if let Some(ref esc) = self.escape_sequence {
-                            escape_buf.extend_from_slice(data);
-                            if escape_buf.ends_with(esc) {
-                                self.hook_manager.notify(&InteractionEvent::ExitRequested);
-                                self.hook_manager.notify(&InteractionEvent::Ended);
-                                return Ok(InteractResult {
-                                    reason: InteractEndReason::Escape,
-                                    buffer: self.buffer.clone(),
-                                });
-                            }
-                            // Keep only last N bytes where N is escape length
-                            if escape_buf.len() > esc.len() {
-                                escape_buf = escape_buf[escape_buf.len() - esc.len()..].to_vec();
-                            }
-                        }
-
-                        // Process through input hooks
-                        let processed = self.hook_manager.process_input(data.to_vec());
-
-                        self.hook_manager.notify(&InteractionEvent::Input(processed.clone()));
-
-                        // Check input patterns
-                        if let Some(result) = self.check_input_patterns(&processed).await? {
+                        if let Some(result) = self
+                            .handle_terminal_input(&input_buf[..n], &mut escape_buf)
+                            .await?
+                        {
                             return Ok(result);
                         }
-
-                        // Send to session
-                        let mut transport = self.transport.clone();
-                        transport.write_all(&processed).await.map_err(ExpectError::Io)?;
-                        transport.flush().await.map_err(ExpectError::Io)?;
                     }
                 }
             }
@@ -590,22 +601,28 @@ where
     /// Run the interaction loop without signal handling (non-Unix platforms).
     #[cfg(not(unix))]
     #[allow(clippy::significant_drop_tightening)]
-    async fn run_without_signals(&mut self) -> Result<InteractResult> {
-        use tokio::io::{BufReader, stdin, stdout};
-
+    async fn run_without_signals(
+        &mut self,
+        input: impl AsyncRead + Unpin + Send,
+        mut output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
         self.hook_manager.notify(&InteractionEvent::Started);
 
-        let mut stdin = BufReader::new(stdin());
+        let mut stdin = BufReader::new(input);
         let mut input_buf = [0u8; 1024];
         let mut output_buf = [0u8; 4096];
         let mut escape_buf: Vec<u8> = Vec::new();
 
-        let deadline = self.timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = self.timeout.map(|t| tokio::time::Instant::now() + t);
+
+        // See the Unix loop: a closed terminal input reads EOF instantly, so a
+        // branch that retries on EOF spins the loop.
+        let mut input_open = true;
 
         loop {
             // Check timeout
             if let Some(deadline) = deadline
-                && std::time::Instant::now() >= deadline
+                && tokio::time::Instant::now() >= deadline
             {
                 self.hook_manager.notify(&InteractionEvent::Ended);
                 return Ok(InteractResult {
@@ -623,6 +640,15 @@ where
             let mut transport = self.transport.clone();
 
             tokio::select! {
+                // End the interaction at its deadline. See the Unix loop.
+                () = wait_until(deadline) => {
+                    self.hook_manager.notify(&InteractionEvent::Ended);
+                    return Ok(InteractResult {
+                        reason: InteractEndReason::Timeout,
+                        buffer: self.buffer.clone(),
+                    });
+                }
+
                 // Read from session output
                 result = transport.read(&mut output_buf) => {
                     match result {
@@ -634,29 +660,9 @@ where
                             });
                         }
                         Ok(n) => {
-                            let data = &output_buf[..n];
-                            self.fire_taps(data);
-                            let processed = self.hook_manager.process_output(data.to_vec());
-
-                            self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));
-
-                            // Write to stdout
-                            let mut stdout = stdout();
-                            let _ = stdout.write_all(&processed).await;
-                            let _ = stdout.flush().await;
-
-                            // Append to buffer for pattern matching
-                            if let Ok(s) = std::str::from_utf8(&processed) {
-                                self.buffer.push_str(s);
-                                // Trim buffer if too large
-                                if self.buffer.len() > self.buffer_size {
-                                    let start = self.buffer.len() - self.buffer_size;
-                                    self.buffer = self.buffer[start..].to_string();
-                                }
-                            }
-
-                            // Check output patterns
-                            if let Some(result) = self.check_output_patterns().await? {
+                            if let Some(result) =
+                                self.handle_output(&output_buf[..n], &mut output).await?
+                            {
                                 return Ok(result);
                             }
                         }
@@ -667,51 +673,108 @@ where
                     }
                 }
 
-                // Read from stdin (user input)
-                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)) => {
+                // Read from the terminal (user input)
+                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)), if input_open => {
 
                     if let Ok(Ok(n)) = result {
                         if n == 0 {
+                            // The terminal's input closed. The child is still
+                            // running, so the interaction continues — but this
+                            // branch has nothing left to report and polling it
+                            // again would spin.
+                            input_open = false;
                             continue;
                         }
 
-                        let data = &input_buf[..n];
-
-                        // Check for escape sequence
-                        if let Some(ref esc) = self.escape_sequence {
-                            escape_buf.extend_from_slice(data);
-                            if escape_buf.ends_with(esc) {
-                                self.hook_manager.notify(&InteractionEvent::ExitRequested);
-                                self.hook_manager.notify(&InteractionEvent::Ended);
-                                return Ok(InteractResult {
-                                    reason: InteractEndReason::Escape,
-                                    buffer: self.buffer.clone(),
-                                });
-                            }
-                            // Keep only last N bytes where N is escape length
-                            if escape_buf.len() > esc.len() {
-                                escape_buf = escape_buf[escape_buf.len() - esc.len()..].to_vec();
-                            }
-                        }
-
-                        // Process through input hooks
-                        let processed = self.hook_manager.process_input(data.to_vec());
-
-                        self.hook_manager.notify(&InteractionEvent::Input(processed.clone()));
-
-                        // Check input patterns
-                        if let Some(result) = self.check_input_patterns(&processed).await? {
+                        if let Some(result) = self
+                            .handle_terminal_input(&input_buf[..n], &mut escape_buf)
+                            .await?
+                        {
                             return Ok(result);
                         }
-
-                        // Send to session
-                        let mut transport = self.transport.clone();
-                        transport.write_all(&processed).await.map_err(ExpectError::Io)?;
-                        transport.flush().await.map_err(ExpectError::Io)?;
                     }
                 }
             }
         }
+    }
+
+    /// Handle one chunk of child output: observers, hooks, the terminal, the
+    /// match buffer, then the output patterns.
+    ///
+    /// Returns `Some` if a pattern ended the interaction. Shared by the Unix and
+    /// non-Unix loops, which otherwise carried this verbatim twice.
+    async fn handle_output(
+        &mut self,
+        data: &[u8],
+        output: &mut (impl AsyncWrite + Unpin + Send),
+    ) -> Result<Option<InteractResult>> {
+        // Fire session-registered output taps on the raw chunk before any
+        // hook-manager rewriting, so taps see exactly what the PTY emitted.
+        self.fire_taps(data);
+        let processed = self.hook_manager.process_output(data.to_vec());
+
+        self.hook_manager
+            .notify(&InteractionEvent::Output(processed.clone()));
+
+        let _ = output.write_all(&processed).await;
+        let _ = output.flush().await;
+
+        // Append to buffer for pattern matching
+        if let Ok(s) = std::str::from_utf8(&processed) {
+            self.buffer.push_str(s);
+            // Trim buffer if too large
+            if self.buffer.len() > self.buffer_size {
+                let start = self.buffer.len() - self.buffer_size;
+                self.buffer = self.buffer[start..].to_string();
+            }
+        }
+
+        self.check_output_patterns().await
+    }
+
+    /// Handle one chunk of terminal input: the escape sequence, the input
+    /// hooks, the input patterns, then the child.
+    ///
+    /// Returns `Some` if the escape sequence or a pattern ended the
+    /// interaction. Shared by the Unix and non-Unix loops.
+    async fn handle_terminal_input(
+        &self,
+        data: &[u8],
+        escape_buf: &mut Vec<u8>,
+    ) -> Result<Option<InteractResult>> {
+        if let Some(ref esc) = self.escape_sequence {
+            escape_buf.extend_from_slice(data);
+            if escape_buf.ends_with(esc) {
+                self.hook_manager.notify(&InteractionEvent::ExitRequested);
+                self.hook_manager.notify(&InteractionEvent::Ended);
+                return Ok(Some(InteractResult {
+                    reason: InteractEndReason::Escape,
+                    buffer: self.buffer.clone(),
+                }));
+            }
+            // Keep only last N bytes where N is escape length
+            if escape_buf.len() > esc.len() {
+                let excess = escape_buf.len() - esc.len();
+                escape_buf.drain(..excess);
+            }
+        }
+
+        let processed = self.hook_manager.process_input(data.to_vec());
+
+        self.hook_manager
+            .notify(&InteractionEvent::Input(processed.clone()));
+
+        if let Some(result) = self.check_input_patterns(&processed).await? {
+            return Ok(Some(result));
+        }
+
+        let mut transport = self.transport.clone();
+        transport
+            .write_all(&processed)
+            .await
+            .map_err(ExpectError::Io)?;
+        transport.flush().await.map_err(ExpectError::Io)?;
+        Ok(None)
     }
 
     #[allow(clippy::significant_drop_tightening)]
@@ -863,5 +926,220 @@ where
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(all(test, feature = "mock"))]
+mod tests {
+    use std::future::Future;
+    use std::io;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+
+    use tokio::io::ReadBuf;
+
+    use super::*;
+    use crate::mock::MockTransport;
+    use crate::session::transport::SharedTransport;
+
+    /// A terminal input that is permanently at end-of-file, counting every read.
+    ///
+    /// A loop that treats "the user's terminal closed" as a reason to retry
+    /// reads this once per iteration, so the count measures how many times the
+    /// loop went round.
+    struct ClosedInput(Arc<AtomicUsize>);
+
+    impl AsyncRead for ClosedInput {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            // Returning with the buffer unfilled is EOF.
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// A shared transport over a mock, plus a handle for queueing output and
+    /// reading back what the interaction sent.
+    fn transport(output: &str) -> (SharedTransport<MockTransport>, MockTransport) {
+        let mock = MockTransport::new();
+        let handle = mock.clone();
+        handle.queue_output_str(output);
+        (SharedTransport::new(mock), handle)
+    }
+
+    /// Drive an interaction under a hard outer bound.
+    ///
+    /// An interaction that fails to end on its own should fail the test, not
+    /// hang the suite — which is what happened when the loop's deadline branch
+    /// was mutated away.
+    async fn bounded(interaction: impl Future<Output = Result<InteractResult>>) -> InteractResult {
+        tokio::time::timeout(Duration::from_secs(5), interaction)
+            .await
+            .expect("the interaction never ended on its own")
+            .expect("the interaction should end cleanly")
+    }
+
+    #[tokio::test]
+    async fn output_pattern_can_stop_the_interaction() {
+        let (shared, _handle) = transport("login: ");
+        let result = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .no_escape()
+                .with_timeout(Duration::from_secs(2))
+                .on_output("login:", |_| InteractAction::Stop)
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result.reason,
+                InteractEndReason::PatternStop { pattern_index: 0 }
+            ),
+            "expected a pattern stop, got {:?}",
+            result.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn an_output_hook_can_answer_the_child() {
+        let (shared, handle) = transport("password: ");
+        let result = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .on_output("password:", |ctx| ctx.send("hunter2\n"))
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert_eq!(handle.take_input_str(), "hunter2\n");
+        assert!(
+            matches!(result.reason, InteractEndReason::Timeout),
+            "expected a timeout, got {:?}",
+            result.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_input_reaches_the_child() {
+        let (shared, handle) = transport("");
+        let _ = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"whoami\n"[..], Vec::new()),
+        )
+        .await;
+
+        assert_eq!(handle.take_input_str(), "whoami\n");
+    }
+
+    #[tokio::test]
+    async fn child_output_reaches_the_terminal() {
+        let (shared, _handle) = transport("hello world");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b""[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(String::from_utf8_lossy(&terminal), "hello world");
+    }
+
+    #[tokio::test]
+    async fn eof_from_the_child_ends_the_interaction() {
+        let (shared, handle) = transport("bye\n");
+        handle.signal_eof();
+        let result = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .no_escape()
+                .with_timeout(Duration::from_secs(2))
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(result.reason, InteractEndReason::Eof),
+            "expected EOF, got {:?}",
+            result.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn the_escape_sequence_ends_the_interaction() {
+        let (shared, _handle) = transport("");
+        let result = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .with_escape(vec![0x1d])
+                .with_timeout(Duration::from_secs(2))
+                .start_with_io(&b"\x1d"[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(result.reason, InteractEndReason::Escape),
+            "expected an escape, got {:?}",
+            result.reason
+        );
+    }
+
+    /// A terminal whose input has closed is not a reason to spin. `interact()`
+    /// under `< /dev/null`, or with a pipe whose writer has gone, reads EOF
+    /// instantly on every pass, so a loop that retries never parks. Measured at
+    /// 3,192,359 reads in 300ms before the fix.
+    #[tokio::test]
+    async fn a_closed_terminal_input_is_read_once_not_spun_on() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (shared, _handle) = transport("");
+        let _ = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(ClosedInput(Arc::clone(&reads)), Vec::new()),
+        )
+        .await;
+
+        let count = reads.load(Ordering::Relaxed);
+        assert!(
+            count <= 5,
+            "closed terminal input was read {count} times in 300ms; the loop is spinning"
+        );
+    }
+
+    /// The deadline has to be part of what the loop waits on. Once a closed
+    /// terminal input stops driving iterations, nothing else wakes a quiet
+    /// session, so the configured timeout is the only thing that can end it.
+    #[tokio::test]
+    async fn a_quiet_interaction_still_times_out() {
+        let (shared, _handle) = transport("");
+        let started = std::time::Instant::now();
+        let result = bounded(
+            InteractBuilder::new(&shared, Vec::new())
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(ClosedInput(Arc::new(AtomicUsize::new(0))), Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(result.reason, InteractEndReason::Timeout),
+            "expected a timeout, got {:?}",
+            result.reason
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the timeout took {:?}, far past its 300ms deadline",
+            started.elapsed()
+        );
     }
 }

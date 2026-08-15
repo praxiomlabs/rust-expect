@@ -118,6 +118,14 @@ pub trait ProcessControl: Send {
     fn has_exited(&mut self) -> bool {
         !self.is_running()
     }
+
+    /// Give up ownership of the child, so dropping this handle leaves it
+    /// running.
+    ///
+    /// One-way. Backends that never owned the child in the first place — SSH
+    /// channels, mocks, plain streams — leave the default, which does nothing
+    /// because there is nothing to give up.
+    fn detach(&mut self) {}
 }
 
 /// A cloneable handle to a session's [`ProcessControl`].

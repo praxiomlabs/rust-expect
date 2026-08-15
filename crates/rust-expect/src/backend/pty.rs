@@ -444,6 +444,9 @@ pub struct PtyProcess {
     child: rust_pty::UnixPtyChild,
     /// Process ID.
     pid: u32,
+    /// Whether the caller has given up ownership, so dropping this handle
+    /// leaves the child running. See [`ProcessControl::detach`].
+    detached: bool,
 }
 
 #[cfg(unix)]
@@ -458,6 +461,40 @@ impl PtyProcess {
             Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
             Ok(Some(rust_pty::ExitStatus::Signaled(sig))) => Some(ProcessExitStatus::Signaled(sig)),
             Ok(None) | Err(_) => None,
+        }
+    }
+
+    /// Whether the child leads its own process group, and can therefore be
+    /// signalled as one.
+    ///
+    /// Checked rather than assumed. A child spawned with neither `new_session`
+    /// nor `controlling_terminal` inherits *our* process group, and `killpg` on
+    /// its pid would then signal this process and everything beside it. Both
+    /// options default to true, so in practice the child is its own leader —
+    /// but "in practice" is not a guard.
+    ///
+    /// Queried per call rather than cached at construction: `setsid` runs in the
+    /// child after fork, so there is no moment at spawn when the answer is
+    /// reliably known, and a child is free to move itself later.
+    #[allow(unsafe_code)]
+    fn leads_its_group(&self) -> bool {
+        // SAFETY: a read-only query; `getpgid` returns -1 for an unknown pid,
+        // which simply reads as "not a leader".
+        let pgid = unsafe { libc::getpgid(self.pid as i32) };
+        pgid == self.pid as i32
+    }
+
+    /// Deliver `signal` to the child's process group if it leads one, and to
+    /// the child alone otherwise. Returns the raw syscall result.
+    #[allow(unsafe_code)]
+    fn deliver(&self, signal: i32) -> i32 {
+        if self.leads_its_group() {
+            // SAFETY: pid is a live process that leads its own group, checked
+            // immediately above.
+            unsafe { libc::killpg(self.pid as i32, signal) }
+        } else {
+            // SAFETY: pid is a valid process ID from the spawned child.
+            unsafe { libc::kill(self.pid as i32, signal) }
         }
     }
 
@@ -481,22 +518,29 @@ impl ProcessControl for PtyProcess {
 
     /// Send a signal to the child process.
     ///
+    /// Delivered to the child's **process group**, which is the behaviour of the
+    /// terminal this session is: pressing Ctrl-C at a terminal signals the
+    /// foreground process group, not one process. Without it a shell's
+    /// background jobs survive `kill()` — measured, in
+    /// `tests/unix_process_ownership.rs`. Falls back to signalling the child
+    /// alone when it does not lead a group of its own — a child spawned with
+    /// neither `new_session` nor `controlling_terminal` inherits this process's
+    /// group, and signalling that group would hit us.
+    ///
     /// Guards against PID reuse (S1): if the child has already exited (and
     /// possibly been reaped, freeing its PID for the OS to recycle), this
-    /// returns [`ExpectError::SessionClosed`] rather than risk `libc::kill`
-    /// landing on an unrelated process. A raw `ESRCH` from `kill` maps to the
-    /// same. Other delivery failures (e.g. `EPERM`) surface unchanged as
-    /// [`ExpectError::Io`]. A raw `libc::kill` is used (rather than
+    /// returns [`ExpectError::SessionClosed`] rather than risk the signal
+    /// landing on an unrelated process. A raw `ESRCH` maps to the same. Other
+    /// delivery failures (e.g. `EPERM`) surface unchanged as
+    /// [`ExpectError::Io`]. Raw syscalls are used (rather than
     /// `rust_pty::PtyChild::signal`) to preserve arbitrary-signal support and
     /// keep the authoritative guard at this layer.
-    #[allow(unsafe_code)]
     fn signal(&mut self, signal: i32) -> Result<()> {
         // Authoritative pre-kill reap check via tokio's child handle.
         if self.try_wait().is_some() {
             return Err(ExpectError::SessionClosed);
         }
-        // SAFETY: pid is a valid process ID from the spawned child.
-        let result = unsafe { libc::kill(self.pid as i32, signal) };
+        let result = self.deliver(signal);
         if result == 0 {
             Ok(())
         } else {
@@ -526,6 +570,40 @@ impl ProcessControl for PtyProcess {
     fn has_exited(&mut self) -> bool {
         Self::has_exited(self)
     }
+
+    fn detach(&mut self) {
+        self.detached = true;
+    }
+}
+
+/// The child dies with the last handle to it.
+///
+/// Closing the PTY master already hangs up the child's controlling terminal,
+/// and that `SIGHUP` cleans up an ordinary child on its own — but only an
+/// ordinary one. A child that ignores `SIGHUP` outlived its session entirely,
+/// with nothing left holding it and nothing that would ever reap it (measured
+/// in `tests/unix_process_ownership.rs`). Relying on the hangup also meant the
+/// only cleanup in the crate was a side effect of field drop order that nothing
+/// stated or tested, and that any handle outliving the session would remove.
+///
+/// This runs when the last `ProcessHandle` goes, so a session and a transport
+/// that share one keep the child alive until both are gone.
+///
+/// `SIGKILL`, not a gentler signal followed by a wait: `Drop` cannot await, and
+/// a blocking grace period inside it would stall whatever thread is dropping
+/// the session. Callers who want the child asked nicely first have
+/// `Session::shutdown`, which can wait. Callers who want the child to outlive
+/// the session have `Session::detach`.
+#[cfg(unix)]
+impl Drop for PtyProcess {
+    fn drop(&mut self) {
+        if self.detached || self.try_wait().is_some() {
+            return;
+        }
+        // Best effort by construction: nothing here can report a failure to
+        // anyone, and a child that is already gone is the common case.
+        let _ = self.deliver(libc::SIGKILL);
+    }
 }
 
 #[cfg(unix)]
@@ -545,6 +623,7 @@ impl AsyncPty {
             process: ProcessHandle::new(PtyProcess {
                 child: handle.child,
                 pid,
+                detached: false,
             }),
             pid,
             dimensions,

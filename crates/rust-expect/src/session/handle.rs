@@ -1014,7 +1014,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             .map(|handle| handle.with(f))
     }
 
-    /// Send a signal to the child process.
+    /// Send a signal to the child process **group**.
+    ///
+    /// A session is a terminal, and a terminal signals its foreground process
+    /// group — pressing Ctrl-C does not signal one process. Signalling only the
+    /// leader left a shell's background jobs running behind it. Falls back to
+    /// the child alone on backends where it does not lead a group of its own.
     ///
     /// Does not touch the transport, so it succeeds while a read is in flight.
     ///
@@ -1027,7 +1032,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         self.with_control("signal", |c| c.signal(signal))?
     }
 
-    /// Kill the child process.
+    /// Kill the child process group.
+    ///
+    /// As [`signal`](Self::signal), with `SIGKILL`: descendants in the child's
+    /// process group go too.
     ///
     /// Does not touch the transport, so it succeeds while a read is in flight.
     ///
@@ -1037,6 +1045,23 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// process, or an error if the kill fails.
     pub fn kill(&self) -> Result<()> {
         self.with_control("kill", |c| c.kill())?
+    }
+
+    /// Give up ownership of the child, so dropping this session leaves it
+    /// running.
+    ///
+    /// A session kills its child process group when the last handle to it goes,
+    /// which is what makes "the child cannot outlive the session" true rather
+    /// than a hope. This is the opt-out, for a caller that means to launch
+    /// something and walk away. One-way, and it does not stop the child's
+    /// controlling terminal from hanging up when the PTY master closes — a
+    /// detached child that does not ignore `SIGHUP` will still take one.
+    ///
+    /// Does nothing on backends with no child process of their own.
+    pub fn detach(&mut self) {
+        if let Some(control) = self.control.as_ref() {
+            control.with(|c| c.detach());
+        }
     }
 
     /// Check whether the child process is still running.
@@ -1394,6 +1419,59 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
         let status = self.reap_exit_status().await;
         self.transition(|lifecycle| lifecycle.exited(status));
         Ok(status)
+    }
+
+    /// Shut the child down and reap it.
+    ///
+    /// The deterministic counterpart to dropping the session: ask the child's
+    /// process group to exit, give it the configured grace period
+    /// (`config.timeout.close`, 10s by default), then kill it and collect the
+    /// status. Returns as soon as the child is gone, so a child that exits
+    /// promptly costs nothing.
+    ///
+    /// This is where a graceful shutdown belongs, because it can wait. `Drop`
+    /// cannot — it kills outright rather than stalling the dropping thread on a
+    /// grace period.
+    ///
+    /// On Unix the first step is `SIGTERM` to the process group. On backends
+    /// with no signals it goes straight to the kill.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only if the child could not be reaped after being
+    /// killed. A child that has already exited is a success, not an error.
+    pub async fn shutdown(&mut self) -> Result<ProcessExitStatus> {
+        let grace = self.config.timeout.close;
+
+        // Already gone: nothing to ask, nothing to kill.
+        if self.is_running() == Some(false) {
+            return self.wait_timeout(grace).await;
+        }
+
+        #[cfg(unix)]
+        let asked = self.signal(libc::SIGTERM);
+        #[cfg(not(unix))]
+        let asked: Result<()> = Err(ExpectError::Unsupported {
+            operation: "signal",
+        });
+
+        // `SessionClosed` here means the child exited between the check above
+        // and the signal — a race this method exists to absorb, not an error.
+        match asked {
+            Ok(()) | Err(ExpectError::SessionClosed | ExpectError::Unsupported { .. }) => {}
+            Err(e) => return Err(e),
+        }
+
+        if let Ok(status) = self.wait_timeout(grace).await {
+            return Ok(status);
+        }
+
+        // It had its chance.
+        match self.kill() {
+            Ok(()) | Err(ExpectError::SessionClosed | ExpectError::Unsupported { .. }) => {}
+            Err(e) => return Err(e),
+        }
+        self.wait_timeout(grace).await
     }
 
     /// Reap the child's real exit status after EOF has been observed.

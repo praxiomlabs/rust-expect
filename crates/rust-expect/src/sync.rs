@@ -88,8 +88,11 @@ impl SyncSession {
     }
 
     /// Get the child process ID.
+    ///
+    /// `None` if the session has no controllable child process. A session
+    /// built by `spawn` always has one.
     #[must_use]
-    pub fn pid(&self) -> u32 {
+    pub fn pid(&self) -> Option<u32> {
         self.inner.pid()
     }
 
@@ -246,8 +249,11 @@ impl SyncSession {
     }
 
     /// Get the child process ID.
+    ///
+    /// `None` if the session has no controllable child process. A session
+    /// built by `spawn` always has one.
     #[must_use]
-    pub fn pid(&self) -> u32 {
+    pub fn pid(&self) -> Option<u32> {
         self.inner.pid()
     }
 
@@ -332,7 +338,7 @@ impl SyncSession {
 
     /// Check if the child process is still running.
     #[must_use]
-    pub fn is_running(&self) -> bool {
+    pub fn is_running(&self) -> Option<bool> {
         self.inner.is_running()
     }
 
@@ -439,7 +445,7 @@ mod tests {
             SyncSession::spawn("/bin/echo", &["hello"]).expect("Failed to spawn echo");
 
         // Verify PID is valid
-        assert!(session.pid() > 0);
+        assert!(session.pid().is_some_and(|p| p > 0));
 
         // Expect the output
         let m = session.expect("hello").expect("Failed to expect hello");

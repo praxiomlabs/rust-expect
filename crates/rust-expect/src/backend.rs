@@ -7,11 +7,11 @@ mod pty;
 
 // Export AsyncPty and PtyHandle for Unix platforms
 #[cfg(unix)]
-pub use pty::{AsyncPty, PtyHandle};
+pub use pty::{AsyncPty, PtyHandle, PtyProcess};
 pub use pty::{EnvMode, PtyConfig, PtySpawner, PtyTransport};
 // Export WindowsAsyncPty and WindowsPtyHandle for Windows platforms
 #[cfg(windows)]
-pub use pty::{WindowsAsyncPty, WindowsPtyHandle};
+pub use pty::{WindowsAsyncPty, WindowsPtyHandle, WindowsPtyProcess};
 
 // SSH backend is conditionally compiled
 #[cfg(feature = "ssh")]
@@ -34,6 +34,129 @@ pub trait ChildExit {
     /// the child is still running or its status cannot be determined.
     fn try_exit_status(&mut self) -> Option<crate::types::ProcessExitStatus> {
         None
+    }
+}
+
+/// Terminal-resize capability, independent of process control.
+///
+/// Resizing acts on the transport's terminal (the PTY master), not on the
+/// child, which is why it is a separate capability from [`ProcessControl`] —
+/// an SSH channel can be resizable without any local process to signal.
+pub trait Resizable {
+    /// Resize the terminal to `cols` × `rows`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying resize operation fails.
+    fn resize(&mut self, cols: u16, rows: u16) -> Result<(), crate::error::ExpectError>;
+
+    /// The transport's current dimensions as `(cols, rows)`.
+    fn dimensions(&self) -> (u16, u16);
+}
+
+/// Control over the child process behind a session, held separately from the
+/// transport that carries its I/O.
+///
+/// Keeping these operations off the transport is what lets a session be killed
+/// while a read is parked. Every method here is a short, non-blocking syscall,
+/// so implementations are held behind a plain [`std::sync::Mutex`] rather than
+/// an async one, and no implementation may block or await.
+pub trait ProcessControl: Send {
+    /// The child's process id, if the backend has one.
+    fn pid(&self) -> Option<u32>;
+
+    /// Send a signal to the child.
+    ///
+    /// The default implementation reports the operation as unsupported, which
+    /// is correct for every backend without Unix signal semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExpectError::Unsupported`] if the backend has no signals,
+    /// [`ExpectError::SessionClosed`] if the child has already exited, or an
+    /// I/O error if delivery fails.
+    ///
+    /// [`ExpectError::Unsupported`]: crate::error::ExpectError::Unsupported
+    /// [`ExpectError::SessionClosed`]: crate::error::ExpectError::SessionClosed
+    fn signal(&mut self, signal: i32) -> Result<(), crate::error::ExpectError> {
+        let _ = signal;
+        Err(crate::error::ExpectError::Unsupported {
+            operation: "signal",
+        })
+    }
+
+    /// Kill the child.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the child cannot be killed.
+    fn kill(&mut self) -> Result<(), crate::error::ExpectError>;
+
+    /// Whether the child is still running.
+    ///
+    /// Takes `&mut self` because the honest answer requires a non-blocking
+    /// reap. Unlike the pre-capability `Session::is_running`, this cannot
+    /// report a guess: there is no lock to fail to acquire.
+    fn is_running(&mut self) -> bool;
+
+    /// Non-blocking reap, as [`ChildExit::try_exit_status`].
+    ///
+    /// The child lives behind this handle, so backends whose transport also
+    /// implements [`ChildExit`] delegate here rather than keeping a second
+    /// child reference.
+    fn try_exit_status(&mut self) -> Option<crate::types::ProcessExitStatus> {
+        None
+    }
+
+    /// Whether the child has been observed to exit, by any status the backend
+    /// can report.
+    ///
+    /// Deliberately distinct from `!is_running()`: this is the guard a
+    /// transport's `poll_write` uses, and it must answer "has it gone" even for
+    /// exit forms [`Self::try_exit_status`] declines to map. Backends with no
+    /// such gap can leave the default.
+    fn has_exited(&mut self) -> bool {
+        !self.is_running()
+    }
+}
+
+/// A cloneable handle to a session's [`ProcessControl`].
+///
+/// Shared between the session and, where a backend needs it, the transport —
+/// `AsyncPty::poll_write` consults it to turn a write to an exited child into
+/// `BrokenPipe`. The inner lock is only ever held for the duration of one
+/// syscall and never across an await, so contention here does not park a task.
+#[derive(Clone)]
+pub struct ProcessHandle(std::sync::Arc<std::sync::Mutex<dyn ProcessControl + Send>>);
+
+impl ProcessHandle {
+    /// Wrap a [`ProcessControl`] implementation in a shareable handle.
+    pub fn new<P: ProcessControl + Send + 'static>(control: P) -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(control)))
+    }
+
+    /// Run `f` against the control implementation.
+    ///
+    /// Recovers from lock poisoning rather than propagating it: a panic in one
+    /// control call must not make a session permanently unkillable. This
+    /// mirrors the screen mutex's recovery in `session::handle`.
+    pub fn with<R>(&self, f: impl FnOnce(&mut (dyn ProcessControl + Send)) -> R) -> R {
+        let mut guard = match self.0.lock() {
+            Ok(g) => g,
+            Err(poison) => {
+                tracing::warn!("process-control mutex was poisoned; recovering inner state");
+                poison.into_inner()
+            }
+        };
+        f(&mut *guard)
+    }
+}
+
+impl std::fmt::Debug for ProcessHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProcessHandle")
+            .field("pid", &self.with(|c| c.pid()))
+            .finish_non_exhaustive()
     }
 }
 

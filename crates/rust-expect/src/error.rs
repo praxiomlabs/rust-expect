@@ -210,6 +210,18 @@ pub enum ExpectError {
     #[error("session is closed")]
     SessionClosed,
 
+    /// The session's backend does not provide the requested capability.
+    ///
+    /// Returned by process-control operations on a session whose transport is
+    /// not backed by a local child process (a mock stream, an SSH channel), and
+    /// by operations a platform does not implement — `signal` on Windows, where
+    /// there is no signal to send.
+    #[error("{operation} is not supported by this session's backend")]
+    Unsupported {
+        /// The operation that is unavailable, e.g. `"signal"`.
+        operation: &'static str,
+    },
+
     /// Session not found.
     #[error("session with id {id} not found")]
     SessionNotFound {

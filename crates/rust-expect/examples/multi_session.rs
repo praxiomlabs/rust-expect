@@ -117,8 +117,8 @@ async fn main() -> Result<()> {
         .expect_timeout(Pattern::shell_prompt(), Duration::from_secs(2))
         .await?;
 
-    println!("   Session 1 PID: {}", session1.pid());
-    println!("   Session 2 PID: {}", session2.pid());
+    println!("   Session 1 PID: {:?}", session1.pid());
+    println!("   Session 2 PID: {:?}", session2.pid());
 
     // Send commands to both
     session1.send_line("echo 'Hello from session 1'").await?;

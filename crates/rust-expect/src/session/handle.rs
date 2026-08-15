@@ -11,9 +11,9 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
-use crate::backend::ChildExit;
 #[cfg(unix)]
 use crate::backend::{AsyncPty, PtyConfig, PtySpawner};
+use crate::backend::{ChildExit, ProcessControl, ProcessHandle, Resizable};
 #[cfg(windows)]
 use crate::backend::{PtyConfig, PtySpawner, WindowsAsyncPty};
 use crate::config::SessionConfig;
@@ -78,6 +78,13 @@ fn lock_screen(screen: &Arc<StdMutex<Screen>>) -> MutexGuard<'_, Screen> {
 pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     /// The underlying transport (PTY, SSH channel, etc.).
     transport: Arc<Mutex<T>>,
+    /// Control over the child process, held separately from the transport so
+    /// that killing or signalling never waits on a read.
+    ///
+    /// `None` for transports with no local child process — mock streams, SSH
+    /// channels, duplex pipes — whose process-control calls report
+    /// [`ExpectError::Unsupported`].
+    control: Option<ProcessHandle>,
     /// Session configuration.
     config: SessionConfig,
     /// Pattern matcher.
@@ -132,12 +139,19 @@ fn write_error_means_closed(err: &std::io::Error) -> bool {
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// Create a new session with the given transport.
+    ///
+    /// The session has no process control: [`signal`](Self::signal),
+    /// [`kill`](Self::kill) and friends report
+    /// [`ExpectError::Unsupported`] until one is attached with
+    /// [`with_process_control`](Self::with_process_control). `Session::spawn`
+    /// attaches one for you.
     pub fn new(transport: T, config: SessionConfig) -> Self {
         let buffer_size = config.buffer.max_size;
         let mut matcher = Matcher::new(buffer_size);
         matcher.set_default_timeout(config.timeout.default);
         Self {
             transport: Arc::new(Mutex::new(transport)),
+            control: None,
             config,
             matcher,
             pattern_manager: PatternManager::new(),
@@ -882,12 +896,76 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         self.matcher.try_match(pattern)
     }
 
-    /// Get the underlying transport.
+    /// Attach process control to this session.
     ///
-    /// Use with caution as direct access bypasses session management.
+    /// Sessions built by `Session::spawn` already have one. This is for
+    /// callers who construct a session from a transport of their own with
+    /// [`Session::new`] and can supply a [`ProcessControl`] for it.
     #[must_use]
-    pub const fn transport(&self) -> &Arc<Mutex<T>> {
-        &self.transport
+    pub fn with_process_control(mut self, control: ProcessHandle) -> Self {
+        self.control = Some(control);
+        self
+    }
+
+    /// Run `f` against this session's process control.
+    ///
+    /// Central to the capability split: every process-control method routes
+    /// through here and therefore touches `control`, never `transport`. That
+    /// is what lets a session be killed while a read is parked on the
+    /// transport lock.
+    fn with_control<R>(
+        &self,
+        operation: &'static str,
+        f: impl FnOnce(&mut (dyn ProcessControl + Send)) -> R,
+    ) -> Result<R> {
+        self.control
+            .as_ref()
+            .ok_or(ExpectError::Unsupported { operation })
+            .map(|handle| handle.with(f))
+    }
+
+    /// Send a signal to the child process.
+    ///
+    /// Does not touch the transport, so it succeeds while a read is in flight.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExpectError::Unsupported`] if the backend has no child
+    /// process or no signals (Windows), [`ExpectError::SessionClosed`] if the
+    /// child has already exited, or an I/O error if delivery fails.
+    pub fn signal(&self, signal: i32) -> Result<()> {
+        self.with_control("signal", |c| c.signal(signal))?
+    }
+
+    /// Kill the child process.
+    ///
+    /// Does not touch the transport, so it succeeds while a read is in flight.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ExpectError::Unsupported`] if the backend has no child
+    /// process, or an error if the kill fails.
+    pub fn kill(&self) -> Result<()> {
+        self.with_control("kill", |c| c.kill())?
+    }
+
+    /// Check whether the child process is still running.
+    ///
+    /// Performs a non-blocking reap, so it reports the truth immediately after
+    /// the child exits. Returns `None` when the backend has no child process
+    /// to ask about — previously this could not be distinguished from a live
+    /// child, because a failed lock acquisition was reported as "running".
+    #[must_use]
+    pub fn is_running(&self) -> Option<bool> {
+        self.with_control("is_running", |c| c.is_running()).ok()
+    }
+
+    /// Get the child process ID.
+    ///
+    /// Returns `None` when the backend has no child process.
+    #[must_use]
+    pub fn pid(&self) -> Option<u32> {
+        self.with_control("pid", |c| c.pid()).ok().flatten()
     }
 
     /// Start an interactive session with pattern hooks.
@@ -1251,6 +1329,35 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
     }
 }
 
+impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Resizable> Session<T> {
+    /// Resize the terminal.
+    ///
+    /// Also resizes the attached screen (if any) so it stays consistent
+    /// with the PTY. Without this, screen-aware assertions would drift
+    /// after a resize.
+    ///
+    /// Available for any transport with the [`Resizable`] capability, rather
+    /// than being written once per platform.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resize ioctl fails.
+    pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
+        {
+            let mut transport = self.transport.lock().await;
+            transport.resize(cols, rows)?;
+        }
+        self.config.dimensions = (cols, rows);
+        #[cfg(feature = "screen")]
+        if let Some(screen) = self.screen.as_ref()
+            && let Ok(mut s) = screen.lock()
+        {
+            s.resize(rows as usize, cols as usize);
+        }
+        Ok(())
+    }
+}
+
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> std::fmt::Debug for Session<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Session")
@@ -1318,94 +1425,13 @@ impl Session<AsyncPty> {
         let async_pty = AsyncPty::from_handle(handle)
             .map_err(|e| ExpectError::io_context("creating async PTY wrapper", e))?;
 
-        // Create the session
-        let mut session = Self::new(async_pty, config);
+        // Create the session, taking process control off the transport so it
+        // is reachable while a read holds the transport lock.
+        let control = async_pty.process_handle();
+        let mut session = Self::new(async_pty, config).with_process_control(control);
         session.state = SessionState::Running;
 
         Ok(session)
-    }
-
-    /// Get the child process ID.
-    #[must_use]
-    pub fn pid(&self) -> u32 {
-        // We need to access the inner transport's pid
-        // For now, use the blocking lock since we know it's not contended
-        // during a sync call like this
-        if let Ok(transport) = self.transport.try_lock() {
-            transport.pid()
-        } else {
-            0
-        }
-    }
-
-    /// Resize the terminal.
-    ///
-    /// Also resizes the attached screen (if any) so it stays consistent
-    /// with the PTY. Without this, screen-aware assertions would drift
-    /// after a resize.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the resize ioctl fails.
-    pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
-        {
-            let mut transport = self.transport.lock().await;
-            transport.resize(cols, rows)?;
-        }
-        self.config.dimensions = (cols, rows);
-        #[cfg(feature = "screen")]
-        if let Some(screen) = self.screen.as_ref()
-            && let Ok(mut s) = screen.lock()
-        {
-            s.resize(rows as usize, cols as usize);
-        }
-        Ok(())
-    }
-
-    /// Send a signal to the child process.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if sending the signal fails.
-    pub fn signal(&self, signal: i32) -> Result<()> {
-        if let Ok(mut transport) = self.transport.try_lock() {
-            transport.signal(signal)
-        } else {
-            Err(ExpectError::io_context(
-                "sending signal to process",
-                std::io::Error::new(std::io::ErrorKind::WouldBlock, "transport is locked"),
-            ))
-        }
-    }
-
-    /// Kill the child process.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if killing the process fails.
-    pub fn kill(&self) -> Result<()> {
-        if let Ok(mut transport) = self.transport.try_lock() {
-            transport.kill()
-        } else {
-            Err(ExpectError::io_context(
-                "killing process",
-                std::io::Error::new(std::io::ErrorKind::WouldBlock, "transport is locked"),
-            ))
-        }
-    }
-
-    /// Check whether the child process is still running.
-    ///
-    /// Performs a non-blocking `waitpid(WNOHANG)` peek, so it reports the truth
-    /// immediately after the child exits. The portable counterpart of
-    /// [`Session::<WindowsAsyncPty>::is_running`].
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        if let Ok(mut transport) = self.transport.try_lock() {
-            transport.is_running()
-        } else {
-            true // Assume running if we can't check
-        }
     }
 }
 
@@ -1464,57 +1490,13 @@ impl Session<WindowsAsyncPty> {
         // Wrap in WindowsAsyncPty for async I/O
         let async_pty = WindowsAsyncPty::from_handle(handle);
 
-        // Create the session
-        let mut session = Self::new(async_pty, config);
+        // Create the session, taking process control off the transport so it
+        // is reachable while a read holds the transport lock.
+        let control = async_pty.process_handle();
+        let mut session = Self::new(async_pty, config).with_process_control(control);
         session.state = SessionState::Running;
 
         Ok(session)
-    }
-
-    /// Get the child process ID.
-    #[must_use]
-    pub fn pid(&self) -> u32 {
-        if let Ok(transport) = self.transport.try_lock() {
-            transport.pid()
-        } else {
-            0
-        }
-    }
-
-    /// Resize the terminal.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the resize operation fails.
-    pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
-        let mut transport = self.transport.lock().await;
-        transport.resize(cols, rows)
-    }
-
-    /// Check if the child process is still running.
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        if let Ok(transport) = self.transport.try_lock() {
-            transport.is_running()
-        } else {
-            true // Assume running if we can't check
-        }
-    }
-
-    /// Kill the child process.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if killing the process fails.
-    pub fn kill(&self) -> Result<()> {
-        if let Ok(mut transport) = self.transport.try_lock() {
-            transport.kill()
-        } else {
-            Err(ExpectError::io_context(
-                "killing process",
-                std::io::Error::new(std::io::ErrorKind::WouldBlock, "transport is locked"),
-            ))
-        }
     }
 }
 
@@ -1563,6 +1545,103 @@ fn is_pty_eof_error(e: &std::io::Error) -> bool {
     }
 
     false
+}
+
+/// Process control must not contend with transport I/O (AR-002).
+///
+/// Each test holds the transport lock — standing in for a read parked on it —
+/// and then exercises a control operation. Before the capability split every
+/// one of these went through `transport.try_lock()` and so failed: `signal`
+/// and `kill` returned `WouldBlock`, `is_running` answered `true` without
+/// checking, and `pid` answered `0`.
+#[cfg(all(test, unix))]
+mod process_control_tests {
+    use std::time::Duration;
+
+    use super::Session;
+    use crate::error::ExpectError;
+
+    /// Spawn a child that will outlive the test unless killed.
+    async fn sleeper() -> Session<crate::backend::AsyncPty> {
+        Session::spawn("/bin/sleep", &["30"])
+            .await
+            .expect("spawn sleep")
+    }
+
+    #[tokio::test]
+    async fn kill_succeeds_while_the_transport_lock_is_held() {
+        let session = sleeper().await;
+        let guard = session.transport.lock().await;
+
+        session.kill().expect("kill must not wait on the transport");
+
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn signal_succeeds_while_the_transport_lock_is_held() {
+        let session = sleeper().await;
+        let guard = session.transport.lock().await;
+
+        session
+            .signal(libc::SIGTERM)
+            .expect("signal must not wait on the transport");
+
+        drop(guard);
+    }
+
+    #[tokio::test]
+    async fn liveness_and_pid_are_answered_while_the_transport_lock_is_held() {
+        let session = sleeper().await;
+        let expected_pid = session.pid().expect("a spawned session has a pid");
+        let guard = session.transport.lock().await;
+
+        assert_eq!(session.is_running(), Some(true));
+        assert_eq!(session.pid(), Some(expected_pid));
+
+        drop(guard);
+        session.kill().expect("kill");
+    }
+
+    /// The point of returning `Option` rather than `bool`: liveness now
+    /// reports what it observed, and observation no longer depends on a lock.
+    #[tokio::test]
+    async fn liveness_reports_exit_rather_than_assuming_running() {
+        let session = sleeper().await;
+        session.kill().expect("kill");
+
+        // The reap is not instantaneous; poll briefly for the observed exit.
+        for _ in 0..50u32 {
+            if session.is_running() == Some(false) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("killed child still reported as running");
+    }
+
+    /// A transport with no child process says so, instead of pretending.
+    #[tokio::test]
+    #[cfg(feature = "mock")]
+    async fn control_without_a_child_reports_unsupported() {
+        let session = Session::new(
+            crate::mock::MockTransport::new(),
+            crate::config::SessionConfig::default(),
+        );
+
+        assert!(matches!(
+            session.kill(),
+            Err(ExpectError::Unsupported { operation: "kill" })
+        ));
+        assert!(matches!(
+            session.signal(libc::SIGTERM),
+            Err(ExpectError::Unsupported {
+                operation: "signal"
+            })
+        ));
+        assert_eq!(session.is_running(), None);
+        assert_eq!(session.pid(), None);
+    }
 }
 
 /// Before/after ambient-pattern behavior driven through the real expect loop

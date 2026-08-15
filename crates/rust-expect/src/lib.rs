@@ -110,7 +110,9 @@ pub use pii::{PiiDetector, PiiRedactor, PiiType};
 #[cfg(feature = "screen")]
 pub use screen::{Attributes, Cell, ScreenBuffer};
 pub use send::{AnsiSend, BasicSend, HumanTyper, Sender};
-pub use session::{OutputTap, QuickSession, Session, SessionBuilder, TapId};
+pub use session::{
+    EventSubscriber, OutputTap, QuickSession, Session, SessionBuilder, SessionEvent, TapId,
+};
 pub use sync::{SyncSession, block_on};
 pub use transcript::{Player, Recorder, Transcript, TranscriptEvent};
 pub use types::{

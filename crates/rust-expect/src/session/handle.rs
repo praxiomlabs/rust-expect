@@ -24,34 +24,11 @@ use crate::expect::{
 use crate::interact::InteractBuilder;
 #[cfg(feature = "screen")]
 use crate::screen::Screen;
+pub use crate::session::events::{OutputTap, TapId};
+use crate::session::events::{SessionEvent, Subscribers};
 use crate::session::state::SessionLifecycle;
 use crate::session::transport::SharedTransport;
 use crate::types::{ControlChar, Dimensions, Match, ProcessExitStatus, SessionId, SessionState};
-
-/// Callback invoked for every chunk of bytes read from the transport.
-///
-/// Taps observe the raw byte stream as it arrives, after it is appended to the
-/// matcher buffer but before any pattern matching is performed. They are the
-/// foundation for screen emulation, transcript recording, and other features
-/// that need to see output as it happens.
-pub type OutputTap = Arc<dyn Fn(&[u8]) + Send + Sync>;
-
-/// Opaque handle identifying a registered output tap. Returned by
-/// [`Session::add_output_tap`] and accepted by
-/// [`Session::remove_output_tap`].
-///
-/// Backed by `u64`. The id space is large enough that wraparound is not
-/// reachable in practice; the implementation uses a non-wrapping `+= 1`
-/// so a hypothetical exhaustion would surface as a loud panic instead of
-/// silently colliding with a still-registered tap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TapId(u64);
-
-impl std::fmt::Display for TapId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "tap#{}", self.0)
-    }
-}
 
 /// Lock the screen mutex, recovering from poisoning.
 ///
@@ -104,11 +81,8 @@ pub struct Session<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> {
     lifecycle: SessionLifecycle,
     /// Unique session identifier.
     id: SessionId,
-    /// Output taps invoked on every chunk of bytes read from the transport,
-    /// stored as (id, callback) so they can be removed individually.
-    output_taps: Vec<(TapId, OutputTap)>,
-    /// Monotonic counter for assigning new `TapId`s.
-    next_tap_id: u64,
+    /// Registered output taps and event subscribers, in registration order.
+    subscribers: Subscribers,
     /// Attached virtual terminal screen, fed from an output tap.
     #[cfg(feature = "screen")]
     screen: Option<Arc<StdMutex<Screen>>>,
@@ -164,8 +138,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             pattern_manager: PatternManager::new(),
             lifecycle: SessionLifecycle::new(),
             id: SessionId::new(),
-            output_taps: Vec::new(),
-            next_tap_id: 0,
+            subscribers: Subscribers::new(),
             #[cfg(feature = "screen")]
             screen: None,
             #[cfg(feature = "screen")]
@@ -223,22 +196,67 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     where
         F: Fn(&[u8]) + Send + Sync + 'static,
     {
-        let id = TapId(self.next_tap_id);
-        // Plain addition (not wrapping_add): on the astronomically unlikely
-        // event of u64 exhaustion on a single session, we'd rather panic
-        // loudly than silently issue a colliding id.
-        self.next_tap_id += 1;
-        self.output_taps.push((id, Arc::new(f)));
-        id
+        self.subscribers.add_tap(Arc::new(f))
+    }
+
+    /// Register a callback invoked for every [`SessionEvent`] this session
+    /// emits.
+    ///
+    /// The general form of [`add_output_tap`](Self::add_output_tap): a tap sees
+    /// only [`SessionEvent::Output`], while a subscriber also sees input,
+    /// resizes, state transitions and read errors. Input in particular has no
+    /// other observation point — it is what makes transcript recording of what
+    /// was *sent* possible.
+    ///
+    /// Subscribers are invoked synchronously in registration order, sharing one
+    /// order with output taps, at the moment the event occurs. They should be
+    /// cheap and non-blocking; use a channel if expensive work is required. A
+    /// panicking subscriber is caught and logged, and the rest still run.
+    ///
+    /// Remove with [`remove_output_tap`](Self::remove_output_tap), which
+    /// accepts the returned id.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use rust_expect::SessionEvent;
+    /// session.add_event_subscriber(|event| match event {
+    ///     SessionEvent::Input(bytes) => eprintln!("sent {} bytes", bytes.len()),
+    ///     SessionEvent::StateChanged { from, to } => eprintln!("{from} -> {to}"),
+    ///     _ => {}
+    /// });
+    /// ```
+    pub fn add_event_subscriber<F>(&mut self, f: F) -> TapId
+    where
+        F: Fn(&SessionEvent<'_>) + Send + Sync + 'static,
+    {
+        self.subscribers.add_subscriber(Arc::new(f))
+    }
+
+    /// Emit an event to every registered tap and subscriber.
+    fn emit(&self, event: &SessionEvent<'_>) {
+        self.subscribers.emit(event);
+    }
+
+    /// Apply a state transition and emit [`SessionEvent::StateChanged`] if it
+    /// changed anything.
+    ///
+    /// Every transition goes through here, so no state change can reach a
+    /// caller without also reaching subscribers.
+    fn transition(&mut self, apply: impl FnOnce(&mut SessionLifecycle)) {
+        let from = self.lifecycle.state();
+        apply(&mut self.lifecycle);
+        let to = self.lifecycle.state();
+        if from != to {
+            self.emit(&SessionEvent::StateChanged { from, to });
+        }
     }
 
     /// Remove a previously registered output tap by its [`TapId`]. Returns
     /// `true` if a tap was removed, `false` if the id was not registered
     /// (already removed, or never existed).
     pub fn remove_output_tap(&mut self, id: TapId) -> bool {
-        let len_before = self.output_taps.len();
-        self.output_taps.retain(|(existing, _)| *existing != id);
-        self.output_taps.len() != len_before
+        self.subscribers.remove(id)
     }
 
     /// Iterate the callbacks for all currently registered output taps.
@@ -250,7 +268,20 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// [`add_output_tap`](Self::add_output_tap)'s return value if you
     /// need the id).
     pub fn output_tap_callbacks(&self) -> impl Iterator<Item = &OutputTap> {
-        self.output_taps.iter().map(|(_, cb)| cb)
+        self.subscribers.taps()
+    }
+
+    /// How many observers are registered on this session, counting output taps
+    /// and event subscribers alike.
+    ///
+    /// [`output_tap_callbacks`](Self::output_tap_callbacks) counts only taps,
+    /// so it does not see internally-registered subscribers such as the one
+    /// [`attach_screen`](Self::attach_screen) installs. This does. Exposed for
+    /// instrumentation and for checking that a subsystem cleaned up after
+    /// itself.
+    #[must_use]
+    pub const fn observer_count(&self) -> usize {
+        self.subscribers.len()
     }
 
     /// Attach a virtual terminal screen to this session.
@@ -293,14 +324,29 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         // Replace any previous screen + its tap so we don't leak callbacks.
         self.detach_screen();
         let screen = Arc::new(StdMutex::new(Screen::new(rows as usize, cols as usize)));
-        let screen_for_tap = screen.clone();
-        let id = self.add_output_tap(move |chunk| {
-            // Reuse the shared poison-recovery helper so the tap-side and
-            // read-side recovery logic stays in lockstep.
-            lock_screen(&screen_for_tap).process(chunk);
-        });
+        let id = self.subscribe_screen(&screen);
         self.screen = Some(screen);
         self.screen_tap_id = Some(id);
+    }
+
+    /// Subscribe a screen to the session's event stream.
+    ///
+    /// The screen consumes `Output` (fed to its ANSI parser) and `Resize` (so
+    /// it keeps the shape of the terminal it mirrors). It was an output tap
+    /// before the event stream existed, which meant `resize_pty` had to poke it
+    /// directly on the side; now both arrive by the same route.
+    #[cfg(feature = "screen")]
+    fn subscribe_screen(&mut self, screen: &Arc<StdMutex<Screen>>) -> TapId {
+        let screen = screen.clone();
+        self.add_event_subscriber(move |event| match event {
+            // Reuse the shared poison-recovery helper so the subscriber-side
+            // and read-side recovery logic stays in lockstep.
+            SessionEvent::Output(chunk) => lock_screen(&screen).process(chunk),
+            SessionEvent::Resize { cols, rows } => {
+                lock_screen(&screen).resize(*rows as usize, *cols as usize);
+            }
+            _ => {}
+        })
     }
 
     /// Attach a screen with a bounded scrollback history, sized to the
@@ -322,10 +368,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
             cols as usize,
             scrollback_lines,
         )));
-        let screen_for_tap = screen.clone();
-        let id = self.add_output_tap(move |chunk| {
-            lock_screen(&screen_for_tap).process(chunk);
-        });
+        let id = self.subscribe_screen(&screen);
         self.screen = Some(screen);
         self.screen_tap_id = Some(id);
     }
@@ -454,13 +497,16 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         };
 
         match result {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.emit(&SessionEvent::Input(data));
+                Ok(())
+            }
             // A write to an already-exited child's PTY fails once the slave end
             // closes (EIO on Unix, BrokenPipe on Windows). Surface that as a
             // clean SessionClosed rather than a raw OS error, and mark the
             // session closed so subsequent sends short-circuit immediately.
             Err(e) if write_error_means_closed(&e) => {
-                self.lifecycle.closed();
+                self.transition(SessionLifecycle::closed);
                 Err(ExpectError::SessionClosed)
             }
             Err(e) => Err(ExpectError::io_context("writing to process", e)),
@@ -855,27 +901,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
 
         match tokio::time::timeout(timeout, transport.read(&mut buf)).await {
             Ok(Ok(0)) => {
-                self.lifecycle.reached_eof();
+                self.transition(SessionLifecycle::reached_eof);
                 Ok(0)
             }
             Ok(Ok(n)) => {
                 self.matcher.append(&buf[..n]);
-                // Run taps in catch_unwind so a panicking user callback can't
-                // unwind across our await boundary or poison subsequent taps.
-                // We log and continue rather than propagate — taps are
-                // observers, not error sources.
-                for (id, tap) in &self.output_taps {
-                    let tap_clone = tap.clone();
-                    let chunk = &buf[..n];
-                    let result =
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap_clone(chunk)));
-                    if result.is_err() {
-                        tracing::warn!(
-                            %id,
-                            "output tap panicked; the panic was caught and other taps continue"
-                        );
-                    }
-                }
+                self.emit(&SessionEvent::Output(&buf[..n]));
                 Ok(n)
             }
             Ok(Err(e)) => {
@@ -883,14 +914,17 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
                 // (i.e., the child process has terminated). Treat this as EOF.
                 // See: https://bugs.python.org/issue5380
                 if is_pty_eof_error(&e) {
-                    self.lifecycle.reached_eof();
+                    self.transition(SessionLifecycle::reached_eof);
                     Ok(0)
                 } else {
                     // Not EOF dressed up as an error: the session cannot read
                     // past this, so it ends here rather than leaving the state
                     // reporting a healthy session the caller can retry.
-                    self.lifecycle.failed(e.kind());
-                    Err(ExpectError::io_context("reading from process", e))
+                    let kind = e.kind();
+                    self.transition(|lifecycle| lifecycle.failed(kind));
+                    let error = ExpectError::io_context("reading from process", e);
+                    self.emit(&SessionEvent::Error(&error));
+                    Err(error)
                 }
             }
             Err(_) => {
@@ -1010,16 +1044,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     where
         T: 'static,
     {
-        // Snapshot the currently registered output taps so the interact
-        // read loop can fire them on every chunk. Without this, attached
-        // screens and transcript recorders would silently freeze for the
-        // duration of interact().
-        let taps: Vec<OutputTap> = self
-            .output_taps
-            .iter()
-            .map(|(_, tap)| tap.clone())
-            .collect();
-        InteractBuilder::new(&self.transport, taps)
+        // Snapshot the currently registered observers so the interact read
+        // loop can fire them on every chunk. Without this, attached screens and
+        // transcript recorders would silently freeze for the duration of
+        // interact(). The snapshot is why interact() cannot see observers
+        // registered while it runs — see AR-003.
+        InteractBuilder::new(&self.transport, self.subscribers.as_subscribers())
     }
 
     /// Run a dialog on this session.
@@ -1281,7 +1311,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
         }
 
         let status = self.reap_exit_status().await;
-        self.lifecycle.exited(status);
+        self.transition(|lifecycle| lifecycle.exited(status));
         Ok(status)
     }
 
@@ -1315,7 +1345,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + ChildExit> Session<T> {
         }
 
         let status = self.reap_exit_status().await;
-        self.lifecycle.exited(status);
+        self.transition(|lifecycle| lifecycle.exited(status));
         Ok(status)
     }
 
@@ -1362,12 +1392,9 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Resizable> Session<T> {
     pub async fn resize_pty(&mut self, cols: u16, rows: u16) -> Result<()> {
         self.transport.with(|t| t.resize(cols, rows))?;
         self.config.dimensions = (cols, rows);
-        #[cfg(feature = "screen")]
-        if let Some(screen) = self.screen.as_ref()
-            && let Ok(mut s) = screen.lock()
-        {
-            s.resize(rows as usize, cols as usize);
-        }
+        // An attached screen resizes by subscribing to this, rather than by
+        // being poked here.
+        self.emit(&SessionEvent::Resize { cols, rows });
         Ok(())
     }
 }
@@ -1443,7 +1470,7 @@ impl Session<AsyncPty> {
         // is reachable while a read holds the transport lock.
         let control = async_pty.process_handle();
         let mut session = Self::new(async_pty, config).with_process_control(control);
-        session.lifecycle.started();
+        session.transition(SessionLifecycle::started);
 
         Ok(session)
     }
@@ -1508,7 +1535,7 @@ impl Session<WindowsAsyncPty> {
         // is reachable while a read holds the transport lock.
         let control = async_pty.process_handle();
         let mut session = Self::new(async_pty, config).with_process_control(control);
-        session.lifecycle.started();
+        session.transition(SessionLifecycle::started);
 
         Ok(session)
     }
@@ -2030,6 +2057,196 @@ mod state_machine_tests {
             session.state(),
             SessionState::Exited(status),
             "reaping must move Eof -> Exited"
+        );
+    }
+}
+
+/// Regression tests for AR-008: observability must be a session feature.
+///
+/// Before design stage 4 a session had exactly one observation point — an
+/// output tap over bytes read from the transport. Input had none at all:
+/// `send()` had no hook, so `Recorder::record_input` was unreachable from a
+/// session even though the recorder implements it. Resize, state transitions
+/// and read errors were equally unobservable, and an attached screen learned
+/// about a resize only because `resize_pty` reached into it directly.
+#[cfg(all(test, feature = "mock"))]
+mod event_stream_tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::Session;
+    use crate::config::SessionConfig;
+    use crate::mock::MockTransport;
+    use crate::session::SessionEvent;
+    use crate::types::SessionState;
+
+    /// Record every event a session emits, as a printable label per event.
+    fn recording_session() -> (
+        Session<MockTransport>,
+        MockTransport,
+        Arc<Mutex<Vec<String>>>,
+    ) {
+        let transport = MockTransport::new();
+        let handle = transport.clone();
+        let mut session = Session::new(transport, SessionConfig::default());
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&log);
+        session.add_event_subscriber(move |event| {
+            let label = match event {
+                SessionEvent::Output(bytes) => {
+                    format!("output:{}", String::from_utf8_lossy(bytes))
+                }
+                SessionEvent::Input(bytes) => format!("input:{}", String::from_utf8_lossy(bytes)),
+                SessionEvent::Resize { cols, rows } => format!("resize:{cols}x{rows}"),
+                SessionEvent::StateChanged { from, to } => format!("state:{from}->{to}"),
+                SessionEvent::Error(e) => format!("error:{e}"),
+            };
+            sink.lock().unwrap().push(label);
+        });
+        (session, handle, log)
+    }
+
+    /// The half of AR-008 with no observation point at all before stage 4.
+    #[tokio::test]
+    async fn input_is_observable() {
+        let (mut session, _handle, log) = recording_session();
+
+        session.send_line("hello").await.expect("send");
+
+        let events = log.lock().unwrap().clone();
+        assert!(
+            events.iter().any(|e| e.starts_with("input:hello")),
+            "send() must emit Input; got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn output_reaches_subscribers_as_well_as_taps() {
+        let (mut session, handle, log) = recording_session();
+        handle.queue_output_str("from the child");
+
+        session.expect("child").await.expect("expect");
+
+        let events = log.lock().unwrap().clone();
+        assert!(
+            events.iter().any(|e| e.contains("output:from the child")),
+            "subscribers must see output; got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn state_transitions_are_observable() {
+        let (mut session, handle, log) = recording_session();
+        handle.signal_eof();
+
+        session.expect_eof().await.expect("read to EOF");
+
+        let events = log.lock().unwrap().clone();
+        assert!(
+            events.iter().any(|e| e.contains("->at end of output")),
+            "reaching EOF must emit StateChanged; got {events:?}"
+        );
+        assert_eq!(session.state(), SessionState::Eof);
+    }
+
+    /// A transition that changes nothing must not announce itself, or a
+    /// subscriber counting transitions sees phantom ones.
+    ///
+    /// Waiting twice is the path that genuinely re-applies a transition: the
+    /// second `wait_timeout` skips its read loop (already at EOF), reaps again,
+    /// and re-applies `exited` with the same status. Calling `expect_eof` twice
+    /// does *not* work here — it returns at the `is_eof` check without
+    /// attempting a transition at all, so it would assert nothing.
+    #[tokio::test]
+    async fn an_unchanged_state_emits_nothing() {
+        let (mut session, handle, log) = recording_session();
+        handle.signal_eof();
+        session.expect_eof().await.expect("read to EOF");
+        let first = session
+            .wait_timeout(std::time::Duration::from_secs(1))
+            .await
+            .expect("first wait");
+        let after_first = log.lock().unwrap().len();
+
+        let second = session
+            .wait_timeout(std::time::Duration::from_secs(1))
+            .await
+            .expect("second wait");
+        assert_eq!(first, second, "the status must be stable across reaps");
+
+        let events = log.lock().unwrap().clone();
+        let transitions = events[after_first..]
+            .iter()
+            .filter(|e| e.starts_with("state:"))
+            .count();
+        assert_eq!(
+            transitions, 0,
+            "re-entering the same state must not re-announce it; got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_errors_are_observable() {
+        let (mut session, handle, log) = recording_session();
+        handle.set_error("device fell off the bus");
+
+        session
+            .expect_timeout("anything", std::time::Duration::from_millis(200))
+            .await
+            .expect_err("the read must fail");
+
+        let events = log.lock().unwrap().clone();
+        assert!(
+            events.iter().any(|e| e.starts_with("error:")),
+            "a read error must be emitted; got {events:?}"
+        );
+    }
+
+    /// Output taps predate the event stream and must keep working unchanged,
+    /// interleaved with subscribers in one registration order.
+    #[tokio::test]
+    async fn output_taps_still_work_and_share_one_order() {
+        let transport = MockTransport::new();
+        let handle = transport.clone();
+        let mut session = Session::new(transport, SessionConfig::default());
+        let order = Arc::new(Mutex::new(Vec::new()));
+
+        let first = Arc::clone(&order);
+        session.add_output_tap(move |_| first.lock().unwrap().push("tap"));
+        let second = Arc::clone(&order);
+        session.add_event_subscriber(move |event| {
+            if matches!(event, SessionEvent::Output(_)) {
+                second.lock().unwrap().push("subscriber");
+            }
+        });
+
+        handle.queue_output_str("x");
+        session.expect("x").await.expect("expect");
+
+        assert_eq!(*order.lock().unwrap(), vec!["tap", "subscriber"]);
+    }
+
+    #[tokio::test]
+    async fn a_removed_subscriber_stops_receiving() {
+        let (mut session, handle, log) = recording_session();
+        let extra = Arc::new(Mutex::new(0usize));
+        let counter = Arc::clone(&extra);
+        let id = session.add_event_subscriber(move |_| {
+            *counter.lock().unwrap() += 1;
+        });
+
+        handle.queue_output_str("one");
+        session.expect("one").await.expect("expect");
+        let before = *extra.lock().unwrap();
+        assert!(before > 0, "the subscriber must have been receiving");
+
+        assert!(session.remove_output_tap(id), "removal reports success");
+        handle.queue_output_str("two");
+        session.expect("two").await.expect("expect");
+
+        assert_eq!(*extra.lock().unwrap(), before, "removed means removed");
+        assert!(
+            !log.lock().unwrap().is_empty(),
+            "the other subscriber is unaffected"
         );
     }
 }

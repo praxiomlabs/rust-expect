@@ -147,11 +147,11 @@ where
     escape_sequence: Option<Vec<u8>>,
     /// Default timeout for the interaction.
     timeout: Option<Duration>,
-    /// Session-registered output taps to fire on every chunk read during
+    /// Session-registered observers to fire on every chunk read during
     /// the interact loop, in addition to the expect-driven taps. Required
     /// so attached screens and transcript recorders don't go stale while
     /// `interact()` is the active read-driver.
-    output_taps: Vec<crate::session::OutputTap>,
+    output_taps: Vec<crate::session::EventSubscriber>,
 }
 
 impl<'a, T> InteractBuilder<'a, T>
@@ -161,7 +161,7 @@ where
     /// Create a new interact builder.
     pub(crate) fn new(
         transport: &'a SharedTransport<T>,
-        output_taps: Vec<crate::session::OutputTap>,
+        output_taps: Vec<crate::session::EventSubscriber>,
     ) -> Self {
         Self {
             transport,
@@ -381,9 +381,9 @@ where
     buffer: String,
     buffer_size: usize,
     escape_sequence: Option<Vec<u8>>,
-    /// Session-registered output taps fired on every chunk so attached
+    /// Session-registered observers fired on every chunk so attached
     /// screens and transcript recorders keep updating during `interact()`.
-    output_taps: Vec<crate::session::OutputTap>,
+    output_taps: Vec<crate::session::EventSubscriber>,
     timeout: Option<Duration>,
     /// Current terminal size - tracked for resize delta detection on Unix.
     /// On Windows, terminal resize events aren't currently supported.
@@ -406,7 +406,7 @@ where
         buffer_size: usize,
         escape_sequence: Option<Vec<u8>>,
         timeout: Option<Duration>,
-        output_taps: Vec<crate::session::OutputTap>,
+        output_taps: Vec<crate::session::EventSubscriber>,
     ) -> Self {
         // Get initial terminal size
         let current_size = super::terminal::Terminal::size().ok();
@@ -427,19 +427,11 @@ where
         }
     }
 
-    /// Fire every registered session output tap on a chunk, wrapping each in
+    /// Fire every session observer with an `Output` event, wrapping each in
     /// `catch_unwind` so a panicking observer can't take down the runner.
     /// Matches the contract of `Session::read_with_timeout`.
     fn fire_taps(&self, chunk: &[u8]) {
-        for tap in &self.output_taps {
-            let tap_clone = tap.clone();
-            let chunk_ref = chunk;
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap_clone(chunk_ref)));
-            if result.is_err() {
-                tracing::warn!("output tap panicked during interact; caught and continuing");
-            }
-        }
+        crate::session::events::emit_output(&self.output_taps, chunk);
     }
 
     async fn run(&mut self) -> Result<InteractResult> {

@@ -105,14 +105,6 @@ impl DialogExecutor {
         self
     }
 
-    /// Get the pattern for a step.
-    #[must_use]
-    pub fn step_pattern(&self, step: &DialogStep, dialog: &Dialog) -> Option<Pattern> {
-        step.expect
-            .as_ref()
-            .map(|e| Pattern::literal(dialog.substitute(e)))
-    }
-
     /// Execute a dialog on a session.
     ///
     /// This runs through the dialog steps, expecting patterns and sending responses.

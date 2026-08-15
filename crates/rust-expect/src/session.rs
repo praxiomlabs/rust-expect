@@ -96,7 +96,6 @@
 mod builder;
 pub(crate) mod events;
 mod handle;
-mod lifecycle;
 mod screen;
 pub(crate) mod state;
 pub(crate) mod transport;
@@ -104,5 +103,4 @@ pub(crate) mod transport;
 pub use builder::{QuickSession, SessionBuilder};
 pub use events::{EventSubscriber, OutputTap, SessionEvent, TapId};
 pub use handle::{Session, SessionExt};
-pub use lifecycle::Signal;
 pub use screen::{Cell, CellAttributes, Color, Position, Region, ScreenBuffer};

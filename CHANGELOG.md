@@ -7,6 +7,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Findings from a source architecture review, burned down one at a time. Every
+fix carries a regression test that was run against the unfixed code first.
+
+### Added
+
+- **`Session` has an event stream.** `add_event_subscriber` observes
+  `SessionEvent::{Output, Input, Resize, StateChanged, Matched, Error}`.
+  `Input` had no observation point at all before: `send()` had no hook, so a
+  transcript could never record what was typed. Output taps are unchanged and
+  are now one kind of subscriber, sharing registration order with the rest.
+
+- **Built-in observers attach to that stream**: `Session::attach_recorder`,
+  `attach_redacted_recorder` (feature `pii-redaction`) and `attach_metrics`.
+  `Recorder`, `SessionMetrics` and `StreamingRedactor` were previously
+  unreachable from a session. Redaction sits between the stream and the
+  transcript and nowhere else, so a caller expecting on a password prompt still
+  matches it while the password stays out of the transcript.
+
+- **`Session::shutdown()`** — ask the child's process group to exit, wait
+  `config.timeout.close`, then kill it and reap. The graceful counterpart to
+  dropping the session.
+
+- **`Session::detach()`** — give up ownership so the child outlives the session.
+
+- **`SessionState::Eof` and `SessionState::Failed(ErrorKind)`.** A session that
+  had reached EOF, or that could not be read from at all, previously went on
+  reporting itself `Running`.
+
+- `Histogram::sum()`, and `StreamingRedactor::redactor()`.
+
+### Changed
+
+- **Breaking: dropping a `Session` kills the child's process group.** Closing
+  the PTY master hangs up the child's controlling terminal, and that `SIGHUP`
+  cleans up an ordinary child — but a child that ignores `SIGHUP` outlived its
+  session with nothing holding it and nothing that would ever reap it. Use
+  `Session::detach()` to keep the previous behaviour for a child you mean to
+  outlive its session.
+
+- **Breaking: `signal()` and `kill()` deliver to the child's process group**,
+  which is what a terminal does — Ctrl-C signals the foreground group, not one
+  process. A shell's background jobs previously survived `kill()`. Guarded:
+  a child that does not lead a group of its own is signalled alone.
+
+- **Breaking: `Session::interact()` takes `&mut self`** and is now the session's
+  read driver rather than a second one. Output it reads lands in the session's
+  buffer, its writes are the session's writes, and EOF or a read failure moves
+  the session's state, so a caller that interacts and then expects sees what
+  happened in between. `InteractBuilder::with_buffer_size` is gone — the
+  session's buffer bounds the interaction now. Output hooks rewrite what the
+  terminal shows, not what the patterns match.
+
+- **Breaking: `Session::transport()` is removed.** Handing out the transport is
+  how a second reader gets built; process control no longer travels through the
+  transport lock, so it is not needed for that either.
+
+- **Breaking: `Session::set_state` is removed** and `SessionState` is
+  `#[non_exhaustive]`. One state machine owns every transition.
+
+- **Breaking: `Session::pid()` and `is_running()` return `Option`.** They
+  previously fabricated `0` and `true` when they could not acquire a lock, which
+  a caller could not distinguish from a real answer.
+
+- **Breaking: removed public items with no callers** — `LifecycleManager`,
+  `LifecycleEvent`, `LifecycleCallback`, `ShutdownConfig`, `ShutdownStrategy`
+  (a second, dead lifecycle model), the `Signal` enum,
+  `DialogExecutor::step_pattern` and `DialogExecutor::execute_step_sync`.
+
+- **Breaking: `Dialog` no longer starts at the first *named* step.** A dialog
+  whose opening steps were unnamed began part-way through itself.
+
+- **Breaking: the `patterns!` and `dialog!` macros expand against the real
+  runtime API.** Neither had ever compiled in any program; both are now covered
+  by compile fixtures in CI.
+
+- A read that fails with a non-EOF error now moves the session to `Failed` and
+  makes it unwritable, rather than leaving it reporting a healthy session.
+
+- `send` after EOF is rejected by the state machine rather than by the transport,
+  so the error is the same on every backend.
+
+### Fixed
+
+- **Concurrently spawned sessions inherited each other's PTY slave fd.** The
+  three stdio descriptors were duplicated with `dup`, which does not carry
+  `FD_CLOEXEC`, so any process forked by another thread in that window inherited
+  them. A session's master then never reached EOF while an unrelated child held
+  its slave, hanging `wait`, `wait_timeout` and `expect_eof` for as long as that
+  sibling lived. Six sessions spawned at once produced six children each holding
+  two to four foreign pts devices.
+
+- **Pattern matching consumed the wrong bytes after invalid UTF-8.** Patterns
+  matched against lossily-decoded text while the buffer was consumed by raw byte
+  offset, and the two spaces drifted two bytes per replacement character.
+
+- **`interact()` dropped any output chunk that ended mid-character**, silently,
+  from the buffer its own patterns matched against — routine, since a PTY read
+  ends wherever the kernel buffer does.
+
+- **`interact()` spun at full CPU when its terminal input was closed** (under
+  `< /dev/null`, or an exhausted pipe): 3.2 million reads in 300ms. Its
+  configured timeout was also never something the loop waited on, and only
+  appeared to work because that spin kept waking it.
+
+- **Trimming the interaction buffer could panic** by slicing a `String` at a raw
+  byte offset, as could `screen::query`'s `find_all`.
+
+- **`screen::query` reported byte offsets as column indices**, so any multibyte
+  character earlier in a row shifted every reported column after it.
+
+- **Dialog steps advanced by name rather than position**, so every unnamed step
+  resolved back to step 0, and an unknown branch target reported success.
+
+- **The mock transport never woke a parked read**, ignored scripted delays, and
+  dropped a scenario step's `expect`, so several tests were passing for the
+  wrong reason.
+
+- **SSH: a channel message carrying no bytes was read as EOF**, ending the
+  session at the first such message.
+
+- **`StreamingRedactor` panicked on multibyte input**, and `Histogram::observe`
+  accumulated float bit patterns with integer addition — `1.5 + 2.25` read back
+  as `NaN`.
+
+- **`tests/integration` was never compiled.** No test root declared the module,
+  so eleven tests had rotted against an API they no longer matched while the
+  suite stayed green.
+
+- Windows: a failed `AssignProcessToJobObject` no longer leaves the crate
+  holding a job handle whose kill-on-close guarantee is absent.
+
+
 ## [0.6.0] - 2026-07-31
 
 ### Changed

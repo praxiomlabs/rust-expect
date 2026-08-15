@@ -171,26 +171,6 @@ impl Subscribers {
         })
     }
 
-    /// Every registered observer as an event subscriber, for handing to a read
-    /// loop that does not own the session. Output taps are wrapped so they
-    /// still see only `Output`.
-    pub(crate) fn as_subscribers(&self) -> Vec<EventSubscriber> {
-        self.sinks
-            .iter()
-            .map(|(_, sink)| match sink {
-                Sink::Tap(tap) => {
-                    let tap = Arc::clone(tap);
-                    Arc::new(move |event: &SessionEvent<'_>| {
-                        if let SessionEvent::Output(chunk) = event {
-                            tap(chunk);
-                        }
-                    }) as EventSubscriber
-                }
-                Sink::Subscriber(subscriber) => Arc::clone(subscriber),
-            })
-            .collect()
-    }
-
     /// Deliver an event to every observer that wants it.
     pub(crate) fn emit(&self, event: &SessionEvent<'_>) {
         for (id, sink) in &self.sinks {
@@ -214,25 +194,12 @@ impl Subscribers {
     }
 }
 
-/// Fire a snapshot of subscribers with an `Output` event, catching panics.
-///
-/// Used by read loops that hold a snapshot rather than the session itself.
-pub(crate) fn emit_output(subscribers: &[EventSubscriber], chunk: &[u8]) {
-    let event = SessionEvent::Output(chunk);
-    for subscriber in subscribers {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| subscriber(&event)));
-        if result.is_err() {
-            tracing::warn!("session subscriber panicked; other subscribers continue");
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
-    use super::{EventSubscriber, SessionEvent, Subscribers};
+    use super::{SessionEvent, Subscribers};
     use crate::types::SessionState;
 
     #[test]
@@ -333,22 +300,5 @@ mod tests {
 
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert!(!subscribers.remove(id), "removing twice reports nothing");
-    }
-
-    /// The snapshot handed to a read loop that does not own the session must
-    /// still route output taps correctly.
-    #[test]
-    fn a_snapshot_keeps_taps_output_only() {
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let sink = Arc::clone(&seen);
-        let mut subscribers = Subscribers::new();
-        subscribers.add_tap(Arc::new(move |chunk: &[u8]| {
-            sink.lock().unwrap().push(chunk.to_vec());
-        }));
-
-        let snapshot: Vec<EventSubscriber> = subscribers.as_subscribers();
-        super::emit_output(&snapshot, b"chunk");
-
-        assert_eq!(*seen.lock().unwrap(), vec![b"chunk".to_vec()]);
     }
 }

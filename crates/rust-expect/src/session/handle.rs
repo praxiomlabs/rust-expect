@@ -900,38 +900,84 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let mut transport = self.transport.clone();
 
         match tokio::time::timeout(timeout, transport.read(&mut buf)).await {
-            Ok(Ok(0)) => {
-                self.transition(SessionLifecycle::reached_eof);
-                Ok(0)
-            }
-            Ok(Ok(n)) => {
-                self.matcher.append(&buf[..n]);
-                self.emit(&SessionEvent::Output(&buf[..n]));
-                Ok(n)
-            }
-            Ok(Err(e)) => {
-                // On Linux, reading from PTY master returns EIO when the slave is closed
-                // (i.e., the child process has terminated). Treat this as EOF.
-                // See: https://bugs.python.org/issue5380
-                if is_pty_eof_error(&e) {
-                    self.transition(SessionLifecycle::reached_eof);
-                    Ok(0)
-                } else {
-                    // Not EOF dressed up as an error: the session cannot read
-                    // past this, so it ends here rather than leaving the state
-                    // reporting a healthy session the caller can retry.
-                    let kind = e.kind();
-                    self.transition(|lifecycle| lifecycle.failed(kind));
-                    let error = ExpectError::io_context("reading from process", e);
-                    self.emit(&SessionEvent::Error(&error));
-                    Err(error)
-                }
-            }
+            Ok(outcome) => self.absorb_read(outcome, &buf),
             Err(_) => {
                 // Timeout, but not an error - caller will handle
                 Ok(0)
             }
         }
+    }
+
+    /// Fold the outcome of one transport read into the session: the matcher,
+    /// the event stream, and the state machine.
+    ///
+    /// This is the only way output enters a session, and both read drivers go
+    /// through it — [`expect`](Self::expect)'s loop above and `interact()`'s.
+    /// They used to keep separate buffers and separate notions of EOF, so a
+    /// caller who interacted and returned saw a session that had observed
+    /// nothing.
+    ///
+    /// Takes the read's outcome rather than performing the read, because
+    /// `interact()` reads inside a `select!` alongside the terminal and
+    /// SIGWINCH and cannot hold a borrow of the session across it.
+    pub(crate) fn absorb_read(
+        &mut self,
+        outcome: std::io::Result<usize>,
+        buf: &[u8],
+    ) -> Result<usize> {
+        match outcome {
+            Ok(0) => {
+                self.transition(SessionLifecycle::reached_eof);
+                Ok(0)
+            }
+            Ok(n) => {
+                self.matcher.append(&buf[..n]);
+                self.emit(&SessionEvent::Output(&buf[..n]));
+                Ok(n)
+            }
+            // On Linux, reading from PTY master returns EIO when the slave is closed
+            // (i.e., the child process has terminated). Treat this as EOF.
+            // See: https://bugs.python.org/issue5380
+            Err(e) if is_pty_eof_error(&e) => {
+                self.transition(SessionLifecycle::reached_eof);
+                Ok(0)
+            }
+            Err(e) => {
+                // Not EOF dressed up as an error: the session cannot read
+                // past this, so it ends here rather than leaving the state
+                // reporting a healthy session the caller can retry.
+                let kind = e.kind();
+                self.transition(|lifecycle| lifecycle.failed(kind));
+                let error = ExpectError::io_context("reading from process", e);
+                self.emit(&SessionEvent::Error(&error));
+                Err(error)
+            }
+        }
+    }
+
+    /// A handle on the transport for the interaction loop's own `select!`.
+    ///
+    /// Crate-internal on purpose: `Session::transport()` was public and was
+    /// removed, because handing out the transport is how a second reader gets
+    /// built. The interaction loop is not a second reader — everything it
+    /// reads goes straight back through [`absorb_read`](Self::absorb_read).
+    pub(crate) fn transport_handle(&self) -> SharedTransport<T> {
+        self.transport.clone()
+    }
+
+    /// The matcher, for the interaction loop's pattern hooks.
+    pub(crate) const fn matcher_mut(&mut self) -> &mut Matcher {
+        &mut self.matcher
+    }
+
+    /// Mark the session as being driven by `interact()`.
+    pub(crate) fn begin_interacting(&mut self) {
+        self.transition(SessionLifecycle::began_interacting);
+    }
+
+    /// Mark the interaction as finished.
+    pub(crate) fn end_interacting(&mut self) {
+        self.transition(SessionLifecycle::stopped_interacting);
     }
 
     /// Check if a pattern matches immediately without blocking.
@@ -1017,6 +1063,12 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// This returns a builder that allows you to configure pattern-based
     /// callbacks that fire when patterns match in the output or input.
     ///
+    /// The interaction borrows the session for its duration. It is the
+    /// session's read driver while it runs, not a second one: output it reads
+    /// lands in the session's buffer, its writes are the session's writes, and
+    /// EOF or a read failure moves the session's state. A caller that interacts
+    /// and then expects sees everything that happened in between.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -1040,16 +1092,11 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// }
     /// ```
     #[must_use]
-    pub fn interact(&self) -> InteractBuilder<'_, T>
+    pub fn interact(&mut self) -> InteractBuilder<'_, T>
     where
         T: 'static,
     {
-        // Snapshot the currently registered observers so the interact read
-        // loop can fire them on every chunk. Without this, attached screens and
-        // transcript recorders would silently freeze for the duration of
-        // interact(). The snapshot is why interact() cannot see observers
-        // registered while it runs — see AR-003.
-        InteractBuilder::new(&self.transport, self.subscribers.as_subscribers())
+        InteractBuilder::new(self)
     }
 
     /// Run a dialog on this session.

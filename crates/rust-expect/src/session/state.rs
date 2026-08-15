@@ -19,11 +19,6 @@ use crate::types::{ProcessExitStatus, SessionState};
 /// and reaping race in practice; a late `reached_eof` must not pull an already
 /// reaped session back out of `Exited`.
 ///
-/// [`SessionState::Interacting`] has no transition here yet. `interact()`
-/// hands out a builder holding only the transport, so the session is not
-/// reachable when the interact loop ends and a session that entered
-/// `Interacting` could never leave it. The transition lands with the work that
-/// funnels `interact()` back through the session.
 #[derive(Debug, Clone)]
 pub(crate) struct SessionLifecycle {
     state: SessionState,
@@ -79,6 +74,27 @@ impl SessionLifecycle {
     /// The child is spawned and the session is live.
     pub(crate) const fn started(&mut self) {
         if matches!(self.state, SessionState::Starting) {
+            self.state = SessionState::Running;
+        }
+    }
+
+    /// `interact()` took over as the session's read driver.
+    ///
+    /// Only from a live state: an interaction started on a session that has
+    /// already reached EOF or failed does not make it live again.
+    pub(crate) const fn began_interacting(&mut self) {
+        if matches!(self.state, SessionState::Starting | SessionState::Running) {
+            self.state = SessionState::Interacting;
+        }
+    }
+
+    /// `interact()` returned.
+    ///
+    /// Only from `Interacting`, so an interaction that ended *because* the
+    /// child reached EOF or the transport failed leaves that state standing
+    /// rather than reporting the session live again.
+    pub(crate) const fn stopped_interacting(&mut self) {
+        if matches!(self.state, SessionState::Interacting) {
             self.state = SessionState::Running;
         }
     }
@@ -173,6 +189,44 @@ mod tests {
             lifecycle.state(),
             SessionState::Exited(ProcessExitStatus::Exited(3))
         );
+    }
+
+    #[test]
+    fn an_interaction_is_entered_and_left() {
+        let mut lifecycle = SessionLifecycle::new();
+        lifecycle.started();
+
+        lifecycle.began_interacting();
+        assert_eq!(lifecycle.state(), SessionState::Interacting);
+        assert!(lifecycle.can_send(), "an interaction writes to the child");
+
+        lifecycle.stopped_interacting();
+        assert_eq!(lifecycle.state(), SessionState::Running);
+    }
+
+    /// An interaction usually ends because the child did. Leaving the state
+    /// must not report the session live again.
+    #[test]
+    fn leaving_an_interaction_does_not_undo_eof() {
+        let mut lifecycle = SessionLifecycle::new();
+        lifecycle.started();
+        lifecycle.began_interacting();
+
+        lifecycle.reached_eof();
+        lifecycle.stopped_interacting();
+
+        assert_eq!(lifecycle.state(), SessionState::Eof);
+        assert!(!lifecycle.can_send());
+    }
+
+    #[test]
+    fn an_interaction_cannot_revive_a_finished_session() {
+        let mut lifecycle = SessionLifecycle::new();
+        lifecycle.reached_eof();
+
+        lifecycle.began_interacting();
+
+        assert_eq!(lifecycle.state(), SessionState::Eof);
     }
 
     #[test]

@@ -162,7 +162,9 @@ impl<'a> ScreenQuery<'a> {
             for line in text.lines() {
                 let line_bytes = line.len() + 1; // +1 for newline
                 if byte_pos + line_bytes > pos {
-                    let col = region.left + (pos - byte_pos);
+                    // A column is a cell index and a line is built one
+                    // `cell.char` at a time, so count characters, not bytes.
+                    let col = region.left + line[..pos - byte_pos].chars().count();
                     return Some((row, col));
                 }
                 byte_pos += line_bytes;
@@ -182,10 +184,23 @@ impl<'a> ScreenQuery<'a> {
         for row in region.top..=region.bottom {
             let line_text = self.row_text(row);
             let mut start = 0;
-            while let Some(pos) = line_text[start..].find(needle) {
-                let col = region.left + start + pos;
-                results.push((row, col));
-                start += pos + 1;
+            // Guard the slice below: the advance can step past the last byte,
+            // which an empty needle reaches on every line.
+            while start <= line_text.len() {
+                let Some(pos) = line_text[start..].find(needle) else {
+                    break;
+                };
+                let match_start = start + pos;
+                // Columns are character counts, not byte offsets.
+                results.push((row, region.left + line_text[..match_start].chars().count()));
+                // Advance one *character* past the match start. Advancing one
+                // byte lands inside a multibyte character, and the next slice
+                // panics on the boundary.
+                start = match_start
+                    + line_text[match_start..]
+                        .chars()
+                        .next()
+                        .map_or(1, char::len_utf8);
             }
         }
 
@@ -206,7 +221,8 @@ impl<'a> ScreenQuery<'a> {
             for line in text.lines() {
                 let line_bytes = line.len() + 1;
                 if byte_pos + line_bytes > pos {
-                    let col = region.left + (pos - byte_pos);
+                    // Characters, not bytes — see `find`.
+                    let col = region.left + line[..pos - byte_pos].chars().count();
                     return Some((row, col, m.as_str().to_string()));
                 }
                 byte_pos += line_bytes;
@@ -320,6 +336,53 @@ mod tests {
         let buf = make_buffer("Hello World");
         let result = buf.query().find("World");
         assert_eq!(result, Some((0, 6)));
+    }
+
+    /// AR-016: `find_all` advanced one *byte* past each match start. When the
+    /// match begins with a multibyte character that lands inside it, and the
+    /// next slice panics.
+    #[test]
+    fn find_all_does_not_panic_on_a_multibyte_needle() {
+        let buf = make_buffer("héllo wörld é");
+        assert_eq!(buf.query().find_all("é"), vec![(0, 1), (0, 12)]);
+    }
+
+    /// AR-016: an empty needle walks the whole line one step at a time and
+    /// must stop at the end rather than slicing past it.
+    #[test]
+    fn find_all_terminates_on_an_empty_needle() {
+        let buf = make_buffer("ab");
+        assert!(!buf.query().find_all("").is_empty());
+    }
+
+    /// AR-019: a column is a cell index, and `row_text`/`text` build a line one
+    /// `cell.char` at a time — so one cell is one character, never one byte.
+    /// Every multibyte character before a match used to shift its reported
+    /// column.
+    #[test]
+    fn find_reports_character_columns_not_byte_offsets() {
+        // h é l l o ␠ X  ->  X is cell 6, but byte 7.
+        let buf = make_buffer("héllo X");
+        assert_eq!(buf.query().find("X"), Some((0, 6)));
+    }
+
+    #[test]
+    fn find_reports_character_columns_on_a_later_row() {
+        let buf = make_buffer("wörld\nhéllo X");
+        assert_eq!(buf.query().find("X"), Some((1, 6)));
+    }
+
+    #[test]
+    fn find_all_reports_character_columns_not_byte_offsets() {
+        let buf = make_buffer("héllo X");
+        assert_eq!(buf.query().find_all("X"), vec![(0, 6)]);
+    }
+
+    #[test]
+    fn find_regex_reports_character_columns_not_byte_offsets() {
+        let re = Regex::new("X+").expect("valid regex");
+        let buf = make_buffer("héllo X");
+        assert_eq!(buf.query().find_regex(&re), Some((0, 6, "X".to_string())));
     }
 
     #[test]

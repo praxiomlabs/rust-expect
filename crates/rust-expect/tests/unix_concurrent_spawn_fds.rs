@@ -12,12 +12,16 @@
 
 #![cfg(unix)]
 
+#[cfg(target_os = "linux")]
 use std::collections::BTreeSet;
 use std::time::Duration;
 
 use rust_expect::{Pattern, Session};
 
 /// The `/dev/pts/*` devices a process currently holds open.
+///
+/// Reads `/proc`, so it exists only where `/proc` does.
+#[cfg(target_os = "linux")]
 fn pts_devices(pid: u32) -> BTreeSet<String> {
     let mut found = BTreeSet::new();
     let Ok(entries) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
@@ -44,7 +48,7 @@ async fn concurrently_spawned_children_do_not_hold_each_others_pts() {
     let mut spawning = Vec::new();
     for _ in 0..6 {
         spawning.push(tokio::spawn(async {
-            Session::spawn("/bin/sh", &["-c", "echo up; sleep 30"])
+            Session::spawn("/bin/sh", &["-c", "echo up; sleep 300"])
                 .await
                 .expect("spawn")
         }));
@@ -88,7 +92,7 @@ async fn a_sibling_child_does_not_wedge_another_sessions_eof() {
     let mut spawning = Vec::new();
     for _ in 0..6 {
         spawning.push(tokio::spawn(async {
-            Session::spawn("/bin/sh", &["-c", "echo up; sleep 30"])
+            Session::spawn("/bin/sh", &["-c", "echo up; sleep 300"])
                 .await
                 .expect("spawn")
         }));
@@ -106,8 +110,17 @@ async fn a_sibling_child_does_not_wedge_another_sessions_eof() {
 
     // End one of them. Its own child is gone, so its master must reach EOF —
     // the others are still running and must not be able to hold it open.
+    //
+    // An already-exited child is an acceptable starting point and not a
+    // failure: what this test measures is what happens *after* the victim's
+    // child is gone, however it went. (A slow runner once took long enough
+    // over the six `expect`s that the children outlived their own sleep, which
+    // is why the sleep is now far longer than any plausible run.)
     let mut victim = sessions.remove(0);
-    victim.kill().expect("kill");
+    match victim.kill() {
+        Ok(()) | Err(rust_expect::ExpectError::SessionClosed) => {}
+        Err(e) => panic!("kill failed: {e}"),
+    }
 
     let status = tokio::time::timeout(
         Duration::from_secs(3),

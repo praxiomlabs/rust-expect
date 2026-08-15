@@ -38,8 +38,9 @@ async fn kill_after_exit_is_safe() {
     // We only require safety (no panic) and a well-formed Result; on Windows
     // terminating an already-finished job typically succeeds.
     let _ = (first, second);
-    assert!(
-        !session.is_running(),
+    assert_eq!(
+        session.is_running(),
+        Some(false),
         "child must report not-running post-exit"
     );
 }
@@ -63,7 +64,7 @@ async fn kill_live_child_terminates_it() {
         waited.is_ok(),
         "wait after kill should resolve, got {waited:?}"
     );
-    assert!(!session.is_running());
+    assert_eq!(session.is_running(), Some(false));
 }
 
 /// The VT100 screen emulator must ingest `ConPTY`'s escape-heavy handshake frame

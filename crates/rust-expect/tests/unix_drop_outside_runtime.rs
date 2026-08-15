@@ -43,7 +43,7 @@ fn reaped_within(pid: u32, limit: std::time::Duration) -> bool {
 fn dropping_a_session_outside_its_runtime_kills_its_child() {
     let runtime = tokio::runtime::Runtime::new().expect("runtime");
     let session = runtime.block_on(async {
-        Session::spawn("/bin/sh", &["-c", "trap '' HUP; sleep 30"])
+        Session::spawn("/bin/sh", &["-c", "trap '' HUP; sleep 300"])
             .await
             .expect("spawn")
     });

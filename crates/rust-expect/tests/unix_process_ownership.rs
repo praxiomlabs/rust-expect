@@ -38,7 +38,7 @@ async fn gone_within(pid: u32, limit: Duration) -> bool {
 /// closing the master hangs up its controlling terminal.
 #[tokio::test]
 async fn dropping_a_session_hangs_up_an_ordinary_child() {
-    let session = Session::spawn("/bin/sh", &["-c", "sleep 30"])
+    let session = Session::spawn("/bin/sh", &["-c", "sleep 300"])
         .await
         .expect("spawn");
     let pid = session.pid().expect("pid");
@@ -56,7 +56,7 @@ async fn dropping_a_session_hangs_up_an_ordinary_child() {
 /// else is holding it: the session is gone and no one will ever reap it.
 #[tokio::test]
 async fn a_child_ignoring_sighup_outlives_its_session() {
-    let mut session = Session::spawn("/bin/sh", &["-c", "trap '' HUP; echo ready; sleep 30"])
+    let mut session = Session::spawn("/bin/sh", &["-c", "trap '' HUP; echo ready; sleep 300"])
         .await
         .expect("spawn");
     session
@@ -87,7 +87,10 @@ async fn a_child_ignoring_sighup_outlives_its_session() {
 async fn kill_reaches_the_childs_descendants() {
     let mut session = Session::spawn(
         "/bin/sh",
-        &["-c", "trap '' HUP; (trap '' HUP; sleep 30) & echo $!; wait"],
+        &[
+            "-c",
+            "trap '' HUP; (trap '' HUP; sleep 300) & echo $!; wait",
+        ],
     )
     .await
     .expect("spawn");
@@ -119,7 +122,7 @@ async fn kill_reaches_the_childs_descendants() {
 /// outlive its session.
 #[tokio::test]
 async fn a_detached_child_outlives_its_session() {
-    let mut session = Session::spawn("/bin/sh", &["-c", "trap '' HUP; echo ready; sleep 30"])
+    let mut session = Session::spawn("/bin/sh", &["-c", "trap '' HUP; echo ready; sleep 300"])
         .await
         .expect("spawn");
     session
@@ -152,7 +155,7 @@ async fn a_detached_child_outlives_its_session() {
 /// waiting out the grace period.
 #[tokio::test]
 async fn shutdown_ends_a_cooperative_child_promptly() {
-    let mut session = Session::spawn("/bin/sh", &["-c", "sleep 30"])
+    let mut session = Session::spawn("/bin/sh", &["-c", "sleep 300"])
         .await
         .expect("spawn");
     let pid = session.pid().expect("pid");
@@ -191,7 +194,7 @@ async fn shutdown_kills_a_child_that_ignores_sigterm() {
     };
     let mut session = Session::spawn_with_config(
         "/bin/sh",
-        &["-c", "trap '' TERM; echo ready; sleep 30"],
+        &["-c", "trap '' TERM; echo ready; sleep 300"],
         config,
     )
     .await

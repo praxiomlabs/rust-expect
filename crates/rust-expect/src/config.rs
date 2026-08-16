@@ -156,9 +156,6 @@ pub struct TimeoutConfig {
     /// Default timeout for expect operations.
     pub default: Duration,
 
-    /// Timeout for spawn operations.
-    pub spawn: Duration,
-
     /// Timeout for close operations.
     pub close: Duration,
 }
@@ -167,7 +164,6 @@ impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
             default: DEFAULT_TIMEOUT,
-            spawn: Duration::from_secs(60),
             close: Duration::from_secs(10),
         }
     }
@@ -181,13 +177,6 @@ impl TimeoutConfig {
             default,
             ..Default::default()
         }
-    }
-
-    /// Set the spawn timeout.
-    #[must_use]
-    pub const fn spawn(mut self, timeout: Duration) -> Self {
-        self.spawn = timeout;
-        self
     }
 
     /// Set the close timeout.

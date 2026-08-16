@@ -35,7 +35,6 @@ fn session_config_builder_pattern() {
 fn timeout_config_default() {
     let timeout = TimeoutConfig::default();
     assert_eq!(timeout.default, Duration::from_secs(30));
-    assert_eq!(timeout.spawn, Duration::from_secs(60));
     assert_eq!(timeout.close, Duration::from_secs(10));
 }
 
@@ -47,12 +46,9 @@ fn timeout_config_new() {
 
 #[test]
 fn timeout_config_builder() {
-    let timeout = TimeoutConfig::new(Duration::from_secs(10))
-        .spawn(Duration::from_secs(30))
-        .close(Duration::from_secs(5));
+    let timeout = TimeoutConfig::new(Duration::from_secs(10)).close(Duration::from_secs(5));
 
     assert_eq!(timeout.default, Duration::from_secs(10));
-    assert_eq!(timeout.spawn, Duration::from_secs(30));
     assert_eq!(timeout.close, Duration::from_secs(5));
 }
 

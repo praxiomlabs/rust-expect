@@ -78,7 +78,6 @@ fn main() -> Result<()> {
         dimensions: (120, 40),
         timeout: TimeoutConfig {
             default: Duration::from_secs(30),
-            spawn: Duration::from_secs(60),
             close: Duration::from_secs(10),
         },
         ..Default::default()

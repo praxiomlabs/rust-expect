@@ -2,21 +2,32 @@
 
 use std::time::Duration;
 
-/// Interaction mode configuration.
+/// How the interaction loop treats the terminal.
+///
+/// Set with [`InteractBuilder::with_mode`](crate::interact::InteractBuilder::with_mode).
+/// The escape sequence that ends an interaction is not here — it is
+/// [`InteractBuilder::with_escape`](crate::interact::InteractBuilder::with_escape).
 #[derive(Debug, Clone)]
 pub struct InteractionMode {
-    /// Whether to echo input locally.
+    /// Write each keystroke back to the terminal as it is typed (default off).
+    ///
+    /// A PTY child in cooked mode echoes for itself, so this doubles every
+    /// character there. It is for a child that has turned echo off, or a
+    /// transport with no terminal behind it — the only way the user sees what
+    /// they type.
     pub local_echo: bool,
-    /// Whether to translate CR to CRLF.
+    /// Rewrite a bare `\n` from the child as `\r\n` on the way to the terminal
+    /// (default on).
+    ///
+    /// A raw-mode terminal does no output translation of its own, so a child
+    /// whose newlines arrive as bare LF stair-steps down the screen. A PTY has
+    /// already done this (ONLCR), and an existing `\r\n` is left alone, so the
+    /// setting is a no-op there and only bites on transports that pass bare
+    /// LF through. It changes what the terminal shows, not what the session
+    /// buffers or what output hooks and patterns see.
     pub crlf: bool,
-    /// Input buffer size.
-    pub buffer_size: usize,
-    /// Read timeout.
+    /// How long one terminal read may wait before the loop goes round again.
     pub read_timeout: Duration,
-    /// Exit character (e.g., Ctrl+]).
-    pub exit_char: Option<u8>,
-    /// Escape character for commands.
-    pub escape_char: Option<u8>,
 }
 
 impl Default for InteractionMode {
@@ -24,10 +35,7 @@ impl Default for InteractionMode {
         Self {
             local_echo: false,
             crlf: true,
-            buffer_size: 4096,
             read_timeout: Duration::from_millis(100),
-            exit_char: Some(0x1d),   // Ctrl+]
-            escape_char: Some(0x1e), // Ctrl+^
         }
     }
 }
@@ -39,58 +47,25 @@ impl InteractionMode {
         Self::default()
     }
 
-    /// Enable local echo.
+    /// Echo keystrokes to the terminal. See [`local_echo`](Self::local_echo).
     #[must_use]
     pub const fn with_local_echo(mut self, echo: bool) -> Self {
         self.local_echo = echo;
         self
     }
 
-    /// Enable CRLF translation.
+    /// Rewrite bare LF as CRLF for the terminal. See [`crlf`](Self::crlf).
     #[must_use]
     pub const fn with_crlf(mut self, crlf: bool) -> Self {
         self.crlf = crlf;
         self
     }
 
-    /// Set buffer size.
-    #[must_use]
-    pub const fn with_buffer_size(mut self, size: usize) -> Self {
-        self.buffer_size = size;
-        self
-    }
-
-    /// Set read timeout.
+    /// Set the terminal read timeout. See [`read_timeout`](Self::read_timeout).
     #[must_use]
     pub const fn with_read_timeout(mut self, timeout: Duration) -> Self {
         self.read_timeout = timeout;
         self
-    }
-
-    /// Set exit character.
-    #[must_use]
-    pub const fn with_exit_char(mut self, ch: Option<u8>) -> Self {
-        self.exit_char = ch;
-        self
-    }
-
-    /// Set escape character.
-    #[must_use]
-    pub const fn with_escape_char(mut self, ch: Option<u8>) -> Self {
-        self.escape_char = ch;
-        self
-    }
-
-    /// Check if a character is the exit character.
-    #[must_use]
-    pub fn is_exit_char(&self, ch: u8) -> bool {
-        self.exit_char == Some(ch)
-    }
-
-    /// Check if a character is the escape character.
-    #[must_use]
-    pub fn is_escape_char(&self, ch: u8) -> bool {
-        self.escape_char == Some(ch)
     }
 }
 

@@ -147,6 +147,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
         let buffer_size = config.buffer.max_size;
         let mut matcher = Matcher::new(buffer_size);
         matcher.set_default_timeout(config.timeout.default);
+        matcher.set_search_window(config.buffer.search_window);
         Self {
             transport: SharedTransport::new(transport),
             control: None,
@@ -598,6 +599,23 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send> Session<T> {
     /// failed — or an I/O error if the write otherwise fails.
     #[allow(clippy::significant_drop_tightening)]
     pub async fn send(&mut self, data: &[u8]) -> Result<()> {
+        // `config.delay_before_send`: give a child that has just printed its
+        // prompt time to finish setting up its terminal before the scripted
+        // reply lands. Zero by default, so this is a no-op unless asked for.
+        let delay = self.config.delay_before_send;
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        self.send_immediate(data).await
+    }
+
+    /// [`send`](Self::send) without the configured `delay_before_send`.
+    ///
+    /// The interaction loop forwards terminal keystrokes through this: the
+    /// delay exists to pace *scripted* replies, and a human typing is already
+    /// slower than any child. Everything else about the send — the state
+    /// check, the `Input` event, the closed-child handling — is identical.
+    pub(crate) async fn send_immediate(&mut self, data: &[u8]) -> Result<()> {
         // Checked against the state machine rather than against the transport,
         // so a write to a child that has closed its output is rejected the same
         // way on every backend. A PTY happens to fail such a write with EIO,
@@ -2690,6 +2708,96 @@ mod subscriber_tests {
                 .contains("tail without a newline"),
             "the buffered tail was never flushed: {:?}",
             transcript_of(&recorder).output_text()
+        );
+    }
+}
+
+/// Configuration fields that were public and settable but read by nothing
+/// (AR-007). Each test here observes the field's effect through the session,
+/// not through the config struct — a config that round-trips a value is not
+/// evidence that anything honours it.
+#[cfg(all(test, feature = "mock"))]
+mod config_wiring_tests {
+    use std::time::{Duration, Instant};
+
+    use super::Session;
+    use crate::config::SessionConfig;
+    use crate::error::ExpectError;
+    use crate::expect::Pattern;
+    use crate::mock::MockTransport;
+
+    fn session_with(
+        config: SessionConfig,
+        output: &str,
+    ) -> (Session<MockTransport>, MockTransport) {
+        let transport = MockTransport::new();
+        let handle = transport.clone();
+        handle.queue_output_str(output);
+        (Session::new(transport, config), handle)
+    }
+
+    /// `buffer.search_window` bounds the matcher's search to the tail of the
+    /// buffer. A pattern that lies entirely before that tail must not match,
+    /// and one inside it must.
+    #[tokio::test]
+    async fn buffer_search_window_reaches_the_matcher() {
+        let mut config = SessionConfig::default();
+        config.buffer.search_window = Some(8);
+        let (mut session, _handle) = session_with(config, "needle-then-lots-of-padding-after-it");
+
+        let outside = session
+            .expect_timeout(Pattern::literal("needle"), Duration::from_millis(200))
+            .await;
+        assert!(
+            matches!(outside, Err(ExpectError::Timeout { .. })),
+            "a pattern before the search window matched: {outside:?}"
+        );
+
+        session
+            .expect_timeout(Pattern::literal("after-it"), Duration::from_millis(200))
+            .await
+            .expect("a pattern inside the search window should match");
+    }
+
+    /// `delay_before_send` is waited before every scripted send.
+    #[tokio::test]
+    async fn delay_before_send_is_waited_before_each_send() {
+        let delay = Duration::from_millis(120);
+        let config = SessionConfig::default().delay_before_send(delay);
+        let (mut session, handle) = session_with(config, "");
+
+        let started = Instant::now();
+        session.send(b"one\n").await.expect("send");
+        session.send(b"two\n").await.expect("send");
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed >= delay * 2,
+            "two sends with a {delay:?} delay took only {elapsed:?}"
+        );
+        assert_eq!(handle.take_input_str(), "one\ntwo\n");
+    }
+
+    /// The default delay is zero. It was 50 ms in the config for as long as the
+    /// field existed, but nothing read it, so every caller has always observed
+    /// zero — wiring the field must not slow every existing script down.
+    #[tokio::test]
+    async fn default_delay_before_send_is_zero() {
+        assert_eq!(
+            SessionConfig::default().delay_before_send,
+            Duration::ZERO,
+            "the default delay must stay at what callers have always observed"
+        );
+
+        let (mut session, _handle) = session_with(SessionConfig::default(), "");
+        let started = Instant::now();
+        for _ in 0..10 {
+            session.send(b"x").await.expect("send");
+        }
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "ten sends under the default config took {:?}",
+            started.elapsed()
         );
     }
 }

@@ -22,8 +22,12 @@ pub const DEFAULT_TERMINAL_HEIGHT: u16 = 24;
 /// Default TERM environment variable value.
 pub const DEFAULT_TERM: &str = "xterm-256color";
 
-/// Default delay before send operations.
-pub const DEFAULT_DELAY_BEFORE_SEND: Duration = Duration::from_millis(50);
+/// Default delay before send operations: none.
+///
+/// pexpect defaults its equivalent (`delaybeforesend`) to 50 ms, and this
+/// constant used to say the same — but nothing read it, so every caller has
+/// always observed zero. Wiring the field kept the observed behaviour.
+pub const DEFAULT_DELAY_BEFORE_SEND: Duration = Duration::ZERO;
 
 /// Configuration for a session.
 #[derive(Debug, Clone)]
@@ -55,7 +59,15 @@ pub struct SessionConfig {
     /// Line ending configuration.
     pub line_ending: LineEnding,
 
-    /// Delay before send operations.
+    /// Delay waited before every scripted send.
+    ///
+    /// Applies to [`Session::send`](crate::Session::send) and everything built
+    /// on it — `send_line`, `send_control`, dialog and hook responses. It gives
+    /// a child that has just printed a prompt time to finish setting up its
+    /// terminal before the reply arrives, which is what pexpect's
+    /// `delaybeforesend` is for. Keystrokes forwarded by
+    /// [`interact`](crate::Session::interact) are not delayed: a human at the
+    /// terminal is already slower than any child.
     pub delay_before_send: Duration,
 }
 
@@ -142,7 +154,8 @@ impl SessionConfig {
         self
     }
 
-    /// Set the delay before send operations.
+    /// Set the delay waited before every scripted send. See
+    /// [`delay_before_send`](Self::delay_before_send).
     #[must_use]
     pub const fn delay_before_send(mut self, delay: Duration) -> Self {
         self.delay_before_send = delay;

@@ -390,6 +390,9 @@ where
     mode: InteractionMode,
     escape_sequence: Option<Vec<u8>>,
     timeout: Option<Duration>,
+    /// Whether the last byte written to the terminal was `\r` — the carry for
+    /// `lf_to_crlf` across output chunks.
+    pending_cr: bool,
     /// Current terminal size - tracked for resize delta detection on Unix.
     /// On Windows, terminal resize events aren't currently supported.
     #[cfg_attr(windows, allow(dead_code))]
@@ -423,6 +426,7 @@ where
             mode,
             escape_sequence,
             timeout,
+            pending_cr: false,
             current_size,
         }
     }
@@ -435,6 +439,10 @@ where
 
     /// Write to the child through the session, so the bytes reach subscribers
     /// as `SessionEvent::Input` and are refused once the child is gone.
+    ///
+    /// This is the scripted path — hook responses and `InteractAction::Send` —
+    /// so it takes the session's `delay_before_send`. Terminal keystrokes go
+    /// through [`Session::send_immediate`] instead; see `handle_terminal_input`.
     async fn send(&mut self, data: &[u8]) -> Result<()> {
         self.session.send(data).await
     }
@@ -579,7 +587,7 @@ where
                         }
 
                         if let Some(result) = self
-                            .handle_terminal_input(&input_buf[..n], &mut escape_buf)
+                            .handle_terminal_input(&input_buf[..n], &mut escape_buf, &mut output)
                             .await?
                         {
                             return Ok(result);
@@ -690,7 +698,7 @@ where
                         }
 
                         if let Some(result) = self
-                            .handle_terminal_input(&input_buf[..n], &mut escape_buf)
+                            .handle_terminal_input(&input_buf[..n], &mut escape_buf, &mut output)
                             .await?
                         {
                             return Ok(result);
@@ -724,7 +732,15 @@ where
         self.hook_manager
             .notify(&InteractionEvent::Output(processed.clone()));
 
-        let _ = output.write_all(&processed).await;
+        // `mode.crlf` is a rendering concern for the terminal alone: observers
+        // above saw the hook-processed bytes, and the session buffered what
+        // the child actually sent.
+        let for_terminal = if self.mode.crlf {
+            lf_to_crlf(&processed, &mut self.pending_cr)
+        } else {
+            processed
+        };
+        let _ = output.write_all(&for_terminal).await;
         let _ = output.flush().await;
 
         self.check_output_patterns().await
@@ -739,6 +755,7 @@ where
         &mut self,
         data: &[u8],
         escape_buf: &mut Vec<u8>,
+        output: &mut (impl AsyncWrite + Unpin + Send),
     ) -> Result<Option<InteractResult>> {
         if let Some(esc) = self.escape_sequence.clone() {
             escape_buf.extend_from_slice(data);
@@ -758,6 +775,15 @@ where
             }
         }
 
+        // `mode.local_echo`: show the keystrokes as typed, before any input
+        // hook rewrites what the child will receive. For a child whose
+        // terminal does not echo — or a transport with no terminal at all —
+        // this is the only way the user sees what they type.
+        if self.mode.local_echo {
+            let _ = output.write_all(data).await;
+            let _ = output.flush().await;
+        }
+
         let processed = self.hook_manager.process_input(data.to_vec());
 
         self.hook_manager
@@ -767,7 +793,11 @@ where
             return Ok(Some(result));
         }
 
-        self.send(&processed).await?;
+        // Keystrokes skip `delay_before_send`: that delay paces scripted
+        // replies to a child that is still setting up its terminal, and a
+        // human typing is already slower than any child. pexpect's interact
+        // makes the same distinction.
+        self.session.send_immediate(&processed).await?;
         Ok(None)
     }
 
@@ -928,6 +958,25 @@ where
 
         Ok(None)
     }
+}
+
+/// Rewrite every bare `\n` in `data` as `\r\n`, leaving an existing `\r\n`
+/// alone. `pending_cr` carries "the previous chunk ended in `\r`" across
+/// calls, so a CRLF split over two reads is still recognised as one.
+///
+/// This is `InteractionMode::crlf`: a raw-mode terminal does not translate on
+/// output, so a child whose newlines reach it as bare LF — anything that is
+/// not a PTY, since a PTY's ONLCR has already done this — stair-steps.
+fn lf_to_crlf(data: &[u8], pending_cr: &mut bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + data.len() / 16);
+    for &byte in data {
+        if byte == b'\n' && !*pending_cr {
+            out.push(b'\r');
+        }
+        out.push(byte);
+        *pending_cr = byte == b'\r';
+    }
+    out
 }
 
 #[cfg(all(test, feature = "mock"))]
@@ -1262,6 +1311,134 @@ mod tests {
             session.is_eof(),
             "the session did not see the EOF the interaction ended on; state = {:?}",
             session.state()
+        );
+    }
+    // ---- InteractionMode fields (AR-007) -------------------------------------
+    //
+    // `local_echo` and `crlf` were public, settable, and read by nothing. Each
+    // test observes the field through the loop, not through the struct.
+
+    #[tokio::test]
+    async fn local_echo_writes_typed_input_back_to_the_terminal() {
+        let (mut session, handle) = session("");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_mode(InteractionMode::new().with_local_echo(true))
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"typed"[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(
+            String::from_utf8_lossy(&terminal),
+            "typed",
+            "local echo should show the keystrokes on the terminal"
+        );
+        assert_eq!(handle.take_input_str(), "typed", "and still forward them");
+    }
+
+    #[tokio::test]
+    async fn local_echo_is_off_by_default() {
+        let (mut session, _handle) = session("");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"typed"[..], &mut terminal),
+        )
+        .await;
+
+        assert!(
+            terminal.is_empty(),
+            "nothing should be echoed by default, got {:?}",
+            String::from_utf8_lossy(&terminal)
+        );
+    }
+
+    /// `crlf` (on by default) rewrites a bare `\n` from the child as `\r\n` on
+    /// the way to the terminal. A raw-mode terminal needs the carriage return
+    /// or every line after the first starts where the previous one ended; a
+    /// PTY child already emits `\r\n` (ONLCR), so the translation is a no-op
+    /// there and only bites on transports that pass bare `\n` through.
+    #[tokio::test]
+    async fn crlf_translates_bare_newlines_for_the_terminal() {
+        let (mut session, _handle) = session("one\ntwo\r\nthree\n");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b""[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(
+            String::from_utf8_lossy(&terminal),
+            "one\r\ntwo\r\nthree\r\n",
+            "bare LF should become CRLF; an existing CRLF must not double"
+        );
+    }
+
+    #[tokio::test]
+    async fn crlf_can_be_disabled() {
+        let (mut session, _handle) = session("one\ntwo\r\n");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_mode(InteractionMode::new().with_crlf(false))
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b""[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(String::from_utf8_lossy(&terminal), "one\ntwo\r\n");
+    }
+
+    /// The translation has to carry state across reads: a chunk that ends in
+    /// `\r` followed by one that starts with `\n` is one CRLF, not a bare LF.
+    #[test]
+    fn crlf_translation_spans_chunk_boundaries() {
+        let mut pending_cr = false;
+        let mut out = Vec::new();
+        for chunk in [&b"a\r"[..], b"\nb\n", b"c\r", b"\n"] {
+            out.extend(lf_to_crlf(chunk, &mut pending_cr));
+        }
+        assert_eq!(String::from_utf8_lossy(&out), "a\r\nb\r\nc\r\n");
+    }
+
+    /// `delay_before_send` paces scripted sends, not typing. With a delay far
+    /// longer than the interaction, a forwarded keystroke must still arrive
+    /// promptly.
+    #[tokio::test]
+    async fn terminal_keystrokes_skip_delay_before_send() {
+        let mock = MockTransport::new();
+        let handle = mock.clone();
+        let config = SessionConfig::default().delay_before_send(Duration::from_secs(2));
+        let mut session = Session::new(mock, config);
+
+        let started = std::time::Instant::now();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"k"[..], Vec::new()),
+        )
+        .await;
+
+        assert_eq!(handle.take_input_str(), "k");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "a keystroke waited on delay_before_send: {:?}",
+            started.elapsed()
         );
     }
 }

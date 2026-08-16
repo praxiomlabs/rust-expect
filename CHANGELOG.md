@@ -75,6 +75,44 @@ fix carries a regression test that was run against the unfixed code first.
   (a second, dead lifecycle model), the `Signal` enum,
   `DialogExecutor::step_pattern` and `DialogExecutor::execute_step_sync`.
 
+- **Breaking: configuration that nothing read is gone, and what remains is
+  honoured.** Every field of `SessionConfig` and `InteractionMode` now has a
+  reader.
+  - Removed: `LoggingConfig` and `LogFormat` (`attach_recorder` is the API),
+    `EncodingConfig`, `Encoding` and `EncodingErrorHandling`, `InteractConfig`
+    and `InteractHook` (the third place interact mode was configured),
+    `BufferConfig::ring_buffer` (the buffer is always a ring; there was no
+    other mode for `false` to select), `TimeoutConfig::spawn` (the spawn
+    completes on its first poll, so no timeout around it can fire), and
+    `SessionBuilder::{logging, log_to_file, encoding}`.
+  - `BufferConfig::search_window` now bounds the matcher's search to the tail
+    of the buffer, as documented.
+  - `SessionConfig::delay_before_send` is now waited before every scripted
+    send. **Its default is now zero, not 50 ms**: nothing read it before, so
+    zero is what every caller has always observed. Keystrokes forwarded by
+    `interact()` are not delayed.
+  - `InteractionMode::local_echo` echoes keystrokes to the terminal, and
+    `InteractionMode::crlf` (default on) rewrites a bare LF from the child as
+    CRLF for the terminal — a no-op for a PTY child, which already sends CRLF,
+    and the fix for stair-stepped output over any transport that does not.
+    `InteractionMode::{buffer_size, exit_char, escape_char}` are removed;
+    the escape sequence is `InteractBuilder::with_escape`.
+
+- **Breaking: one screen model, one multi-session model.**
+  `rust_expect::session::ScreenBuffer` (and its `Position`, `Region`, `Cell`,
+  `CellAttributes`, `Color`) is removed — `screen::ScreenBuffer` behind the
+  `screen` feature is the one the session uses. `SessionGroup`,
+  `GroupBuilder`, `GroupManager` and `GroupResult` are removed: they held no
+  `Session` at all, only labels and a `String`; `MultiSessionManager` is the
+  multi-session model.
+
+- **Breaking: removed the empty `Backend` trait** (zero implementations; the
+  capability traits `ProcessControl`, `Resizable` and `ChildExit` are what
+  backends implement) and the `AsyncPty` / `WindowsAsyncPty` /
+  `WindowsPtyHandle` process pass-throughs (`signal`, `kill`, `is_running`,
+  `try_wait`), which had no callers. `Session::signal` and `Session::kill`
+  are the API.
+
 - **Breaking: `Dialog` no longer starts at the first *named* step.** A dialog
   whose opening steps were unnamed began part-way through itself.
 

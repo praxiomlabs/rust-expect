@@ -27,17 +27,16 @@
 //! }
 //! ```
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Mutex;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 
 use super::hooks::{HookManager, InteractionEvent};
 use super::mode::InteractionMode;
 use super::terminal::TerminalSize;
-use crate::error::{ExpectError, Result};
+use crate::error::Result;
 use crate::expect::Pattern;
+use crate::session::Session;
 
 /// Action to take after a pattern match in interactive mode.
 #[derive(Debug, Clone)]
@@ -130,8 +129,10 @@ pub struct InteractBuilder<'a, T>
 where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
-    /// Reference to the transport.
-    transport: &'a Arc<Mutex<T>>,
+    /// The session being interacted with. The interaction is its read driver
+    /// for the duration, which is why this is a borrow of the session itself
+    /// rather than a copy of its transport handle.
+    session: &'a mut Session<T>,
     /// Output pattern hooks.
     output_hooks: Vec<OutputPatternHook>,
     /// Input pattern hooks.
@@ -142,17 +143,10 @@ where
     hook_manager: HookManager,
     /// Interaction mode configuration.
     mode: InteractionMode,
-    /// Buffer for accumulating output.
-    buffer_size: usize,
     /// Escape string to exit interact mode.
     escape_sequence: Option<Vec<u8>>,
     /// Default timeout for the interaction.
     timeout: Option<Duration>,
-    /// Session-registered output taps to fire on every chunk read during
-    /// the interact loop, in addition to the expect-driven taps. Required
-    /// so attached screens and transcript recorders don't go stale while
-    /// `interact()` is the active read-driver.
-    output_taps: Vec<crate::session::OutputTap>,
 }
 
 impl<'a, T> InteractBuilder<'a, T>
@@ -160,21 +154,16 @@ where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
     /// Create a new interact builder.
-    pub(crate) fn new(
-        transport: &'a Arc<Mutex<T>>,
-        output_taps: Vec<crate::session::OutputTap>,
-    ) -> Self {
+    pub(crate) fn new(session: &'a mut Session<T>) -> Self {
         Self {
-            transport,
+            session,
             output_hooks: Vec::new(),
             input_hooks: Vec::new(),
             resize_hook: None,
             hook_manager: HookManager::new(),
             mode: InteractionMode::default(),
-            buffer_size: 8192,
             escape_sequence: Some(vec![0x1d]), // Ctrl+] by default
             timeout: None,
-            output_taps,
         }
     }
 
@@ -280,13 +269,6 @@ where
         self
     }
 
-    /// Set the output buffer size.
-    #[must_use]
-    pub const fn with_buffer_size(mut self, size: usize) -> Self {
-        self.buffer_size = size;
-        self
-    }
-
     /// Add a byte-level input hook.
     #[must_use]
     pub fn with_input_hook<F>(mut self, hook: F) -> Self
@@ -322,19 +304,30 @@ where
     ///
     /// Returns an error if I/O fails or a pattern callback returns an error.
     pub async fn start(self) -> Result<InteractResult> {
+        self.start_with_io(tokio::io::stdin(), tokio::io::stdout())
+            .await
+    }
+
+    /// Start the interaction against an arbitrary terminal pair.
+    ///
+    /// [`start`](Self::start) is this with the process's own stdin and stdout.
+    /// Tests use it to drive the loop without a terminal.
+    pub(crate) async fn start_with_io(
+        self,
+        input: impl AsyncRead + Unpin + Send,
+        output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
         let mut runner = InteractRunner::new(
-            Arc::clone(self.transport),
+            self.session,
             self.output_hooks,
             self.input_hooks,
             self.resize_hook,
             self.hook_manager,
             self.mode,
-            self.buffer_size,
             self.escape_sequence,
             self.timeout,
-            self.output_taps,
         );
-        runner.run().await
+        runner.run(input, output).await
     }
 }
 
@@ -343,7 +336,11 @@ where
 pub struct InteractResult {
     /// How the interaction ended.
     pub reason: InteractEndReason,
-    /// Final buffer contents.
+    /// The session's buffer when the interaction ended.
+    ///
+    /// This is the session's own buffer, not a copy the interaction kept
+    /// beside it, so it includes anything read before the interaction started
+    /// and excludes text an output hook has already consumed.
     pub buffer: String,
 }
 
@@ -365,12 +362,24 @@ pub enum InteractEndReason {
     Error(String),
 }
 
+/// Wait until `deadline`, or forever if there is none.
+///
+/// The interaction's deadline has to be something the loop can park on. A
+/// check at the top of the loop only runs once some other branch has completed,
+/// which leaves the timeout at the mercy of whether anything else is happening.
+async fn wait_until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
 /// Internal runner for the interaction loop.
-struct InteractRunner<T>
+struct InteractRunner<'a, T>
 where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
-    transport: Arc<Mutex<T>>,
+    session: &'a mut Session<T>,
     output_hooks: Vec<OutputPatternHook>,
     input_hooks: Vec<InputPatternHook>,
     /// Resize hook - used on Unix via SIGWINCH signal handling.
@@ -379,121 +388,156 @@ where
     resize_hook: Option<ResizeHook>,
     hook_manager: HookManager,
     mode: InteractionMode,
-    buffer: String,
-    buffer_size: usize,
     escape_sequence: Option<Vec<u8>>,
-    /// Session-registered output taps fired on every chunk so attached
-    /// screens and transcript recorders keep updating during `interact()`.
-    output_taps: Vec<crate::session::OutputTap>,
     timeout: Option<Duration>,
+    /// Whether the last byte written to the terminal was `\r` — the carry for
+    /// `lf_to_crlf` across output chunks.
+    pending_cr: bool,
     /// Current terminal size - tracked for resize delta detection on Unix.
     /// On Windows, terminal resize events aren't currently supported.
     #[cfg_attr(windows, allow(dead_code))]
     current_size: Option<TerminalSize>,
 }
 
-impl<T> InteractRunner<T>
+impl<'a, T> InteractRunner<'a, T>
 where
     T: AsyncReadExt + AsyncWriteExt + Unpin + Send + 'static,
 {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        transport: Arc<Mutex<T>>,
+        session: &'a mut Session<T>,
         output_hooks: Vec<OutputPatternHook>,
         input_hooks: Vec<InputPatternHook>,
         resize_hook: Option<ResizeHook>,
         hook_manager: HookManager,
         mode: InteractionMode,
-        buffer_size: usize,
         escape_sequence: Option<Vec<u8>>,
         timeout: Option<Duration>,
-        output_taps: Vec<crate::session::OutputTap>,
     ) -> Self {
         // Get initial terminal size
         let current_size = super::terminal::Terminal::size().ok();
 
         Self {
-            transport,
+            session,
             output_hooks,
             input_hooks,
             resize_hook,
             hook_manager,
             mode,
-            buffer: String::with_capacity(buffer_size),
-            buffer_size,
             escape_sequence,
             timeout,
+            pending_cr: false,
             current_size,
-            output_taps,
         }
     }
 
-    /// Fire every registered session output tap on a chunk, wrapping each in
-    /// `catch_unwind` so a panicking observer can't take down the runner.
-    /// Matches the contract of `Session::read_with_timeout`.
-    fn fire_taps(&self, chunk: &[u8]) {
-        for tap in &self.output_taps {
-            let tap_clone = tap.clone();
-            let chunk_ref = chunk;
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tap_clone(chunk_ref)));
-            if result.is_err() {
-                tracing::warn!("output tap panicked during interact; caught and continuing");
-            }
-        }
+    /// What the interaction has seen so far: the session's buffer, which is
+    /// now the only one. The runner used to keep a private `String` beside it.
+    fn buffer(&mut self) -> String {
+        self.session.buffer()
     }
 
-    async fn run(&mut self) -> Result<InteractResult> {
+    /// Write to the child through the session, so the bytes reach subscribers
+    /// as `SessionEvent::Input` and are refused once the child is gone.
+    ///
+    /// This is the scripted path — hook responses and `InteractAction::Send` —
+    /// so it takes the session's `delay_before_send`. Terminal keystrokes go
+    /// through [`Session::send_immediate`] instead; see `handle_terminal_input`.
+    async fn send(&mut self, data: &[u8]) -> Result<()> {
+        self.session.send(data).await
+    }
+
+    /// Run the interaction loop over `input`/`output`.
+    ///
+    /// The terminal ends of the loop are parameters rather than direct calls to
+    /// `tokio::io::stdin`/`stdout` so the loop can be driven by a test. Nothing
+    /// else constructs an `InteractRunner`, so before this the loop could not be
+    /// exercised at all — which is why the defects below survived.
+    async fn run(
+        &mut self,
+        input: impl AsyncRead + Unpin + Send,
+        output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
+        // Bracketed here rather than in the loops so every exit path — pattern
+        // stop, escape, timeout, EOF, or an I/O error — leaves the state.
+        self.session.begin_interacting();
         #[cfg(unix)]
-        {
-            self.run_with_signals().await
-        }
+        let outcome = self.run_with_signals(input, output).await;
         #[cfg(not(unix))]
-        {
-            self.run_without_signals().await
-        }
+        let outcome = self.run_without_signals(input, output).await;
+        self.session.end_interacting();
+        outcome
     }
 
     /// Run the interaction loop with Unix signal handling (SIGWINCH).
     #[cfg(unix)]
     #[allow(clippy::significant_drop_tightening)]
-    async fn run_with_signals(&mut self) -> Result<InteractResult> {
-        use tokio::io::{BufReader, stdin, stdout};
-
+    async fn run_with_signals(
+        &mut self,
+        input: impl AsyncRead + Unpin + Send,
+        mut output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
         self.hook_manager.notify(&InteractionEvent::Started);
 
-        let mut stdin = BufReader::new(stdin());
+        let mut stdin = BufReader::new(input);
         let mut input_buf = [0u8; 1024];
         let mut output_buf = [0u8; 4096];
         let mut escape_buf: Vec<u8> = Vec::new();
 
-        let deadline = self.timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = self.timeout.map(|t| tokio::time::Instant::now() + t);
+
+        // The terminal's input is a branch of the loop, not a guarantee. It can
+        // be closed before the interaction starts — `interact()` with stdin
+        // redirected from `/dev/null` or from an exhausted pipe — or close
+        // partway through. Reading a closed input returns EOF instantly, so a
+        // loop that keeps polling it never parks: measured at 3.2 million reads
+        // in 300ms before this flag existed.
+        let mut input_open = true;
 
         // Set up SIGWINCH signal handler
         let mut sigwinch =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::window_change())
-                .map_err(ExpectError::Io)?;
+                .map_err(crate::error::ExpectError::Io)?;
 
         loop {
             // Check timeout
             if let Some(deadline) = deadline
-                && std::time::Instant::now() >= deadline
+                && tokio::time::Instant::now() >= deadline
             {
                 self.hook_manager.notify(&InteractionEvent::Ended);
+                let buffer = self.buffer();
                 return Ok(InteractResult {
                     reason: InteractEndReason::Timeout,
-                    buffer: self.buffer.clone(),
+                    buffer,
                 });
             }
 
             let read_timeout = self.mode.read_timeout;
-            let mut transport = self.transport.lock().await;
+            // A clone, not a guard: `SharedTransport` takes the lock inside
+            // each poll, so parking here on a quiet child holds nothing. The
+            // previous `lock().await` was held for the whole `select!` —
+            // including while waiting on stdin — which is what made process
+            // control unreachable for the length of an interactive session.
+            //
+            // The bytes it reads go straight into the session via
+            // `absorb_read`, so this is the session's read, not a second one.
+            let mut transport = self.session.transport_handle();
 
             tokio::select! {
+                // End the interaction at its deadline. Without this branch the
+                // timeout is only observed between other completions, so a
+                // quiet session with a closed terminal input never reaches it.
+                () = wait_until(deadline) => {
+                    self.hook_manager.notify(&InteractionEvent::Ended);
+                    let buffer = self.buffer();
+                    return Ok(InteractResult {
+                        reason: InteractEndReason::Timeout,
+                        buffer,
+                    });
+                }
+
                 // Handle SIGWINCH (window resize)
                 _ = sigwinch.recv() => {
-                    drop(transport); // Release lock before processing
-
                     if let Some(result) = self.handle_resize().await? {
                         return Ok(result);
                     }
@@ -501,94 +545,53 @@ where
 
                 // Read from session output
                 result = transport.read(&mut output_buf) => {
-                    drop(transport); // Release lock before processing
-                    match result {
+                    // Everything read here enters the session: the matcher, the
+                    // event stream, and the state machine. EOF and a failed read
+                    // are the session's EOF and the session's failure, not just
+                    // this loop's.
+                    let read = self.session.absorb_read(result, &output_buf);
+                    match read {
                         Ok(0) => {
                             self.hook_manager.notify(&InteractionEvent::Ended);
+                            let buffer = self.buffer();
                             return Ok(InteractResult {
                                 reason: InteractEndReason::Eof,
-                                buffer: self.buffer.clone(),
+                                buffer,
                             });
                         }
                         Ok(n) => {
-                            let data = &output_buf[..n];
-                            // Fire session-registered output taps on the raw
-                            // chunk before any hook-manager rewriting, so
-                            // taps see exactly what the PTY emitted.
-                            self.fire_taps(data);
-                            let processed = self.hook_manager.process_output(data.to_vec());
-
-                            self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));
-
-                            // Write to stdout
-                            let mut stdout = stdout();
-                            let _ = stdout.write_all(&processed).await;
-                            let _ = stdout.flush().await;
-
-                            // Append to buffer for pattern matching
-                            if let Ok(s) = std::str::from_utf8(&processed) {
-                                self.buffer.push_str(s);
-                                // Trim buffer if too large
-                                if self.buffer.len() > self.buffer_size {
-                                    let start = self.buffer.len() - self.buffer_size;
-                                    self.buffer = self.buffer[start..].to_string();
-                                }
-                            }
-
-                            // Check output patterns
-                            if let Some(result) = self.check_output_patterns().await? {
+                            if let Some(result) =
+                                self.handle_output(&output_buf[..n], &mut output).await?
+                            {
                                 return Ok(result);
                             }
                         }
                         Err(e) => {
                             self.hook_manager.notify(&InteractionEvent::Ended);
-                            return Err(ExpectError::Io(e));
+                            return Err(e);
                         }
                     }
                 }
 
-                // Read from stdin (user input)
-                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)) => {
-                    drop(transport); // Release lock
+                // Read from the terminal (user input)
+                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)), if input_open => {
 
                     if let Ok(Ok(n)) = result {
                         if n == 0 {
+                            // The terminal's input closed. The child is still
+                            // running, so the interaction continues — but this
+                            // branch has nothing left to report and polling it
+                            // again would spin.
+                            input_open = false;
                             continue;
                         }
 
-                        let data = &input_buf[..n];
-
-                        // Check for escape sequence
-                        if let Some(ref esc) = self.escape_sequence {
-                            escape_buf.extend_from_slice(data);
-                            if escape_buf.ends_with(esc) {
-                                self.hook_manager.notify(&InteractionEvent::ExitRequested);
-                                self.hook_manager.notify(&InteractionEvent::Ended);
-                                return Ok(InteractResult {
-                                    reason: InteractEndReason::Escape,
-                                    buffer: self.buffer.clone(),
-                                });
-                            }
-                            // Keep only last N bytes where N is escape length
-                            if escape_buf.len() > esc.len() {
-                                escape_buf = escape_buf[escape_buf.len() - esc.len()..].to_vec();
-                            }
-                        }
-
-                        // Process through input hooks
-                        let processed = self.hook_manager.process_input(data.to_vec());
-
-                        self.hook_manager.notify(&InteractionEvent::Input(processed.clone()));
-
-                        // Check input patterns
-                        if let Some(result) = self.check_input_patterns(&processed).await? {
+                        if let Some(result) = self
+                            .handle_terminal_input(&input_buf[..n], &mut escape_buf, &mut output)
+                            .await?
+                        {
                             return Ok(result);
                         }
-
-                        // Send to session
-                        let mut transport = self.transport.lock().await;
-                        transport.write_all(&processed).await.map_err(ExpectError::Io)?;
-                        transport.flush().await.map_err(ExpectError::Io)?;
                     }
                 }
             }
@@ -598,216 +601,305 @@ where
     /// Run the interaction loop without signal handling (non-Unix platforms).
     #[cfg(not(unix))]
     #[allow(clippy::significant_drop_tightening)]
-    async fn run_without_signals(&mut self) -> Result<InteractResult> {
-        use tokio::io::{BufReader, stdin, stdout};
-
+    async fn run_without_signals(
+        &mut self,
+        input: impl AsyncRead + Unpin + Send,
+        mut output: impl AsyncWrite + Unpin + Send,
+    ) -> Result<InteractResult> {
         self.hook_manager.notify(&InteractionEvent::Started);
 
-        let mut stdin = BufReader::new(stdin());
+        let mut stdin = BufReader::new(input);
         let mut input_buf = [0u8; 1024];
         let mut output_buf = [0u8; 4096];
         let mut escape_buf: Vec<u8> = Vec::new();
 
-        let deadline = self.timeout.map(|t| std::time::Instant::now() + t);
+        let deadline = self.timeout.map(|t| tokio::time::Instant::now() + t);
+
+        // See the Unix loop: a closed terminal input reads EOF instantly, so a
+        // branch that retries on EOF spins the loop.
+        let mut input_open = true;
 
         loop {
             // Check timeout
             if let Some(deadline) = deadline
-                && std::time::Instant::now() >= deadline
+                && tokio::time::Instant::now() >= deadline
             {
                 self.hook_manager.notify(&InteractionEvent::Ended);
+                let buffer = self.buffer();
                 return Ok(InteractResult {
                     reason: InteractEndReason::Timeout,
-                    buffer: self.buffer.clone(),
+                    buffer,
                 });
             }
 
             let read_timeout = self.mode.read_timeout;
-            let mut transport = self.transport.lock().await;
+            // A clone, not a guard: `SharedTransport` takes the lock inside
+            // each poll, so parking here on a quiet child holds nothing. The
+            // previous `lock().await` was held for the whole `select!` —
+            // including while waiting on stdin — which is what made process
+            // control unreachable for the length of an interactive session.
+            //
+            // The bytes it reads go straight into the session via
+            // `absorb_read`, so this is the session's read, not a second one.
+            let mut transport = self.session.transport_handle();
 
             tokio::select! {
+                // End the interaction at its deadline. See the Unix loop.
+                () = wait_until(deadline) => {
+                    self.hook_manager.notify(&InteractionEvent::Ended);
+                    let buffer = self.buffer();
+                    return Ok(InteractResult {
+                        reason: InteractEndReason::Timeout,
+                        buffer,
+                    });
+                }
+
                 // Read from session output
                 result = transport.read(&mut output_buf) => {
-                    drop(transport); // Release lock before processing
-                    match result {
+                    // Everything read here enters the session: the matcher, the
+                    // event stream, and the state machine. EOF and a failed read
+                    // are the session's EOF and the session's failure, not just
+                    // this loop's.
+                    let read = self.session.absorb_read(result, &output_buf);
+                    match read {
                         Ok(0) => {
                             self.hook_manager.notify(&InteractionEvent::Ended);
+                            let buffer = self.buffer();
                             return Ok(InteractResult {
                                 reason: InteractEndReason::Eof,
-                                buffer: self.buffer.clone(),
+                                buffer,
                             });
                         }
                         Ok(n) => {
-                            let data = &output_buf[..n];
-                            self.fire_taps(data);
-                            let processed = self.hook_manager.process_output(data.to_vec());
-
-                            self.hook_manager.notify(&InteractionEvent::Output(processed.clone()));
-
-                            // Write to stdout
-                            let mut stdout = stdout();
-                            let _ = stdout.write_all(&processed).await;
-                            let _ = stdout.flush().await;
-
-                            // Append to buffer for pattern matching
-                            if let Ok(s) = std::str::from_utf8(&processed) {
-                                self.buffer.push_str(s);
-                                // Trim buffer if too large
-                                if self.buffer.len() > self.buffer_size {
-                                    let start = self.buffer.len() - self.buffer_size;
-                                    self.buffer = self.buffer[start..].to_string();
-                                }
-                            }
-
-                            // Check output patterns
-                            if let Some(result) = self.check_output_patterns().await? {
+                            if let Some(result) =
+                                self.handle_output(&output_buf[..n], &mut output).await?
+                            {
                                 return Ok(result);
                             }
                         }
                         Err(e) => {
                             self.hook_manager.notify(&InteractionEvent::Ended);
-                            return Err(ExpectError::Io(e));
+                            return Err(e);
                         }
                     }
                 }
 
-                // Read from stdin (user input)
-                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)) => {
-                    drop(transport); // Release lock
+                // Read from the terminal (user input)
+                result = tokio::time::timeout(read_timeout, stdin.read(&mut input_buf)), if input_open => {
 
                     if let Ok(Ok(n)) = result {
                         if n == 0 {
+                            // The terminal's input closed. The child is still
+                            // running, so the interaction continues — but this
+                            // branch has nothing left to report and polling it
+                            // again would spin.
+                            input_open = false;
                             continue;
                         }
 
-                        let data = &input_buf[..n];
-
-                        // Check for escape sequence
-                        if let Some(ref esc) = self.escape_sequence {
-                            escape_buf.extend_from_slice(data);
-                            if escape_buf.ends_with(esc) {
-                                self.hook_manager.notify(&InteractionEvent::ExitRequested);
-                                self.hook_manager.notify(&InteractionEvent::Ended);
-                                return Ok(InteractResult {
-                                    reason: InteractEndReason::Escape,
-                                    buffer: self.buffer.clone(),
-                                });
-                            }
-                            // Keep only last N bytes where N is escape length
-                            if escape_buf.len() > esc.len() {
-                                escape_buf = escape_buf[escape_buf.len() - esc.len()..].to_vec();
-                            }
-                        }
-
-                        // Process through input hooks
-                        let processed = self.hook_manager.process_input(data.to_vec());
-
-                        self.hook_manager.notify(&InteractionEvent::Input(processed.clone()));
-
-                        // Check input patterns
-                        if let Some(result) = self.check_input_patterns(&processed).await? {
+                        if let Some(result) = self
+                            .handle_terminal_input(&input_buf[..n], &mut escape_buf, &mut output)
+                            .await?
+                        {
                             return Ok(result);
                         }
-
-                        // Send to session
-                        let mut transport = self.transport.lock().await;
-                        transport.write_all(&processed).await.map_err(ExpectError::Io)?;
-                        transport.flush().await.map_err(ExpectError::Io)?;
                     }
                 }
             }
         }
     }
 
-    #[allow(clippy::significant_drop_tightening)]
-    async fn check_output_patterns(&mut self) -> Result<Option<InteractResult>> {
-        for (index, hook) in self.output_hooks.iter().enumerate() {
-            if let Some(m) = hook.pattern.matches(&self.buffer) {
-                let matched = &self.buffer[m.start..m.end];
-                let before = &self.buffer[..m.start];
-                let after = &self.buffer[m.end..];
+    /// Handle one chunk of child output: observers, hooks, the terminal, the
+    /// match buffer, then the output patterns.
+    ///
+    /// Returns `Some` if a pattern ended the interaction. Shared by the Unix and
+    /// non-Unix loops, which otherwise carried this verbatim twice.
+    /// The chunk is already in the session's buffer — `absorb_read` put it
+    /// there before this is called. What remains is the terminal's copy, which
+    /// the output hooks may rewrite, and the pattern check.
+    ///
+    /// Output hooks no longer rewrite what the patterns see. They rewrite what
+    /// the *terminal* sees, and the session buffers what the child actually
+    /// sent, so a screen or transcript attached to the session records the real
+    /// output rather than a display transform of it.
+    async fn handle_output(
+        &mut self,
+        data: &[u8],
+        output: &mut (impl AsyncWrite + Unpin + Send),
+    ) -> Result<Option<InteractResult>> {
+        let processed = self.hook_manager.process_output(data.to_vec());
 
+        self.hook_manager
+            .notify(&InteractionEvent::Output(processed.clone()));
+
+        // `mode.crlf` is a rendering concern for the terminal alone: observers
+        // above saw the hook-processed bytes, and the session buffered what
+        // the child actually sent.
+        let for_terminal = if self.mode.crlf {
+            lf_to_crlf(&processed, &mut self.pending_cr)
+        } else {
+            processed
+        };
+        let _ = output.write_all(&for_terminal).await;
+        let _ = output.flush().await;
+
+        self.check_output_patterns().await
+    }
+
+    /// Handle one chunk of terminal input: the escape sequence, the input
+    /// hooks, the input patterns, then the child.
+    ///
+    /// Returns `Some` if the escape sequence or a pattern ended the
+    /// interaction. Shared by the Unix and non-Unix loops.
+    async fn handle_terminal_input(
+        &mut self,
+        data: &[u8],
+        escape_buf: &mut Vec<u8>,
+        output: &mut (impl AsyncWrite + Unpin + Send),
+    ) -> Result<Option<InteractResult>> {
+        if let Some(esc) = self.escape_sequence.clone() {
+            escape_buf.extend_from_slice(data);
+            if escape_buf.ends_with(&esc) {
+                self.hook_manager.notify(&InteractionEvent::ExitRequested);
+                self.hook_manager.notify(&InteractionEvent::Ended);
+                let buffer = self.buffer();
+                return Ok(Some(InteractResult {
+                    reason: InteractEndReason::Escape,
+                    buffer,
+                }));
+            }
+            // Keep only last N bytes where N is escape length
+            if escape_buf.len() > esc.len() {
+                let excess = escape_buf.len() - esc.len();
+                escape_buf.drain(..excess);
+            }
+        }
+
+        // `mode.local_echo`: show the keystrokes as typed, before any input
+        // hook rewrites what the child will receive. For a child whose
+        // terminal does not echo — or a transport with no terminal at all —
+        // this is the only way the user sees what they type.
+        if self.mode.local_echo {
+            let _ = output.write_all(data).await;
+            let _ = output.flush().await;
+        }
+
+        let processed = self.hook_manager.process_input(data.to_vec());
+
+        self.hook_manager
+            .notify(&InteractionEvent::Input(processed.clone()));
+
+        if let Some(result) = self.check_input_patterns(&processed).await? {
+            return Ok(Some(result));
+        }
+
+        // Keystrokes skip `delay_before_send`: that delay paces scripted
+        // replies to a child that is still setting up its terminal, and a
+        // human typing is already slower than any child. pexpect's interact
+        // makes the same distinction.
+        self.session.send_immediate(&processed).await?;
+        Ok(None)
+    }
+
+    /// Check the output hooks against the session's buffer.
+    ///
+    /// Matching goes through the session's matcher, which tracks decoded text
+    /// against raw bytes (so an invalid sequence cannot shift the offsets) and
+    /// bounds the buffer by discarding whole bytes rather than slicing a
+    /// `String` at an arbitrary index.
+    async fn check_output_patterns(&mut self) -> Result<Option<InteractResult>> {
+        for index in 0..self.output_hooks.len() {
+            let Some(found) = self
+                .session
+                .matcher_mut()
+                .try_match(&self.output_hooks[index].pattern)
+            else {
+                continue;
+            };
+
+            // Consume through the match whatever the hook decides. The hook has
+            // handled it, so it must not fire again on the next chunk — and now
+            // that this is the session's own buffer, a later `expect()` must not
+            // match it a second time either.
+            let m = self.session.consume_and_announce(&found);
+            let buffer = format!("{}{}{}", m.before, m.matched, m.after);
+
+            let action = {
                 let ctx = InteractContext {
-                    matched,
-                    before,
-                    after,
-                    buffer: &self.buffer,
+                    matched: &m.matched,
+                    before: &m.before,
+                    after: &m.after,
+                    buffer: &buffer,
                     pattern_index: index,
                 };
+                (self.output_hooks[index].callback)(&ctx)
+            };
 
-                match (hook.callback)(&ctx) {
-                    InteractAction::Continue => {
-                        // Clear the matched portion to avoid re-triggering
-                        self.buffer = after.to_string();
-                    }
-                    InteractAction::Send(data) => {
-                        let mut transport = self.transport.lock().await;
-                        transport.write_all(&data).await.map_err(ExpectError::Io)?;
-                        transport.flush().await.map_err(ExpectError::Io)?;
-                        // Clear matched portion
-                        self.buffer = after.to_string();
-                    }
-                    InteractAction::Stop => {
-                        self.hook_manager.notify(&InteractionEvent::Ended);
-                        return Ok(Some(InteractResult {
-                            reason: InteractEndReason::PatternStop {
-                                pattern_index: index,
-                            },
-                            buffer: self.buffer.clone(),
-                        }));
-                    }
-                    InteractAction::Error(msg) => {
-                        self.hook_manager.notify(&InteractionEvent::Ended);
-                        return Ok(Some(InteractResult {
-                            reason: InteractEndReason::Error(msg),
-                            buffer: self.buffer.clone(),
-                        }));
-                    }
+            match action {
+                InteractAction::Continue => {}
+                InteractAction::Send(data) => self.send(&data).await?,
+                InteractAction::Stop => {
+                    self.hook_manager.notify(&InteractionEvent::Ended);
+                    return Ok(Some(InteractResult {
+                        reason: InteractEndReason::PatternStop {
+                            pattern_index: index,
+                        },
+                        buffer,
+                    }));
+                }
+                InteractAction::Error(msg) => {
+                    self.hook_manager.notify(&InteractionEvent::Ended);
+                    return Ok(Some(InteractResult {
+                        reason: InteractEndReason::Error(msg),
+                        buffer,
+                    }));
                 }
             }
         }
         Ok(None)
     }
 
-    #[allow(clippy::significant_drop_tightening)]
-    async fn check_input_patterns(&self, input: &[u8]) -> Result<Option<InteractResult>> {
-        let input_str = String::from_utf8_lossy(input);
+    /// Check the input hooks against one chunk of what the user typed.
+    ///
+    /// Unlike the output hooks these match the chunk itself, not a buffer:
+    /// input arrives as discrete keystrokes with no accumulated context.
+    async fn check_input_patterns(&mut self, input: &[u8]) -> Result<Option<InteractResult>> {
+        let input_str = String::from_utf8_lossy(input).into_owned();
 
-        for (index, hook) in self.input_hooks.iter().enumerate() {
-            if let Some(m) = hook.pattern.matches(&input_str) {
-                let matched = &input_str[m.start..m.end];
-                let before = &input_str[..m.start];
-                let after = &input_str[m.end..];
+        for index in 0..self.input_hooks.len() {
+            let Some(m) = self.input_hooks[index].pattern.matches(&input_str) else {
+                continue;
+            };
 
+            let action = {
                 let ctx = InteractContext {
-                    matched,
-                    before,
-                    after,
+                    matched: &input_str[m.start..m.end],
+                    before: &input_str[..m.start],
+                    after: &input_str[m.end..],
                     buffer: &input_str,
                     pattern_index: index,
                 };
+                (self.input_hooks[index].callback)(&ctx)
+            };
 
-                match (hook.callback)(&ctx) {
-                    InteractAction::Continue => {}
-                    InteractAction::Send(data) => {
-                        let mut transport = self.transport.lock().await;
-                        transport.write_all(&data).await.map_err(ExpectError::Io)?;
-                        transport.flush().await.map_err(ExpectError::Io)?;
-                    }
-                    InteractAction::Stop => {
-                        return Ok(Some(InteractResult {
-                            reason: InteractEndReason::PatternStop {
-                                pattern_index: index,
-                            },
-                            buffer: self.buffer.clone(),
-                        }));
-                    }
-                    InteractAction::Error(msg) => {
-                        return Ok(Some(InteractResult {
-                            reason: InteractEndReason::Error(msg),
-                            buffer: self.buffer.clone(),
-                        }));
-                    }
+            match action {
+                InteractAction::Continue => {}
+                InteractAction::Send(data) => self.send(&data).await?,
+                InteractAction::Stop => {
+                    let buffer = self.buffer();
+                    return Ok(Some(InteractResult {
+                        reason: InteractEndReason::PatternStop {
+                            pattern_index: index,
+                        },
+                        buffer,
+                    }));
+                }
+                InteractAction::Error(msg) => {
+                    let buffer = self.buffer();
+                    return Ok(Some(InteractResult {
+                        reason: InteractEndReason::Error(msg),
+                        buffer,
+                    }));
                 }
             }
         }
@@ -842,31 +934,511 @@ where
         self.current_size = Some(new_size);
 
         // Call the user's resize hook if registered
-        if let Some(ref hook) = self.resize_hook {
-            match hook(&ctx) {
-                InteractAction::Continue => {}
-                InteractAction::Send(data) => {
-                    let mut transport = self.transport.lock().await;
-                    transport.write_all(&data).await.map_err(ExpectError::Io)?;
-                    transport.flush().await.map_err(ExpectError::Io)?;
-                }
-                InteractAction::Stop => {
-                    self.hook_manager.notify(&InteractionEvent::Ended);
-                    return Ok(Some(InteractResult {
-                        reason: InteractEndReason::PatternStop { pattern_index: 0 },
-                        buffer: self.buffer.clone(),
-                    }));
-                }
-                InteractAction::Error(msg) => {
-                    self.hook_manager.notify(&InteractionEvent::Ended);
-                    return Ok(Some(InteractResult {
-                        reason: InteractEndReason::Error(msg),
-                        buffer: self.buffer.clone(),
-                    }));
-                }
+        let action = self.resize_hook.as_ref().map(|hook| hook(&ctx));
+        match action {
+            None | Some(InteractAction::Continue) => {}
+            Some(InteractAction::Send(data)) => self.send(&data).await?,
+            Some(InteractAction::Stop) => {
+                self.hook_manager.notify(&InteractionEvent::Ended);
+                let buffer = self.buffer();
+                return Ok(Some(InteractResult {
+                    reason: InteractEndReason::PatternStop { pattern_index: 0 },
+                    buffer,
+                }));
+            }
+            Some(InteractAction::Error(msg)) => {
+                self.hook_manager.notify(&InteractionEvent::Ended);
+                let buffer = self.buffer();
+                return Ok(Some(InteractResult {
+                    reason: InteractEndReason::Error(msg),
+                    buffer,
+                }));
             }
         }
 
         Ok(None)
+    }
+}
+
+/// Rewrite every bare `\n` in `data` as `\r\n`, leaving an existing `\r\n`
+/// alone. `pending_cr` carries "the previous chunk ended in `\r`" across
+/// calls, so a CRLF split over two reads is still recognised as one.
+///
+/// This is `InteractionMode::crlf`: a raw-mode terminal does not translate on
+/// output, so a child whose newlines reach it as bare LF — anything that is
+/// not a PTY, since a PTY's ONLCR has already done this — stair-steps.
+fn lf_to_crlf(data: &[u8], pending_cr: &mut bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + data.len() / 16);
+    for &byte in data {
+        if byte == b'\n' && !*pending_cr {
+            out.push(b'\r');
+        }
+        out.push(byte);
+        *pending_cr = byte == b'\r';
+    }
+    out
+}
+
+#[cfg(all(test, feature = "mock"))]
+mod tests {
+    use std::future::Future;
+    use std::io;
+    use std::pin::Pin;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context, Poll};
+    use std::time::Duration;
+
+    use tokio::io::ReadBuf;
+
+    use super::*;
+    use crate::config::SessionConfig;
+    use crate::mock::MockTransport;
+    use crate::session::Session;
+
+    /// A terminal input that is permanently at end-of-file, counting every read.
+    ///
+    /// A loop that treats "the user's terminal closed" as a reason to retry
+    /// reads this once per iteration, so the count measures how many times the
+    /// loop went round.
+    struct ClosedInput(Arc<AtomicUsize>);
+
+    impl AsyncRead for ClosedInput {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+            _buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            // Returning with the buffer unfilled is EOF.
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    /// A session over a mock transport pre-loaded with `output`, plus a handle
+    /// for queueing more and reading back what the interaction sent.
+    fn session(output: &str) -> (Session<MockTransport>, MockTransport) {
+        let mock = MockTransport::new();
+        let handle = mock.clone();
+        handle.queue_output_str(output);
+        (Session::new(mock, SessionConfig::default()), handle)
+    }
+
+    /// Drive an interaction under a hard outer bound.
+    ///
+    /// An interaction that fails to end on its own should fail the test, not
+    /// hang the suite — which is what happened when the loop's deadline branch
+    /// was mutated away.
+    async fn bounded(interaction: impl Future<Output = Result<InteractResult>>) -> InteractResult {
+        tokio::time::timeout(Duration::from_secs(5), interaction)
+            .await
+            .expect("the interaction never ended on its own")
+            .expect("the interaction should end cleanly")
+    }
+
+    #[tokio::test]
+    async fn output_pattern_can_stop_the_interaction() {
+        let (mut session, _handle) = session("login: ");
+        let result = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_secs(2))
+                .on_output("login:", |_| InteractAction::Stop)
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result.reason,
+                InteractEndReason::PatternStop { pattern_index: 0 }
+            ),
+            "expected a pattern stop, got {:?}",
+            result.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn an_output_hook_can_answer_the_child() {
+        let (mut session, handle) = session("password: ");
+        let result = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .on_output("password:", |ctx| ctx.send("hunter2\n"))
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert_eq!(handle.take_input_str(), "hunter2\n");
+        assert!(
+            matches!(result.reason, InteractEndReason::Timeout),
+            "expected a timeout, got {:?}",
+            result.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_input_reaches_the_child() {
+        let (mut session, handle) = session("");
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"whoami\n"[..], Vec::new()),
+        )
+        .await;
+
+        assert_eq!(handle.take_input_str(), "whoami\n");
+    }
+
+    #[tokio::test]
+    async fn child_output_reaches_the_terminal() {
+        let (mut session, _handle) = session("hello world");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b""[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(String::from_utf8_lossy(&terminal), "hello world");
+    }
+
+    #[tokio::test]
+    async fn eof_from_the_child_ends_the_interaction() {
+        let (mut session, handle) = session("bye\n");
+        handle.signal_eof();
+        let result = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_secs(2))
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(result.reason, InteractEndReason::Eof),
+            "expected EOF, got {:?}",
+            result.reason
+        );
+    }
+
+    #[tokio::test]
+    async fn the_escape_sequence_ends_the_interaction() {
+        let (mut session, _handle) = session("");
+        let result = bounded(
+            session
+                .interact()
+                .with_escape(vec![0x1d])
+                .with_timeout(Duration::from_secs(2))
+                .start_with_io(&b"\x1d"[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(result.reason, InteractEndReason::Escape),
+            "expected an escape, got {:?}",
+            result.reason
+        );
+    }
+
+    /// A terminal whose input has closed is not a reason to spin. `interact()`
+    /// under `< /dev/null`, or with a pipe whose writer has gone, reads EOF
+    /// instantly on every pass, so a loop that retries never parks. Measured at
+    /// 3,192,359 reads in 300ms before the fix.
+    #[tokio::test]
+    async fn a_closed_terminal_input_is_read_once_not_spun_on() {
+        let reads = Arc::new(AtomicUsize::new(0));
+        let (mut session, _handle) = session("");
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(ClosedInput(Arc::clone(&reads)), Vec::new()),
+        )
+        .await;
+
+        let count = reads.load(Ordering::Relaxed);
+        assert!(
+            count <= 5,
+            "closed terminal input was read {count} times in 300ms; the loop is spinning"
+        );
+    }
+
+    /// The deadline has to be part of what the loop waits on. Once a closed
+    /// terminal input stops driving iterations, nothing else wakes a quiet
+    /// session, so the configured timeout is the only thing that can end it.
+    #[tokio::test]
+    async fn a_quiet_interaction_still_times_out() {
+        let (mut session, _handle) = session("");
+        let started = std::time::Instant::now();
+        let result = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(ClosedInput(Arc::new(AtomicUsize::new(0))), Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(result.reason, InteractEndReason::Timeout),
+            "expected a timeout, got {:?}",
+            result.reason
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the timeout took {:?}, far past its 300ms deadline",
+            started.elapsed()
+        );
+    }
+
+    /// AR-017. A PTY read ends wherever the kernel buffer does, so a chunk
+    /// routinely stops partway through a multibyte character. Dropping such a
+    /// chunk loses it from what the interaction's patterns match against, and
+    /// the loss is invisible — the bytes still reach the terminal.
+    #[tokio::test]
+    async fn a_chunk_split_mid_character_is_not_dropped() {
+        // "caf" plus the first byte of 'é'; the rest arrives in the next read.
+        let (mut session, handle) = session("");
+        handle.queue_output(&[b'c', b'a', b'f', 0xC3]);
+
+        let queue = handle.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            queue.queue_output(&[0xA9, b' ', b'r', b'e', b'a', b'd', b'y']);
+        });
+
+        let result = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(600))
+                .on_output("café ready", |_| InteractAction::Stop)
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(
+                result.reason,
+                InteractEndReason::PatternStop { pattern_index: 0 }
+            ),
+            "the split chunk was dropped, so the pattern never fired; got {:?}",
+            result.reason
+        );
+    }
+
+    /// AR-016. Trimming the interaction buffer used to slice a `String` at a
+    /// raw byte offset, which panics when the cut lands inside a character.
+    /// Three 3000-byte bursts cross the 8192-byte bound at byte 808 of a
+    /// three-byte sequence.
+    #[tokio::test]
+    async fn trimming_a_multibyte_stream_does_not_panic() {
+        let (mut session, handle) = session("");
+
+        let queue = handle.clone();
+        tokio::spawn(async move {
+            let burst = "€".repeat(1000);
+            for _ in 0..3 {
+                tokio::time::sleep(Duration::from_millis(30)).await;
+                queue.queue_output_str(&burst);
+            }
+        });
+
+        let result = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(400))
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            matches!(result.reason, InteractEndReason::Timeout),
+            "expected a timeout, got {:?}",
+            result.reason
+        );
+    }
+
+    /// AR-003. The session is not a bystander while `interact()` runs: output
+    /// the interaction reads lands in the session's own buffer, so a caller
+    /// that interacts and then expects sees what happened in between.
+    #[tokio::test]
+    async fn output_read_during_the_interaction_reaches_the_session() {
+        let (mut session, _handle) = session("build finished\n");
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            session.buffer().contains("build finished"),
+            "the session buffer missed the interaction's output: {:?}",
+            session.buffer()
+        );
+    }
+
+    /// AR-003/AR-004. EOF observed by the interaction is EOF for the session.
+    #[tokio::test]
+    async fn eof_during_the_interaction_reaches_the_session_state() {
+        let (mut session, handle) = session("done\n");
+        handle.signal_eof();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_secs(2))
+                .start_with_io(&b""[..], Vec::new()),
+        )
+        .await;
+
+        assert!(
+            session.is_eof(),
+            "the session did not see the EOF the interaction ended on; state = {:?}",
+            session.state()
+        );
+    }
+    // ---- InteractionMode fields (AR-007) -------------------------------------
+    //
+    // `local_echo` and `crlf` were public, settable, and read by nothing. Each
+    // test observes the field through the loop, not through the struct.
+
+    #[tokio::test]
+    async fn local_echo_writes_typed_input_back_to_the_terminal() {
+        let (mut session, handle) = session("");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_mode(InteractionMode::new().with_local_echo(true))
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"typed"[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(
+            String::from_utf8_lossy(&terminal),
+            "typed",
+            "local echo should show the keystrokes on the terminal"
+        );
+        assert_eq!(handle.take_input_str(), "typed", "and still forward them");
+    }
+
+    #[tokio::test]
+    async fn local_echo_is_off_by_default() {
+        let (mut session, _handle) = session("");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"typed"[..], &mut terminal),
+        )
+        .await;
+
+        assert!(
+            terminal.is_empty(),
+            "nothing should be echoed by default, got {:?}",
+            String::from_utf8_lossy(&terminal)
+        );
+    }
+
+    /// `crlf` (on by default) rewrites a bare `\n` from the child as `\r\n` on
+    /// the way to the terminal. A raw-mode terminal needs the carriage return
+    /// or every line after the first starts where the previous one ended; a
+    /// PTY child already emits `\r\n` (ONLCR), so the translation is a no-op
+    /// there and only bites on transports that pass bare `\n` through.
+    #[tokio::test]
+    async fn crlf_translates_bare_newlines_for_the_terminal() {
+        let (mut session, _handle) = session("one\ntwo\r\nthree\n");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b""[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(
+            String::from_utf8_lossy(&terminal),
+            "one\r\ntwo\r\nthree\r\n",
+            "bare LF should become CRLF; an existing CRLF must not double"
+        );
+    }
+
+    #[tokio::test]
+    async fn crlf_can_be_disabled() {
+        let (mut session, _handle) = session("one\ntwo\r\n");
+        let mut terminal = Vec::new();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_mode(InteractionMode::new().with_crlf(false))
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b""[..], &mut terminal),
+        )
+        .await;
+
+        assert_eq!(String::from_utf8_lossy(&terminal), "one\ntwo\r\n");
+    }
+
+    /// The translation has to carry state across reads: a chunk that ends in
+    /// `\r` followed by one that starts with `\n` is one CRLF, not a bare LF.
+    #[test]
+    fn crlf_translation_spans_chunk_boundaries() {
+        let mut pending_cr = false;
+        let mut out = Vec::new();
+        for chunk in [&b"a\r"[..], b"\nb\n", b"c\r", b"\n"] {
+            out.extend(lf_to_crlf(chunk, &mut pending_cr));
+        }
+        assert_eq!(String::from_utf8_lossy(&out), "a\r\nb\r\nc\r\n");
+    }
+
+    /// `delay_before_send` paces scripted sends, not typing. With a delay far
+    /// longer than the interaction, a forwarded keystroke must still arrive
+    /// promptly.
+    #[tokio::test]
+    async fn terminal_keystrokes_skip_delay_before_send() {
+        let mock = MockTransport::new();
+        let handle = mock.clone();
+        let config = SessionConfig::default().delay_before_send(Duration::from_secs(2));
+        let mut session = Session::new(mock, config);
+
+        let started = std::time::Instant::now();
+        let _ = bounded(
+            session
+                .interact()
+                .no_escape()
+                .with_timeout(Duration::from_millis(300))
+                .start_with_io(&b"k"[..], Vec::new()),
+        )
+        .await;
+
+        assert_eq!(handle.take_input_str(), "k");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "a keystroke waited on delay_before_send: {:?}",
+            started.elapsed()
+        );
     }
 }

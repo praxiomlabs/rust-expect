@@ -159,7 +159,9 @@ pub struct Dialog {
     pub description: String,
     /// Steps in the dialog.
     pub steps: Vec<DialogStep>,
-    /// Entry point step name.
+    /// Name of the step to begin at. `None` — the default — begins at the
+    /// first step. A name that matches no step fails the dialog rather than
+    /// falling back to the first.
     pub entry: Option<String>,
     /// Variables for substitution.
     pub variables: HashMap<String, String>,
@@ -189,11 +191,16 @@ impl Dialog {
     }
 
     /// Add a step.
+    ///
+    /// Steps run in the order they are added. Execution begins at the first
+    /// one unless [`entry_point`](Self::entry_point) says otherwise.
+    ///
+    /// Adding a step deliberately does not set the entry point. It used to
+    /// name the first *named* step as the entry, which meant a dialog whose
+    /// early steps were unnamed silently began part-way through itself and
+    /// skipped them.
     #[must_use]
     pub fn step(mut self, step: DialogStep) -> Self {
-        if self.entry.is_none() && !step.name.is_empty() {
-            self.entry = Some(step.name.clone());
-        }
         self.steps.push(step);
         self
     }

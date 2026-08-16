@@ -28,6 +28,11 @@
 //! }
 //! ```
 
+/// Re-exported so the [`regex!`] macro's expansion resolves in any crate that
+/// depends on rust-expect. It named a bare `regex::Regex`, which only resolves
+/// where the caller happens to depend on the regex crate directly.
+#[doc(hidden)]
+pub use ::regex;
 // Re-export macros
 pub use rust_expect_macros::{dialog, patterns, regex, timeout};
 
@@ -73,10 +78,7 @@ pub mod pii;
 pub use auto_config::{LocaleInfo, ShellType, detect_shell};
 // Re-export commonly used items from Phase 5
 pub use backend::{BackendType, PtyConfig, PtySpawner};
-pub use config::{
-    BufferConfig, EncodingConfig, HumanTypingConfig, InteractConfig, LineEnding, LogFormat,
-    LoggingConfig, SessionConfig, TimeoutConfig,
-};
+pub use config::{BufferConfig, HumanTypingConfig, LineEnding, SessionConfig, TimeoutConfig};
 pub use dialog::{Dialog, DialogBuilder, DialogStep};
 pub use encoding::{
     DetectedEncoding, EncodedText, LineEndingStyle, decode_utf8_lossy, detect_encoding_from_env,
@@ -96,16 +98,15 @@ pub use metrics::{Counter, Gauge, Histogram, MetricsRegistry, SessionMetrics};
 // Conditional re-exports
 #[cfg(feature = "mock")]
 pub use mock::{MockBuilder, MockSession, MockTransport, Scenario};
-pub use multi::{
-    GroupBuilder, GroupManager, GroupResult, MultiSessionManager, PatternSelector, ReadyType,
-    SelectResult, SendResult, SessionGroup,
-};
+pub use multi::{MultiSessionManager, PatternSelector, ReadyType, SelectResult, SendResult};
 #[cfg(feature = "pii-redaction")]
 pub use pii::{PiiDetector, PiiRedactor, PiiType};
 #[cfg(feature = "screen")]
 pub use screen::{Attributes, Cell, ScreenBuffer};
 pub use send::{AnsiSend, BasicSend, HumanTyper, Sender};
-pub use session::{OutputTap, QuickSession, Session, SessionBuilder, TapId};
+pub use session::{
+    EventSubscriber, OutputTap, QuickSession, Session, SessionBuilder, SessionEvent, TapId,
+};
 pub use sync::{SyncSession, block_on};
 pub use transcript::{Player, Recorder, Transcript, TranscriptEvent};
 pub use types::{

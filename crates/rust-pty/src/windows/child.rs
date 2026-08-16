@@ -360,15 +360,24 @@ where
     // sole ownership of.
     let process = unsafe { OwnedHandle::from_raw_handle(process_info.hProcess as RawHandle) };
 
-    if let Some(ref job_handle) = job {
-        // SAFETY: handles are valid
-        unsafe {
+    // The job is what makes the child die with the session, via
+    // `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. If the assignment fails, that
+    // guarantee is simply absent — so drop the job rather than keep holding a
+    // handle whose whole meaning is a promise it is not making. `job: None`
+    // then honestly says "this child is not owned by a job".
+    //
+    // Unverified on Windows: type-checked and linted for the MSVC target from
+    // Linux, never executed. See AR-010.
+    let job = job.filter(|job_handle| {
+        // SAFETY: both handles are valid and owned here.
+        let assigned = unsafe {
             AssignProcessToJobObject(
                 job_handle.as_raw_handle() as HANDLE,
                 process.as_raw_handle() as HANDLE,
-            );
-        }
-    }
+            )
+        };
+        assigned != FALSE
+    });
 
     Ok(WindowsPtyChild::new(process, process_info.dwProcessId, job))
 }

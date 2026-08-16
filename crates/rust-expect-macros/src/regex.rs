@@ -36,11 +36,14 @@ pub fn expand(input: RegexInput) -> TokenStream {
 
     quote! {
         {
-            // Use once_cell for lazy static initialization without unsafe
-            static REGEX: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            // Reached through rust_expect's own re-export rather than a bare
+            // `regex::`, which resolves only in crates that happen to depend on
+            // the regex crate themselves.
+            static REGEX: ::std::sync::OnceLock<::rust_expect::regex::Regex> =
+                ::std::sync::OnceLock::new();
             REGEX.get_or_init(|| {
-                // SAFETY: We validated the regex at compile time
-                regex::Regex::new(#lit).expect("regex was validated at compile time")
+                ::rust_expect::regex::Regex::new(#lit)
+                    .expect("regex was validated when `regex!` expanded")
             })
         }
     }

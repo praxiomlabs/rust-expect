@@ -320,17 +320,6 @@ fn session_builder_buffer_size() {
     assert_eq!(config.buffer.max_size, 1024 * 1024);
 }
 
-/// Test `SessionBuilder` logging.
-#[test]
-fn session_builder_logging() {
-    let config = SessionBuilder::new()
-        .command("test")
-        .log_to_file("/tmp/test.log")
-        .build();
-
-    assert_eq!(config.logging.log_file, Some("/tmp/test.log".into()));
-}
-
 // =============================================================================
 // End-to-end spawn tests (require actual process spawning)
 // =============================================================================
@@ -405,7 +394,10 @@ async fn spawn_has_pid() {
         .expect("Failed to spawn true");
 
     let pid = session.pid();
-    assert!(pid > 0, "Expected valid PID, got {pid}");
+    assert!(
+        pid.is_some_and(|p| p > 0),
+        "Expected valid PID, got {pid:?}"
+    );
 }
 
 /// Spawning a non-existent program must surface a spawn error. The old
@@ -436,7 +428,7 @@ async fn spawn_with_custom_config() {
 
     // Just verify it spawned successfully
     let pid = session.pid();
-    assert!(pid > 0);
+    assert!(pid.is_some_and(|p| p > 0));
 }
 
 /// Test spawning command that fails.

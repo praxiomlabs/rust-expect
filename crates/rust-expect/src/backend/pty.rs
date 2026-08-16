@@ -9,7 +9,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-use crate::backend::ChildExit;
+use crate::backend::{ChildExit, ProcessControl, ProcessHandle, Resizable};
 use crate::config::SessionConfig;
 use crate::error::{ExpectError, Result, SpawnError};
 use crate::types::ProcessExitStatus;
@@ -372,7 +372,7 @@ impl PtyHandle {
 
     // NB: no `signal`/`kill` here. The unguarded low-level signal path was
     // removed for the PID-reuse guard (S1); signal a child through
-    // `Session`/`SyncSession`, whose `AsyncPty::signal` performs the
+    // `Session`/`SyncSession`, whose `ProcessHandle` performs the
     // authoritative reap-before-kill check.
 }
 
@@ -400,19 +400,6 @@ impl WindowsPtyHandle {
         self.dimensions = (cols, rows);
         Ok(())
     }
-
-    /// Check if the child process is still running.
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        self.child.is_running()
-    }
-
-    /// Kill the process.
-    pub fn kill(&mut self) -> Result<()> {
-        self.child
-            .kill()
-            .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
-    }
 }
 
 /// Async wrapper around a PTY file descriptor for use with Tokio.
@@ -423,12 +410,187 @@ impl WindowsPtyHandle {
 pub struct AsyncPty {
     /// The underlying Unix PTY master from rust-pty.
     master: rust_pty::UnixPtyMaster,
-    /// The child process handle.
-    child: rust_pty::UnixPtyChild,
+    /// Control over the child, shared with the owning session.
+    ///
+    /// The transport keeps a handle rather than the child itself so that
+    /// killing or signalling never contends with a parked read. It still needs
+    /// the handle because `poll_write` must turn a write to an exited child
+    /// into `BrokenPipe`.
+    process: ProcessHandle,
     /// Process ID.
     pid: u32,
     /// Terminal dimensions.
     dimensions: (u16, u16),
+}
+
+/// Control over a Unix child process, separated from the PTY master that
+/// carries its I/O.
+#[cfg(unix)]
+pub struct PtyProcess {
+    /// The child process handle from rust-pty.
+    child: rust_pty::UnixPtyChild,
+    /// Process ID.
+    pid: u32,
+    /// Whether the caller has given up ownership, so dropping this handle
+    /// leaves the child running. See [`ProcessControl::detach`].
+    detached: bool,
+}
+
+#[cfg(unix)]
+impl PtyProcess {
+    /// Non-blocking reap.
+    ///
+    /// Returns `Some(status)` once the child has exited (rust-pty caches the
+    /// status), or `None` while it is still running or its status cannot be
+    /// determined.
+    fn try_wait(&mut self) -> Option<ProcessExitStatus> {
+        match self.child.try_wait() {
+            Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
+            Ok(Some(rust_pty::ExitStatus::Signaled(sig))) => Some(ProcessExitStatus::Signaled(sig)),
+            Ok(None) | Err(_) => None,
+        }
+    }
+
+    /// Whether the child leads its own process group, and can therefore be
+    /// signalled as one.
+    ///
+    /// Checked rather than assumed. A child spawned with neither `new_session`
+    /// nor `controlling_terminal` inherits *our* process group, and `killpg` on
+    /// its pid would then signal this process and everything beside it. Both
+    /// options default to true, so in practice the child is its own leader —
+    /// but "in practice" is not a guard.
+    ///
+    /// Queried per call rather than cached at construction: `setsid` runs in the
+    /// child after fork, so there is no moment at spawn when the answer is
+    /// reliably known, and a child is free to move itself later.
+    #[allow(unsafe_code)]
+    fn leads_its_group(&self) -> bool {
+        // SAFETY: a read-only query; `getpgid` returns -1 for an unknown pid,
+        // which simply reads as "not a leader".
+        let pgid = unsafe { libc::getpgid(self.pid as i32) };
+        pgid == self.pid as i32
+    }
+
+    /// Deliver `signal` to the child's process group if it leads one, and to
+    /// the child alone otherwise. Returns the raw syscall result.
+    #[allow(unsafe_code)]
+    fn deliver(&self, signal: i32) -> i32 {
+        if self.leads_its_group() {
+            // SAFETY: pid is a live process that leads its own group, checked
+            // immediately above.
+            unsafe { libc::killpg(self.pid as i32, signal) }
+        } else {
+            // SAFETY: pid is a valid process ID from the spawned child.
+            unsafe { libc::kill(self.pid as i32, signal) }
+        }
+    }
+
+    /// Whether the child has been observed to exit, by any exit status
+    /// rust-pty can report.
+    ///
+    /// Deliberately broader than `try_wait().is_some()`: this is the guard
+    /// `poll_write` uses, and a write to a child that exited in a form
+    /// [`Self::try_wait`] declines to map must still fail rather than
+    /// disappear into a dead PTY.
+    fn has_exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+}
+
+#[cfg(unix)]
+impl ProcessControl for PtyProcess {
+    fn pid(&self) -> Option<u32> {
+        Some(self.pid)
+    }
+
+    /// Send a signal to the child process.
+    ///
+    /// Delivered to the child's **process group**, which is the behaviour of the
+    /// terminal this session is: pressing Ctrl-C at a terminal signals the
+    /// foreground process group, not one process. Without it a shell's
+    /// background jobs survive `kill()` — measured, in
+    /// `tests/unix_process_ownership.rs`. Falls back to signalling the child
+    /// alone when it does not lead a group of its own — a child spawned with
+    /// neither `new_session` nor `controlling_terminal` inherits this process's
+    /// group, and signalling that group would hit us.
+    ///
+    /// Guards against PID reuse (S1): if the child has already exited (and
+    /// possibly been reaped, freeing its PID for the OS to recycle), this
+    /// returns [`ExpectError::SessionClosed`] rather than risk the signal
+    /// landing on an unrelated process. A raw `ESRCH` maps to the same. Other
+    /// delivery failures (e.g. `EPERM`) surface unchanged as
+    /// [`ExpectError::Io`]. Raw syscalls are used (rather than
+    /// `rust_pty::PtyChild::signal`) to preserve arbitrary-signal support and
+    /// keep the authoritative guard at this layer.
+    fn signal(&mut self, signal: i32) -> Result<()> {
+        // Authoritative pre-kill reap check via tokio's child handle.
+        if self.try_wait().is_some() {
+            return Err(ExpectError::SessionClosed);
+        }
+        let result = self.deliver(signal);
+        if result == 0 {
+            Ok(())
+        } else {
+            let err = io::Error::last_os_error();
+            // Child exited between the guard and the kill: treat as already
+            // closed rather than a raw error.
+            if err.raw_os_error() == Some(libc::ESRCH) {
+                Err(ExpectError::SessionClosed)
+            } else {
+                Err(ExpectError::Io(err))
+            }
+        }
+    }
+
+    fn kill(&mut self) -> Result<()> {
+        self.signal(libc::SIGKILL)
+    }
+
+    fn is_running(&mut self) -> bool {
+        self.try_wait().is_none()
+    }
+
+    fn try_exit_status(&mut self) -> Option<ProcessExitStatus> {
+        self.try_wait()
+    }
+
+    fn has_exited(&mut self) -> bool {
+        Self::has_exited(self)
+    }
+
+    fn detach(&mut self) {
+        self.detached = true;
+    }
+}
+
+/// The child dies with the last handle to it.
+///
+/// Closing the PTY master already hangs up the child's controlling terminal,
+/// and that `SIGHUP` cleans up an ordinary child on its own — but only an
+/// ordinary one. A child that ignores `SIGHUP` outlived its session entirely,
+/// with nothing left holding it and nothing that would ever reap it (measured
+/// in `tests/unix_process_ownership.rs`). Relying on the hangup also meant the
+/// only cleanup in the crate was a side effect of field drop order that nothing
+/// stated or tested, and that any handle outliving the session would remove.
+///
+/// This runs when the last `ProcessHandle` goes, so a session and a transport
+/// that share one keep the child alive until both are gone.
+///
+/// `SIGKILL`, not a gentler signal followed by a wait: `Drop` cannot await, and
+/// a blocking grace period inside it would stall whatever thread is dropping
+/// the session. Callers who want the child asked nicely first have
+/// `Session::shutdown`, which can wait. Callers who want the child to outlive
+/// the session have `Session::detach`.
+#[cfg(unix)]
+impl Drop for PtyProcess {
+    fn drop(&mut self) {
+        if self.detached || self.try_wait().is_some() {
+            return;
+        }
+        // Best effort by construction: nothing here can report a failure to
+        // anyone, and a child that is already gone is the common case.
+        let _ = self.deliver(libc::SIGKILL);
+    }
 }
 
 #[cfg(unix)]
@@ -445,31 +607,23 @@ impl AsyncPty {
         let dimensions = handle.dimensions;
         Ok(Self {
             master: handle.master,
-            child: handle.child,
+            process: ProcessHandle::new(PtyProcess {
+                child: handle.child,
+                pid,
+                detached: false,
+            }),
             pid,
             dimensions,
         })
     }
 
-    /// Non-blocking reap of the child process.
+    /// A cloneable handle to this PTY's child process.
     ///
-    /// Returns `Some(status)` once the child has exited (rust-pty caches the
-    /// status), or `None` while it is still running or its status cannot be
-    /// determined.
-    pub fn try_wait(&mut self) -> Option<ProcessExitStatus> {
-        match self.child.try_wait() {
-            Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
-            Ok(Some(rust_pty::ExitStatus::Signaled(sig))) => Some(ProcessExitStatus::Signaled(sig)),
-            Ok(None) | Err(_) => None,
-        }
-    }
-
-    /// Check whether the child process is still running.
-    ///
-    /// Non-blocking: reaps through tokio's child handle, so it reports the truth
-    /// immediately after the child exits. Mirrors `WindowsAsyncPty::is_running`.
-    pub fn is_running(&mut self) -> bool {
-        self.try_wait().is_none()
+    /// The session takes one of these at spawn time so that process control
+    /// does not have to go through the transport lock.
+    #[must_use]
+    pub fn process_handle(&self) -> ProcessHandle {
+        self.process.clone()
     }
 
     /// Get the process ID.
@@ -493,43 +647,6 @@ impl AsyncPty {
         self.dimensions = (cols, rows);
         Ok(())
     }
-
-    /// Send a signal to the child process.
-    ///
-    /// Guards against PID reuse (S1): if the child has already exited (and
-    /// possibly been reaped, freeing its PID for the OS to recycle), this
-    /// returns [`ExpectError::SessionClosed`] rather than risk `libc::kill`
-    /// landing on an unrelated process. A raw `ESRCH` from `kill` maps to the
-    /// same. Other delivery failures (e.g. `EPERM`) surface unchanged as
-    /// [`ExpectError::Io`]. A raw `libc::kill` is used (rather than
-    /// `rust_pty::PtyChild::signal`) to preserve arbitrary-signal support and
-    /// keep the authoritative guard at this layer.
-    #[allow(unsafe_code)]
-    pub fn signal(&mut self, signal: i32) -> Result<()> {
-        // Authoritative pre-kill reap check via tokio's child handle.
-        if self.try_wait().is_some() {
-            return Err(ExpectError::SessionClosed);
-        }
-        // SAFETY: pid is a valid process ID from the spawned child.
-        let result = unsafe { libc::kill(self.pid as i32, signal) };
-        if result == 0 {
-            Ok(())
-        } else {
-            let err = io::Error::last_os_error();
-            // Child exited between the guard and the kill: treat as already
-            // closed rather than a raw error.
-            if err.raw_os_error() == Some(libc::ESRCH) {
-                Err(ExpectError::SessionClosed)
-            } else {
-                Err(ExpectError::Io(err))
-            }
-        }
-    }
-
-    /// Kill the child process.
-    pub fn kill(&mut self) -> Result<()> {
-        self.signal(libc::SIGKILL)
-    }
 }
 
 #[cfg(unix)]
@@ -551,7 +668,7 @@ impl AsyncWrite for AsyncPty {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         // A dead child's PTY master buffers writes; surface exit as BrokenPipe.
-        if matches!(self.child.try_wait(), Ok(Some(_))) {
+        if self.process.with(|c| c.has_exited()) {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         }
         Pin::new(&mut self.master).poll_write(cx, buf)
@@ -579,7 +696,18 @@ impl std::fmt::Debug for AsyncPty {
 #[cfg(unix)]
 impl ChildExit for AsyncPty {
     fn try_exit_status(&mut self) -> Option<ProcessExitStatus> {
-        self.try_wait()
+        self.process.with(|c| c.try_exit_status())
+    }
+}
+
+#[cfg(unix)]
+impl Resizable for AsyncPty {
+    fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        Self::resize(self, cols, rows)
+    }
+
+    fn dimensions(&self) -> (u16, u16) {
+        self.dimensions
     }
 }
 
@@ -591,12 +719,68 @@ impl ChildExit for AsyncPty {
 pub struct WindowsAsyncPty {
     /// The underlying Windows PTY master.
     master: rust_pty::WindowsPtyMaster,
-    /// The child process handle.
-    child: rust_pty::WindowsPtyChild,
+    /// Control over the child, shared with the owning session.
+    ///
+    /// As on Unix, the transport keeps a handle rather than the child so that
+    /// killing never contends with a parked read, while `poll_write` can still
+    /// turn a write to an exited child into `BrokenPipe`.
+    process: ProcessHandle,
     /// Process ID.
     pid: u32,
     /// Terminal dimensions.
     dimensions: (u16, u16),
+}
+
+/// Control over a Windows `ConPTY` child process, separated from the master
+/// that carries its I/O.
+#[cfg(windows)]
+pub struct WindowsPtyProcess {
+    /// The child process handle from rust-pty.
+    child: rust_pty::WindowsPtyChild,
+    /// Process ID.
+    pid: u32,
+}
+
+#[cfg(windows)]
+impl ProcessControl for WindowsPtyProcess {
+    fn pid(&self) -> Option<u32> {
+        Some(self.pid)
+    }
+
+    // `signal` is left at the trait default: Windows has no signals to send,
+    // so it reports ExpectError::Unsupported rather than silently doing
+    // nothing. This matches the pre-split API, where `Session<WindowsAsyncPty>`
+    // had no `signal` method at all.
+
+    fn kill(&mut self) -> Result<()> {
+        self.child
+            .kill()
+            .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
+    }
+
+    fn is_running(&mut self) -> bool {
+        self.child.is_running()
+    }
+
+    fn try_exit_status(&mut self) -> Option<ProcessExitStatus> {
+        // WindowsPtyChild::try_wait peeks GetExitCodeProcess without blocking and
+        // returns the real status once the child has exited. The exit watcher
+        // installed by rust-pty guarantees EOF is delivered to readers, so by the
+        // time Session::wait reaches here the child has typically already exited.
+        match self.child.try_wait() {
+            Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
+            // Windows reports every exit as `Terminated(exit_code)`; the code is the real exit code.
+            Ok(Some(rust_pty::ExitStatus::Terminated(code))) => {
+                Some(ProcessExitStatus::Exited(code as i32))
+            }
+            // Still running, or status unrecoverable.
+            Ok(None) | Err(_) => None,
+        }
+    }
+
+    fn has_exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
 }
 
 #[cfg(windows)]
@@ -610,10 +794,22 @@ impl WindowsAsyncPty {
         let dimensions = handle.dimensions;
         Self {
             master: handle.master,
-            child: handle.child,
+            process: ProcessHandle::new(WindowsPtyProcess {
+                child: handle.child,
+                pid,
+            }),
             pid,
             dimensions,
         }
+    }
+
+    /// A cloneable handle to this PTY's child process.
+    ///
+    /// The session takes one of these at spawn time so that process control
+    /// does not have to go through the transport lock.
+    #[must_use]
+    pub fn process_handle(&self) -> ProcessHandle {
+        self.process.clone()
     }
 
     /// Get the process ID.
@@ -638,37 +834,23 @@ impl WindowsAsyncPty {
         self.dimensions = (cols, rows);
         Ok(())
     }
-
-    /// Check if the child process is still running.
-    #[must_use]
-    pub fn is_running(&self) -> bool {
-        self.child.is_running()
-    }
-
-    /// Kill the child process.
-    pub fn kill(&mut self) -> Result<()> {
-        self.child
-            .kill()
-            .map_err(|e| ExpectError::Io(io::Error::other(format!("kill failed: {e}"))))
-    }
 }
 
 #[cfg(windows)]
 impl ChildExit for WindowsAsyncPty {
     fn try_exit_status(&mut self) -> Option<ProcessExitStatus> {
-        // WindowsPtyChild::try_wait peeks GetExitCodeProcess without blocking and
-        // returns the real status once the child has exited. The exit watcher
-        // installed by rust-pty guarantees EOF is delivered to readers, so by the
-        // time Session::wait reaches here the child has typically already exited.
-        match self.child.try_wait() {
-            Ok(Some(rust_pty::ExitStatus::Exited(code))) => Some(ProcessExitStatus::Exited(code)),
-            // Windows reports every exit as `Terminated(exit_code)`; the code is the real exit code.
-            Ok(Some(rust_pty::ExitStatus::Terminated(code))) => {
-                Some(ProcessExitStatus::Exited(code as i32))
-            }
-            // Still running, or status unrecoverable.
-            Ok(None) | Err(_) => None,
-        }
+        self.process.with(|c| c.try_exit_status())
+    }
+}
+
+#[cfg(windows)]
+impl Resizable for WindowsAsyncPty {
+    fn resize(&mut self, cols: u16, rows: u16) -> Result<()> {
+        Self::resize(self, cols, rows)
+    }
+
+    fn dimensions(&self) -> (u16, u16) {
+        self.dimensions
     }
 }
 
@@ -692,7 +874,7 @@ impl AsyncWrite for WindowsAsyncPty {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         // Mirror the Unix guard: a write after the ConPTY child exits must surface closure.
-        if matches!(self.child.try_wait(), Ok(Some(_))) {
+        if self.process.with(|c| c.has_exited()) {
             return Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()));
         }
         Pin::new(&mut self.master).poll_write(cx, buf)

@@ -192,6 +192,15 @@ impl StreamingRedactor {
         }
     }
 
+    /// The underlying redactor.
+    ///
+    /// For callers that need a one-shot redaction with the same detector and
+    /// placeholders, without going through this type's buffering.
+    #[must_use]
+    pub const fn redactor(&self) -> &PiiRedactor {
+        &self.redactor
+    }
+
     /// Flush any remaining data.
     pub fn flush(&mut self) -> String {
         let remaining = std::mem::take(&mut self.buffer);
@@ -199,10 +208,23 @@ impl StreamingRedactor {
     }
 
     /// Find a safe point to split the buffer.
+    ///
+    /// "Safe" is about character boundaries as much as about content: the
+    /// returned index is used to slice the buffer, and slicing a `String`
+    /// inside a multibyte character panics. Both fixed indices below can land
+    /// mid-character on any non-ASCII input.
     fn find_safe_point(&self) -> usize {
         if self.buffer.len() >= self.max_buffer {
-            // Force a split at max buffer
-            return self.max_buffer;
+            // Force a split at max buffer, rounded down to a character
+            // boundary.
+            let floor = floor_char_boundary(&self.buffer, self.max_buffer);
+            if floor > 0 {
+                return floor;
+            }
+            // A single character wider than `max_buffer` would round down to
+            // zero and the buffer would never drain. Emit that character whole
+            // instead, overshooting the bound by at most three bytes.
+            return ceil_char_boundary(&self.buffer, self.max_buffer);
         }
 
         // Try to find a newline
@@ -211,14 +233,43 @@ impl StreamingRedactor {
         }
 
         // Try to find a space
+        let window = floor_char_boundary(&self.buffer, 100);
         if self.buffer.len() > 100
-            && let Some(pos) = self.buffer[..100].rfind(' ')
+            && let Some(pos) = self.buffer[..window].rfind(' ')
         {
             return pos + 1;
         }
 
         0
     }
+}
+
+/// The largest character boundary at or below `index`.
+///
+/// `str::floor_char_boundary` is still unstable, and clamping is the whole
+/// point here: an index that lands inside a multibyte character panics when
+/// used to slice.
+const fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// The smallest character boundary at or above `index`.
+const fn ceil_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 #[cfg(test)]
@@ -311,5 +362,45 @@ mod tests {
         let result = redactor.redact("Use CODE-1234 to access");
         assert!(result.contains("*********")); // 9 asterisks for "CODE-1234"
         assert!(!result.contains("CODE-1234"));
+    }
+
+    /// The forced split at `max_buffer` used to slice the buffer at a raw byte
+    /// index, which panics when that index falls inside a multibyte character.
+    /// Any non-ASCII output large enough to hit the bound would take the
+    /// process down.
+    #[test]
+    fn streaming_split_at_max_buffer_handles_multibyte() {
+        let mut redactor = StreamingRedactor::new(PiiRedactor::new()).max_buffer(4);
+        // 'é' occupies bytes 3..5, so the split at 4 lands inside it.
+        let out = redactor.process("aaaébb");
+        assert!(!out.is_empty(), "the buffer should have been drained");
+        let all = format!("{out}{}", redactor.flush());
+        assert_eq!(all, "aaaébb", "no bytes may be lost or mangled");
+    }
+
+    /// The scan for a space also sliced at a fixed index.
+    #[test]
+    fn streaming_space_scan_handles_multibyte() {
+        let mut redactor = StreamingRedactor::new(PiiRedactor::new());
+        // No newline, over 100 bytes, and a multibyte character straddling
+        // byte 100.
+        let text = format!("{}é{}", "x".repeat(99), "y".repeat(50));
+        let out = redactor.process(&text);
+        let all = format!("{out}{}", redactor.flush());
+        assert_eq!(all, text, "no bytes may be lost or mangled");
+    }
+
+    /// A character wider than the whole buffer bound must still drain, rather
+    /// than rounding the split down to zero forever.
+    #[test]
+    fn streaming_character_wider_than_max_buffer_still_drains() {
+        let mut redactor = StreamingRedactor::new(PiiRedactor::new()).max_buffer(2);
+        let out = redactor.process("€€");
+        assert!(
+            !out.is_empty(),
+            "a 3-byte character with a 2-byte bound must still be emitted"
+        );
+        let all = format!("{out}{}", redactor.flush());
+        assert_eq!(all, "€€");
     }
 }

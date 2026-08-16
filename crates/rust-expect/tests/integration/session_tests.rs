@@ -1,8 +1,9 @@
 //! Session lifecycle tests.
 
-use rust_expect::config::SessionConfig;
-use rust_expect::session::SessionBuilder;
 use std::time::Duration;
+
+use rust_expect::config::SessionConfig;
+use rust_expect::session::{QuickSession, SessionBuilder};
 
 #[test]
 fn session_config_defaults() {
@@ -21,15 +22,14 @@ fn session_builder_configuration() {
         .timeout(Duration::from_secs(30));
 
     // Builder should have the correct config
-    let config = builder.config();
+    let config = builder.build();
     assert_eq!(config.dimensions, (120, 40));
     assert!(config.env.contains_key("TEST_VAR"));
 }
 
 #[test]
 fn session_builder_shell_mode() {
-    let builder = SessionBuilder::new().shell();
-    let config = builder.config();
+    let config = QuickSession::shell();
 
     // Shell mode should set command to /bin/sh or similar
     assert!(!config.command.is_empty());

@@ -18,7 +18,6 @@ fn interaction_mode_default() {
     let mode = InteractionMode::default();
     assert!(!mode.local_echo);
     assert!(mode.crlf);
-    assert_eq!(mode.buffer_size, 4096);
 }
 
 #[test]
@@ -26,29 +25,11 @@ fn interaction_mode_builder() {
     let mode = InteractionMode::new()
         .with_local_echo(true)
         .with_crlf(false)
-        .with_buffer_size(8192)
         .with_read_timeout(Duration::from_millis(50));
 
     assert!(mode.local_echo);
     assert!(!mode.crlf);
-    assert_eq!(mode.buffer_size, 8192);
     assert_eq!(mode.read_timeout, Duration::from_millis(50));
-}
-
-#[test]
-fn interaction_mode_exit_char() {
-    let mode = InteractionMode::new().with_exit_char(Some(0x1d)); // Ctrl+]
-
-    assert!(mode.is_exit_char(0x1d));
-    assert!(!mode.is_exit_char(0x03));
-}
-
-#[test]
-fn interaction_mode_escape_char() {
-    let mode = InteractionMode::new().with_escape_char(Some(0x1e)); // Ctrl+^
-
-    assert!(mode.is_escape_char(0x1e));
-    assert!(!mode.is_escape_char(0x03));
 }
 
 #[test]

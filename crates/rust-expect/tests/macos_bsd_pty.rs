@@ -39,7 +39,7 @@ async fn output_survives_reap_before_first_read() {
     // Let the child write "hello\n" and exit, then reap it (is_running ->
     // try_wait) before ever reading the master.
     tokio::time::sleep(Duration::from_millis(50)).await;
-    while session.is_running() {
+    while session.is_running() == Some(true) {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
 
@@ -61,7 +61,7 @@ async fn fast_exit_output_survives_reap_looped() {
             .await
             .expect("spawn should succeed");
         tokio::time::sleep(Duration::from_millis(5)).await;
-        while session.is_running() {
+        while session.is_running() == Some(true) {
             tokio::time::sleep(Duration::from_millis(2)).await;
         }
         let m = session

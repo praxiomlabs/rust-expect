@@ -412,9 +412,26 @@ where
 
 /// Duplicate the slave fd for a child stdio stream, returning an error rather
 /// than a `-1` on failure.
+///
+/// The copy is close-on-exec, made so atomically with `F_DUPFD_CLOEXEC`.
+///
+/// A plain `dup` does not carry `FD_CLOEXEC` over, so these three descriptors
+/// used to sit in the parent as inheritable fds between here and `spawn` —
+/// and every process forked by another thread in that window inherited them.
+/// Sessions spawned concurrently therefore held each other's slave ends open,
+/// which is worse than a leaked descriptor: a session's master never reaches
+/// EOF while another session's child is holding its slave, so `wait`,
+/// `wait_timeout` and `expect_eof` hang for as long as that unrelated child
+/// lives. Measured at 6 of 6 concurrently spawned children holding 2-4 foreign
+/// pts devices each.
+///
+/// Close-on-exec is correct for the stdio copies too, despite the name: the
+/// child's `dup2` onto fds 0/1/2 happens after fork and clears the flag on the
+/// descriptors it creates, so the child still gets its terminal.
 fn dup_slave(slave_raw: RawFd) -> Result<RawFd> {
     // SAFETY: slave_raw is a valid, open slave fd for the duration of the call.
-    let fd = unsafe { libc::dup(slave_raw) };
+    // `F_DUPFD_CLOEXEC` is POSIX-2008 and present on Linux, macOS and the BSDs.
+    let fd = unsafe { libc::fcntl(slave_raw, libc::F_DUPFD_CLOEXEC, 0) };
     if fd == -1 {
         return Err(PtyError::Spawn(io::Error::last_os_error()));
     }

@@ -28,10 +28,8 @@
 //! }
 //! ```
 
-mod group;
 mod select;
 
-pub use group::{GroupBuilder, GroupManager, GroupResult, SessionGroup};
 /// Session identifier type for multi-session operations.
 /// This is distinct from `types::SessionId` which is a UUID-based identifier.
 pub use select::SessionId as MultiSessionId;

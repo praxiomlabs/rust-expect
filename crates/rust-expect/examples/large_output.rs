@@ -61,7 +61,6 @@ async fn main() -> Result<()> {
         buffer: BufferConfig {
             max_size: 1024 * 1024, // 1 MB buffer
             search_window: Some(8192),
-            ring_buffer: true,
         },
         ..Default::default()
     };
@@ -76,7 +75,6 @@ async fn main() -> Result<()> {
         "   Search window: {:?}",
         session2.config().buffer.search_window
     );
-    println!("   Ring buffer: {}", session2.config().buffer.ring_buffer);
     drop(session2);
 
     // Example 4: Backpressure handling
@@ -154,20 +152,18 @@ async fn main() -> Result<()> {
     // Example 7: Buffer configuration options
     println!("\n7. Buffer configuration options...");
 
-    let small_buffer = BufferConfig::new(1024).search_window(512).ring_buffer(true);
+    let small_buffer = BufferConfig::new(1024).search_window(512);
 
     println!(
         "   Small buffer: {} bytes, window: {:?}",
         small_buffer.max_size, small_buffer.search_window
     );
 
-    let large_buffer = BufferConfig::new(10 * 1024 * 1024) // 10 MB
-        .ring_buffer(false); // Keep all data
+    let large_buffer = BufferConfig::new(10 * 1024 * 1024); // 10 MB
 
     println!(
-        "   Large buffer: {} MB, ring: {}",
-        large_buffer.max_size / 1024 / 1024,
-        large_buffer.ring_buffer
+        "   Large buffer: {} MB",
+        large_buffer.max_size / 1024 / 1024
     );
 
     // Clean up

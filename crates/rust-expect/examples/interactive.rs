@@ -63,14 +63,10 @@ async fn main() -> Result<()> {
     // Example 5: Interaction mode configuration
     println!("\n5. Interaction modes...");
 
-    let mode = InteractionMode::new()
-        .with_local_echo(true)
-        .with_crlf(true)
-        .with_exit_char(Some(0x1d)); // Ctrl+]
+    let mode = InteractionMode::new().with_local_echo(true).with_crlf(true);
 
     println!("   Local echo: {}", mode.local_echo);
     println!("   CRLF: {}", mode.crlf);
-    println!("   Exit char: {:?}", mode.exit_char);
 
     // Example 6: Hook management
     println!("\n6. Setting up interaction hooks...");

@@ -73,8 +73,9 @@ async fn is_running_flips_false_after_exit() {
         .await
         .expect("child should exit");
 
-    assert!(
-        !session.is_running(),
+    assert_eq!(
+        session.is_running(),
+        Some(false),
         "is_running() must report false after the child has exited"
     );
 }

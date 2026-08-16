@@ -25,7 +25,9 @@ pub struct StepResult {
     pub send: Option<String>,
     /// Error message if failed.
     pub error: Option<String>,
-    /// Name of the next step to execute.
+    /// Name of the step this one explicitly branched to, from `next` or a
+    /// matched branch condition. `None` when execution simply falls through to
+    /// the following step, which is resolved by position rather than by name.
     pub next_step: Option<String>,
 }
 
@@ -103,50 +105,6 @@ impl DialogExecutor {
         self
     }
 
-    /// Execute a single step (synchronously - for testing).
-    ///
-    /// This method prepares a step for execution by:
-    /// - Substituting variables in the send text
-    /// - Determining the next step to execute
-    ///
-    /// Note: This is a synchronous helper primarily for testing. For actual
-    /// dialog execution, use the async session-based execution methods.
-    #[must_use]
-    pub fn execute_step_sync(
-        &self,
-        step: &DialogStep,
-        dialog: &Dialog,
-        _buffer: &str,
-    ) -> StepResult {
-        let substituted_send = step.send.as_ref().map(|s| dialog.substitute(s));
-
-        StepResult {
-            step_name: step.name.clone(),
-            success: true,
-            output: String::new(),
-            matched: step.expect.clone(),
-            send: substituted_send,
-            error: None,
-            next_step: step.next.clone().or_else(|| {
-                // Find next step in sequence
-                dialog
-                    .steps
-                    .iter()
-                    .position(|s| s.name == step.name)
-                    .and_then(|i| dialog.steps.get(i + 1))
-                    .map(|s| s.name.clone())
-            }),
-        }
-    }
-
-    /// Get the pattern for a step.
-    #[must_use]
-    pub fn step_pattern(&self, step: &DialogStep, dialog: &Dialog) -> Option<Pattern> {
-        step.expect
-            .as_ref()
-            .map(|e| Pattern::literal(dialog.substitute(e)))
-    }
-
     /// Execute a dialog on a session.
     ///
     /// This runs through the dialog steps, expecting patterns and sending responses.
@@ -200,16 +158,26 @@ impl DialogExecutor {
         let mut total_output = String::new();
         let mut step_count = 0;
 
-        // Determine starting step
-        let mut current_step_idx = if let Some(ref entry) = dialog.entry {
-            dialog
-                .steps
-                .iter()
-                .position(|s| &s.name == entry)
-                .unwrap_or(0)
-        } else {
-            0
-        };
+        // Determine starting step. An entry point naming a step that does not
+        // exist is the same defect as an unknown branch target: silently
+        // starting at step 0 runs a different dialog than the caller asked for.
+        let mut current_step_idx = 0;
+        if let Some(ref entry) = dialog.entry {
+            match dialog.steps.iter().position(|s| &s.name == entry) {
+                Some(idx) => current_step_idx = idx,
+                None => {
+                    return Ok(DialogResult {
+                        dialog_name: dialog.name.clone(),
+                        success: false,
+                        steps: Vec::new(),
+                        output: String::new(),
+                        error: Some(format!(
+                            "Entry point '{entry}' is not a step in this dialog"
+                        )),
+                    });
+                }
+            }
+        }
 
         loop {
             // Prevent infinite loops
@@ -253,8 +221,19 @@ impl DialogExecutor {
                 if let Some(idx) = dialog.steps.iter().position(|s| s.name == next_name) {
                     current_step_idx = idx;
                 } else {
-                    // Next step not found, end dialog
-                    break;
+                    // A branch or `next` naming a step that does not exist is a
+                    // broken dialog, not a finished one. Reporting success here
+                    // made a typo'd target indistinguishable from completion.
+                    return Ok(DialogResult {
+                        dialog_name: dialog.name.clone(),
+                        success: false,
+                        steps: step_results,
+                        output: total_output,
+                        error: Some(format!(
+                            "Step '{}' branches to unknown step '{next_name}'",
+                            step.name
+                        )),
+                    });
                 }
             } else {
                 // No explicit next, try sequential
@@ -347,15 +326,11 @@ impl DialogExecutor {
             None
         };
 
-        // Determine next step if not set
-        if next_step.is_none() {
-            next_step = dialog
-                .steps
-                .iter()
-                .position(|s| s.name == step.name)
-                .and_then(|i| dialog.steps.get(i + 1))
-                .map(|s| s.name.clone());
-        }
+        // Sequential advancement is deliberately *not* resolved here. It used
+        // to be filled in by looking up this step's own name to find its
+        // successor, which sends every unnamed step (name `""`) back to the
+        // first unnamed step in the dialog. `execute` advances by index when
+        // this is `None`, which is correct whether or not steps are named.
 
         Ok(StepResult {
             step_name: step.name.clone(),
@@ -393,24 +368,203 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.send, Some("hello".to_string()));
     }
+}
 
-    #[test]
-    fn step_result_with_substitution() {
-        use super::super::definition::{Dialog, DialogStep};
+/// Dialog execution driven through the real expect loop over a mock
+/// transport. The builder-only tests above cannot see how steps advance.
+#[cfg(all(test, feature = "mock"))]
+mod execution_tests {
+    use std::time::Duration;
 
-        let dialog = Dialog::named("test_dialog")
-            .variable("username", "admin")
+    use super::super::definition::{Dialog, DialogStep};
+    use super::DialogExecutor;
+    use crate::config::SessionConfig;
+    use crate::mock::MockTransport;
+    use crate::session::Session;
+
+    /// Build a session over a mock transport pre-loaded with `output`, keeping
+    /// a cloned handle for reading back what the dialog sent.
+    fn session_with(output: &str) -> (Session<MockTransport>, MockTransport) {
+        let transport = MockTransport::new();
+        let handle = transport.clone();
+        handle.queue_output_str(output);
+        let session = Session::new(transport, SessionConfig::default());
+        (session, handle)
+    }
+
+    fn short_executor() -> DialogExecutor {
+        DialogExecutor::new().default_timeout(Duration::from_millis(200))
+    }
+
+    /// Unnamed steps all carry the name `""`, and sequential advancement used
+    /// to be resolved by looking that name up — which always found step 0. A
+    /// dialog of unnamed steps therefore re-ran its first step instead of
+    /// walking forward.
+    #[tokio::test]
+    async fn unnamed_steps_advance_sequentially() {
+        let (mut session, handle) = session_with("one two three ");
+
+        let dialog = Dialog::named("d")
+            .step(DialogStep::expect("one").then_send("a\n"))
+            .step(DialogStep::expect("two").then_send("b\n"))
+            .step(DialogStep::expect("three").then_send("c\n"));
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(result.success, "dialog failed: {:?}", result.error);
+        assert_eq!(result.steps.len(), 3, "every unnamed step should run once");
+        assert_eq!(handle.take_input_str(), "a\nb\nc\n");
+    }
+
+    /// Named steps that fall through (no `next`, no branches) must advance the
+    /// same way, by position rather than by name.
+    #[tokio::test]
+    async fn named_steps_advance_sequentially() {
+        let (mut session, handle) = session_with("one two ");
+
+        let dialog = Dialog::named("d")
+            .step(DialogStep::new("first").with_expect("one").with_send("a\n"))
             .step(
-                DialogStep::new("login")
-                    .with_expect("Username:")
-                    .with_send("${username}"),
+                DialogStep::new("second")
+                    .with_expect("two")
+                    .with_send("b\n"),
             );
 
-        let executor = DialogExecutor::new();
-        let step = &dialog.steps[0];
-        let result = executor.execute_step_sync(step, &dialog, "");
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
 
-        assert_eq!(result.step_name, "login");
-        assert_eq!(result.send, Some("admin".to_string()));
+        assert!(result.success, "dialog failed: {:?}", result.error);
+        assert_eq!(result.steps.len(), 2);
+        assert_eq!(handle.take_input_str(), "a\nb\n");
+    }
+
+    /// An explicit `next` still jumps by name, skipping the step in between.
+    #[tokio::test]
+    async fn explicit_next_jumps() {
+        let (mut session, handle) = session_with("start end ");
+
+        let mut first = DialogStep::new("first")
+            .with_expect("start")
+            .with_send("a\n");
+        first.next = Some("third".to_string());
+        let dialog = Dialog::named("d")
+            .step(first)
+            .step(DialogStep::new("second").with_send("SKIPPED\n"))
+            .step(DialogStep::new("third").with_expect("end").with_send("c\n"));
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(result.success, "dialog failed: {:?}", result.error);
+        let sent = handle.take_input_str();
+        assert_eq!(sent, "a\nc\n", "the skipped step must not have sent");
+    }
+
+    /// A `next` naming a step that does not exist used to end the dialog and
+    /// report success, so a typo'd target looked exactly like completion.
+    #[tokio::test]
+    async fn unknown_branch_target_fails() {
+        let (mut session, _handle) = session_with("hello ");
+
+        let mut first = DialogStep::new("first").with_expect("hello");
+        first.next = Some("does-not-exist".to_string());
+        let dialog = Dialog::named("d").step(first);
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(!result.success, "unknown branch target must not succeed");
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("does-not-exist")),
+            "error should name the missing step, got {:?}",
+            result.error
+        );
+    }
+
+    /// Variables in a step's send text are substituted on the way out, which
+    /// used to be checked through a sync helper that only *prepared* a step.
+    /// Assert it against what actually reaches the transport.
+    #[tokio::test]
+    async fn send_text_is_variable_substituted() {
+        let (mut session, handle) = session_with("Username: ");
+
+        let dialog = Dialog::named("login").variable("username", "admin").step(
+            DialogStep::new("login")
+                .with_expect("Username:")
+                .with_send("${username}\n"),
+        );
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(result.success, "dialog failed: {:?}", result.error);
+        assert_eq!(handle.take_input_str(), "admin\n");
+    }
+
+    /// Execution begins at the first step. It used to begin at the first
+    /// *named* one, so a dialog whose opening steps were unnamed skipped them.
+    #[tokio::test]
+    async fn execution_begins_at_the_first_step() {
+        let (mut session, handle) = session_with("one two three ");
+
+        let dialog = Dialog::named("mixed")
+            .step(DialogStep::expect("one").then_send("a\n"))
+            .step(DialogStep::expect("two").then_send("b\n"))
+            .step(
+                DialogStep::new("named")
+                    .with_expect("three")
+                    .with_send("c\n"),
+            );
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(result.success, "dialog failed: {:?}", result.error);
+        assert_eq!(
+            result.steps.len(),
+            3,
+            "the unnamed steps must not be skipped"
+        );
+        assert_eq!(handle.take_input_str(), "a\nb\nc\n");
+    }
+
+    /// Same defect on the entry point: it used to fall back to step 0 and run
+    /// a different dialog than the caller asked for.
+    #[tokio::test]
+    async fn unknown_entry_point_fails() {
+        let (mut session, handle) = session_with("hello ");
+
+        let dialog = Dialog::named("d")
+            .step(
+                DialogStep::new("first")
+                    .with_expect("hello")
+                    .with_send("a\n"),
+            )
+            .entry_point("nowhere");
+
+        let result = short_executor()
+            .execute(&mut session, &dialog)
+            .await
+            .expect("dialog runs");
+
+        assert!(!result.success, "unknown entry point must not succeed");
+        assert!(result.steps.is_empty(), "no step should have run");
+        assert_eq!(handle.take_input_str(), "", "nothing should have been sent");
     }
 }

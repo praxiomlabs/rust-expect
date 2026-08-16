@@ -84,8 +84,9 @@ async fn is_running_reflects_exit() {
         .await
         .expect("spawn");
 
-    assert!(
+    assert_eq!(
         session.is_running(),
+        Some(true),
         "child should be alive right after spawn"
     );
 
@@ -94,7 +95,7 @@ async fn is_running_reflects_exit() {
     // Poll briefly for the liveness flag to flip after the kill is delivered.
     let mut became_dead = false;
     for _ in 0..50 {
-        if !session.is_running() {
+        if session.is_running() == Some(false) {
             became_dead = true;
             break;
         }

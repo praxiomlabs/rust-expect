@@ -22,8 +22,7 @@
 // Backend types
 pub use crate::backend::{BackendType, PtyConfig, PtySpawner};
 pub use crate::config::{
-    BufferConfig, EncodingConfig, HumanTypingConfig, InteractConfig, LineEnding, LogFormat,
-    LoggingConfig, SessionConfig, TimeoutConfig,
+    BufferConfig, HumanTypingConfig, LineEnding, SessionConfig, TimeoutConfig,
 };
 // Encoding utilities
 pub use crate::encoding::{

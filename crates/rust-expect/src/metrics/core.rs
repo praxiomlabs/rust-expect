@@ -122,10 +122,31 @@ impl Histogram {
             .unwrap_or(self.buckets.len());
         self.counts[idx].fetch_add(1, Ordering::Relaxed);
 
-        // Update sum (as bits for f64 storage)
-        let bits = value.to_bits();
-        self.sum.fetch_add(bits, Ordering::Relaxed);
+        // There is no atomic f64, so the running total lives as a bit pattern
+        // and is updated by compare-and-swap. Adding the bit patterns as
+        // integers — which is what this used to do — is not a floating-point
+        // sum under any interpretation: the bits of 1.0 and 2.0 add to a
+        // number that reads back as roughly 3.5e-323.
+        let mut current = self.sum.load(Ordering::Relaxed);
+        loop {
+            let next = (f64::from_bits(current) + value).to_bits();
+            match self.sum.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
         self.count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the sum of all observed values.
+    #[must_use]
+    pub fn sum(&self) -> f64 {
+        f64::from_bits(self.sum.load(Ordering::Relaxed))
     }
 
     /// Get the count.
@@ -341,6 +362,49 @@ mod tests {
         histogram.observe(1.0);
 
         assert_eq!(histogram.count(), 3);
+    }
+
+    /// The running total used to add the observations' *bit patterns* as
+    /// integers, so it read back as a denormal near zero rather than a sum.
+    #[test]
+    fn histogram_sums_observations() {
+        let histogram = Histogram::new();
+        histogram.observe(1.5);
+        histogram.observe(2.25);
+
+        assert!(
+            (histogram.sum() - 3.75).abs() < f64::EPSILON,
+            "sum was {}",
+            histogram.sum()
+        );
+        assert_eq!(histogram.count(), 2);
+    }
+
+    /// The compare-and-swap has to survive concurrent observers; a plain
+    /// load-add-store would lose updates.
+    #[test]
+    fn histogram_sum_is_atomic_under_contention() {
+        let histogram = Arc::new(Histogram::new());
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let histogram = Arc::clone(&histogram);
+                std::thread::spawn(move || {
+                    for _ in 0..1000 {
+                        histogram.observe(1.0);
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        assert_eq!(histogram.count(), 8000);
+        assert!(
+            (histogram.sum() - 8000.0).abs() < f64::EPSILON,
+            "lost updates: sum was {}",
+            histogram.sum()
+        );
     }
 
     #[test]

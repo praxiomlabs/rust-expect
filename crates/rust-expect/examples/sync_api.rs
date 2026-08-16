@@ -23,13 +23,13 @@ fn main() -> Result<()> {
     // Blocking expect
     let m = session.expect("Hello")?;
     println!("   Matched: '{}'", m.matched.trim());
-    println!("   PID: {}", session.pid());
+    println!("   PID: {:?}", session.pid());
 
     // Example 2: Interactive synchronous session
     println!("\n2. Interactive synchronous session...");
 
     let mut session = SyncSession::spawn("/bin/sh", &[])?;
-    println!("   Shell spawned with PID: {}", session.pid());
+    println!("   Shell spawned with PID: {:?}", session.pid());
 
     // Wait for prompt
     session.expect_timeout(Pattern::shell_prompt(), Duration::from_secs(5))?;
@@ -78,7 +78,6 @@ fn main() -> Result<()> {
         dimensions: (120, 40),
         timeout: TimeoutConfig {
             default: Duration::from_secs(30),
-            spawn: Duration::from_secs(60),
             close: Duration::from_secs(10),
         },
         ..Default::default()

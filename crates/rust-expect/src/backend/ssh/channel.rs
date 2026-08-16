@@ -411,6 +411,62 @@ impl crate::backend::ChildExit for SshChannelStream {
     }
 }
 
+/// The only extended-data type SSH defines (RFC 4254 §5.2): stderr. Anything
+/// else is an extension this crate does not interpret.
+#[cfg(feature = "ssh")]
+const SSH_EXTENDED_DATA_STDERR: u32 = 1;
+
+/// What a received channel message means for a read in progress.
+#[cfg(feature = "ssh")]
+#[derive(Debug, PartialEq, Eq)]
+enum ReadOutcome<'a> {
+    /// Bytes belonging to the session's byte stream.
+    Bytes(&'a [u8]),
+    /// Nothing to deliver from this message; keep waiting for the next one.
+    KeepWaiting,
+    /// The peer sent EOF.
+    Eof,
+    /// The channel was closed.
+    Closed,
+    /// The remote command reported its exit status.
+    ExitStatus(u32),
+}
+
+/// Decide what a channel message contributes to a read.
+///
+/// The distinction that matters is between "no bytes yet" and "no more bytes
+/// ever": a read that completes with zero bytes is EOF to every caller, so any
+/// message that carries no stream data has to leave the read pending instead.
+/// Extended data with an extension other than stderr used to complete the read
+/// with nothing in it, ending the session at the first such message.
+#[cfg(feature = "ssh")]
+fn classify_read_msg(msg: &russh::ChannelMsg) -> ReadOutcome<'_> {
+    /// An empty payload carries no bytes, so completing the read on it would
+    /// signal EOF just the same.
+    const fn bytes_or_wait(data: &[u8]) -> ReadOutcome<'_> {
+        if data.is_empty() {
+            ReadOutcome::KeepWaiting
+        } else {
+            ReadOutcome::Bytes(data)
+        }
+    }
+
+    match msg {
+        russh::ChannelMsg::Data { data } => bytes_or_wait(data),
+        russh::ChannelMsg::ExtendedData { data, ext } => {
+            if *ext == SSH_EXTENDED_DATA_STDERR {
+                bytes_or_wait(data)
+            } else {
+                ReadOutcome::KeepWaiting
+            }
+        }
+        russh::ChannelMsg::Eof => ReadOutcome::Eof,
+        russh::ChannelMsg::Close => ReadOutcome::Closed,
+        russh::ChannelMsg::ExitStatus { exit_status } => ReadOutcome::ExitStatus(*exit_status),
+        _ => ReadOutcome::KeepWaiting,
+    }
+}
+
 #[cfg(feature = "ssh")]
 impl AsyncRead for SshChannelStream {
     fn poll_read(
@@ -442,8 +498,8 @@ impl AsyncRead for SshChannelStream {
         match wait_future.poll(cx) {
             Poll::Ready(Some(msg)) => {
                 // Future is done, safe to modify self now
-                match msg {
-                    russh::ChannelMsg::Data { data } => {
+                match classify_read_msg(&msg) {
+                    ReadOutcome::Bytes(data) => {
                         let len = std::cmp::min(buf.remaining(), data.len());
                         buf.put_slice(&data[..len]);
                         // Store remaining data in buffer
@@ -452,33 +508,24 @@ impl AsyncRead for SshChannelStream {
                         }
                         Poll::Ready(Ok(()))
                     }
-                    russh::ChannelMsg::ExtendedData { data, ext } => {
-                        if ext == 1 {
-                            let len = std::cmp::min(buf.remaining(), data.len());
-                            buf.put_slice(&data[..len]);
-                            if len < data.len() {
-                                this.read_buffer.extend(&data[len..]);
-                            }
-                        }
-                        Poll::Ready(Ok(()))
-                    }
-                    russh::ChannelMsg::Eof => {
+                    ReadOutcome::Eof => {
                         this.eof_received = true;
                         this.state = ChannelState::Eof;
                         Poll::Ready(Ok(()))
                     }
-                    russh::ChannelMsg::Close => {
+                    ReadOutcome::Closed => {
                         this.state = ChannelState::Closed;
                         Poll::Ready(Ok(()))
                     }
-                    russh::ChannelMsg::ExitStatus { exit_status } => {
-                        this.exit_status = Some(exit_status);
+                    ReadOutcome::ExitStatus(code) => {
+                        this.exit_status = Some(code);
                         // Continue waiting for more data
                         cx.waker().wake_by_ref();
                         Poll::Pending
                     }
-                    _ => {
-                        // Other messages, continue waiting
+                    ReadOutcome::KeepWaiting => {
+                        // Metadata, or a message carrying no stream bytes:
+                        // continue waiting.
                         cx.waker().wake_by_ref();
                         Poll::Pending
                     }
@@ -653,5 +700,78 @@ mod tests {
 
         channel.close();
         assert!(channel.is_closed());
+    }
+
+    /// A read that completes with zero bytes is EOF to the session, so only a
+    /// real end-of-stream may complete one. Everything else has to leave the
+    /// read pending.
+    #[cfg(feature = "ssh")]
+    mod read_classification {
+        use super::super::{ReadOutcome, classify_read_msg};
+
+        #[test]
+        fn channel_data_is_stream_bytes() {
+            let msg = russh::ChannelMsg::Data {
+                data: b"hello"[..].into(),
+            };
+            assert_eq!(classify_read_msg(&msg), ReadOutcome::Bytes(b"hello"));
+        }
+
+        #[test]
+        fn stderr_extended_data_is_stream_bytes() {
+            let msg = russh::ChannelMsg::ExtendedData {
+                data: b"oops"[..].into(),
+                ext: 1,
+            };
+            assert_eq!(classify_read_msg(&msg), ReadOutcome::Bytes(b"oops"));
+        }
+
+        /// The regression: any other extension used to complete the read with
+        /// no bytes in it, which the session read as the process exiting.
+        #[test]
+        fn unknown_extended_data_keeps_waiting() {
+            let msg = russh::ChannelMsg::ExtendedData {
+                data: b"vendor metadata"[..].into(),
+                ext: 7,
+            };
+            assert_eq!(classify_read_msg(&msg), ReadOutcome::KeepWaiting);
+        }
+
+        /// Same trap from the other direction: a payload that happens to be
+        /// empty carries no bytes either.
+        #[test]
+        fn empty_payloads_keep_waiting() {
+            let data = russh::ChannelMsg::Data {
+                data: b""[..].into(),
+            };
+            assert_eq!(classify_read_msg(&data), ReadOutcome::KeepWaiting);
+
+            let stderr = russh::ChannelMsg::ExtendedData {
+                data: b""[..].into(),
+                ext: 1,
+            };
+            assert_eq!(classify_read_msg(&stderr), ReadOutcome::KeepWaiting);
+        }
+
+        #[test]
+        fn end_of_stream_messages_are_terminal() {
+            assert_eq!(classify_read_msg(&russh::ChannelMsg::Eof), ReadOutcome::Eof);
+            assert_eq!(
+                classify_read_msg(&russh::ChannelMsg::Close),
+                ReadOutcome::Closed
+            );
+        }
+
+        #[test]
+        fn exit_status_is_recorded_without_ending_the_read() {
+            let msg = russh::ChannelMsg::ExitStatus { exit_status: 3 };
+            assert_eq!(classify_read_msg(&msg), ReadOutcome::ExitStatus(3));
+        }
+
+        #[test]
+        fn unrelated_messages_keep_waiting() {
+            let msg = russh::ChannelMsg::Success;
+            assert_eq!(classify_read_msg(&msg), ReadOutcome::KeepWaiting);
+        }
     }
 }

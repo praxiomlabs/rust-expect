@@ -1,7 +1,8 @@
 //! Dialog execution tests.
 
-use rust_expect::dialog::{Dialog, DialogBuilder, DialogStep};
 use std::time::Duration;
+
+use rust_expect::dialog::{Dialog, DialogBuilder, DialogStep};
 
 #[test]
 fn dialog_builder_creates_steps() {
@@ -46,9 +47,7 @@ fn dialog_step_creation() {
 
 #[test]
 fn dialog_variable_substitution() {
-    let dialog = DialogBuilder::new()
-        .var("name", "Alice")
-        .build();
+    let dialog = DialogBuilder::new().var("name", "Alice").build();
 
     let result = dialog.substitute("Hello, ${name}!");
     assert_eq!(result, "Hello, Alice!");
@@ -67,8 +66,7 @@ fn dialog_nested_variable() {
 
 #[test]
 fn dialog_step_with_timeout() {
-    let step = DialogStep::expect("prompt")
-        .timeout(Duration::from_secs(10));
+    let step = DialogStep::expect("prompt").timeout(Duration::from_secs(10));
 
     assert_eq!(step.get_timeout(), Some(Duration::from_secs(10)));
 }

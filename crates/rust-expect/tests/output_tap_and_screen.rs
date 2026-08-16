@@ -284,7 +284,7 @@ async fn remove_output_tap_stops_invocations() {
 }
 
 /// Re-attaching a screen replaces the previous one and does NOT leak the
-/// previous attach's internal tap.
+/// previous attach's internal subscriber.
 #[tokio::test]
 async fn attach_screen_replacement_does_not_leak_taps() {
     let (cmd, args, config) = build("sleep 2; exit 0");
@@ -294,21 +294,27 @@ async fn attach_screen_replacement_does_not_leak_taps() {
         .unwrap();
 
     session.attach_screen();
-    assert_eq!(session.output_tap_callbacks().count(), 1);
+    assert_eq!(session.observer_count(), 1);
 
     // Add a user tap so we can verify the count reflects the user tap +
-    // exactly one screen tap (not two screen taps).
+    // exactly one screen observer (not two).
     let count: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
     let cc = count.clone();
     session.add_output_tap(move |_| *cc.lock().unwrap() += 1);
-    assert_eq!(session.output_tap_callbacks().count(), 2);
+    assert_eq!(session.observer_count(), 2);
 
-    // Re-attach. The previous screen's tap must be removed.
+    // Re-attach. The previous screen's observer must be removed.
     session.attach_screen();
     assert_eq!(
-        session.output_tap_callbacks().count(),
+        session.observer_count(),
         2,
-        "re-attach should replace, not stack, the screen tap (user tap + 1 screen tap)"
+        "re-attach should replace, not stack, the screen observer (user tap + 1 screen observer)"
+    );
+    // The screen subscribes to the event stream, so it is not an output tap.
+    assert_eq!(
+        session.output_tap_callbacks().count(),
+        1,
+        "only the user's tap is an output tap"
     );
 
     let _ = session.send_control(rust_expect::ControlChar::CtrlC).await;
@@ -365,7 +371,7 @@ async fn screen_mutex_poison_recovers() {
     session.wait_timeout(Duration::from_secs(2)).await.ok();
 }
 
-/// `detach_screen` removes its tap and `screen()` returns None.
+/// `detach_screen` removes its subscriber and `screen()` returns None.
 #[tokio::test]
 async fn detach_screen_removes_internal_tap() {
     let (cmd, args, config) = build("sleep 2; exit 0");
@@ -375,14 +381,14 @@ async fn detach_screen_removes_internal_tap() {
         .unwrap();
     session.attach_screen();
     assert!(session.screen().is_some());
-    assert_eq!(session.output_tap_callbacks().count(), 1);
+    assert_eq!(session.observer_count(), 1);
 
     assert!(session.detach_screen());
     assert!(session.screen().is_none());
     assert_eq!(
-        session.output_tap_callbacks().count(),
+        session.observer_count(),
         0,
-        "screen's internal tap should be removed"
+        "screen's internal subscriber should be removed"
     );
     // Idempotent.
     assert!(!session.detach_screen());

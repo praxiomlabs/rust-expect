@@ -553,6 +553,12 @@ impl ScreenBuffer {
         self.scroll_region = (top, bottom);
     }
 
+    /// The scroll region as `(top, bottom)` row indices, 0-based and inclusive.
+    #[must_use]
+    pub const fn scroll_region(&self) -> (usize, usize) {
+        self.scroll_region
+    }
+
     /// Reset the scroll region to the entire screen.
     pub const fn reset_scroll_region(&mut self) {
         self.scroll_region = (0, self.rows.saturating_sub(1));

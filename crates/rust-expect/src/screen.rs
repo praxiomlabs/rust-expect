@@ -210,14 +210,7 @@ impl Screen {
                 // Line feed (LF), Vertical Tab (VT), Form Feed (FF)
                 // All behave the same in VT100: move down one line, scroll if needed
                 // Also reset column (newline mode behavior)
-                let rows = self.buffer.rows();
-                let cursor_row = self.buffer.cursor().row + 1;
-                if cursor_row >= rows {
-                    self.buffer.scroll_up(1);
-                    self.buffer.cursor_mut().row = rows - 1;
-                } else {
-                    self.buffer.cursor_mut().row = cursor_row;
-                }
+                self.index();
                 self.buffer.cursor_mut().col = 0;
             }
             0x0d => {
@@ -225,6 +218,31 @@ impl Screen {
                 self.buffer.cursor_mut().col = 0;
             }
             _ => {}
+        }
+    }
+
+    /// Move the cursor down a row (IND, and the vertical part of LF/VT/FF and
+    /// NEL). On the scroll region's bottom margin the region scrolls up
+    /// instead; below the region the cursor stops at the last row.
+    fn index(&mut self) {
+        let (_, bottom) = self.buffer.scroll_region();
+        let row = self.buffer.cursor().row;
+        if row == bottom {
+            self.buffer.scroll_up(1);
+        } else if row + 1 < self.buffer.rows() {
+            self.buffer.cursor_mut().row = row + 1;
+        }
+    }
+
+    /// Move the cursor up a row (RI). On the scroll region's top margin the
+    /// region scrolls down instead; above the region the cursor stops at row 0.
+    fn reverse_index(&mut self) {
+        let (top, _) = self.buffer.scroll_region();
+        let row = self.buffer.cursor().row;
+        if row == top {
+            self.buffer.scroll_down(1);
+        } else if row > 0 {
+            self.buffer.cursor_mut().row = row - 1;
         }
     }
 
@@ -317,36 +335,10 @@ impl Screen {
             AnsiSequence::ScrollDown(n) => {
                 self.buffer.scroll_down(n as usize);
             }
-            AnsiSequence::ReverseIndex => {
-                // Move cursor up, scroll down if at top of scroll region
-                let cursor_row = self.buffer.cursor().row;
-                let (top, _) = (0, self.buffer.rows() - 1); // Use full screen for now
-                if cursor_row == top {
-                    self.buffer.scroll_down(1);
-                } else {
-                    self.buffer.cursor_mut().row = cursor_row.saturating_sub(1);
-                }
-            }
-            AnsiSequence::Index => {
-                // Move cursor down, scroll up if at bottom
-                let rows = self.buffer.rows();
-                let cursor_row = self.buffer.cursor().row;
-                if cursor_row >= rows - 1 {
-                    self.buffer.scroll_up(1);
-                } else {
-                    self.buffer.cursor_mut().row = cursor_row + 1;
-                }
-            }
+            AnsiSequence::ReverseIndex => self.reverse_index(),
+            AnsiSequence::Index => self.index(),
             AnsiSequence::NextLine => {
-                // Move to start of next line, scroll if needed
-                let rows = self.buffer.rows();
-                let cursor_row = self.buffer.cursor().row;
-                if cursor_row >= rows - 1 {
-                    self.buffer.scroll_up(1);
-                    self.buffer.cursor_mut().row = rows - 1;
-                } else {
-                    self.buffer.cursor_mut().row = cursor_row + 1;
-                }
+                self.index();
                 self.buffer.cursor_mut().col = 0;
             }
             AnsiSequence::SaveCursor => {
@@ -762,5 +754,91 @@ mod tests {
         screen.process_str("Line 2");
 
         assert_eq!(screen.cursor().row, 1);
+    }
+
+    /// Rows of `screen` as text, blank rows included.
+    fn rows(screen: &Screen) -> Vec<String> {
+        (0..screen.buffer().rows())
+            .map(|r| {
+                (0..screen.buffer().cols())
+                    .map(|c| screen.buffer().get(r, c).map_or(' ', |cell| cell.char))
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    fn five_rows() -> Screen {
+        let mut screen = Screen::new(5, 10);
+        screen.process_str("\x1b[1;1Hone\x1b[2;1Htwo\x1b[3;1Hthree\x1b[4;1Hfour\x1b[5;1Hfive");
+        screen
+    }
+
+    #[test]
+    fn reverse_index_at_region_top_scrolls_only_the_region() {
+        let mut screen = five_rows();
+        screen.process_str("\x1b[2;4r\x1b[2;1H\x1bM");
+        assert_eq!(rows(&screen), ["one", "", "two", "three", "five"]);
+        assert_eq!(screen.cursor().row, 1);
+    }
+
+    #[test]
+    fn reverse_index_above_region_moves_without_scrolling() {
+        let mut screen = five_rows();
+        screen.process_str("\x1b[3;4r\x1b[2;1H\x1bM");
+        assert_eq!(rows(&screen), ["one", "two", "three", "four", "five"]);
+        assert_eq!(screen.cursor().row, 0);
+    }
+
+    #[test]
+    fn index_and_line_feed_at_region_bottom_scroll_only_the_region() {
+        let mut ind = five_rows();
+        ind.process_str("\x1b[2;4r\x1b[4;1H\x1bD");
+        assert_eq!(rows(&ind), ["one", "three", "four", "", "five"]);
+        assert_eq!(ind.cursor().row, 3);
+
+        let mut lf = five_rows();
+        lf.process_str("\x1b[2;4r\x1b[4;3H\n");
+        assert_eq!(rows(&lf), ["one", "three", "four", "", "five"]);
+        assert_eq!((lf.cursor().row, lf.cursor().col), (3, 0));
+
+        let mut nel = five_rows();
+        nel.process_str("\x1b[2;4r\x1b[4;3H\x1bE");
+        assert_eq!(rows(&nel), ["one", "three", "four", "", "five"]);
+        assert_eq!((nel.cursor().row, nel.cursor().col), (3, 0));
+    }
+
+    #[test]
+    fn line_feed_below_region_stops_at_the_last_row() {
+        let mut screen = five_rows();
+        screen.process_str("\x1b[1;3r\x1b[5;1H\n");
+        assert_eq!(rows(&screen), ["one", "two", "three", "four", "five"]);
+        assert_eq!(screen.cursor().row, 4);
+    }
+
+    #[test]
+    fn without_a_region_the_full_screen_still_scrolls() {
+        let mut down = five_rows();
+        down.process_str("\x1b[1;1H\x1bM");
+        assert_eq!(rows(&down), ["", "one", "two", "three", "four"]);
+
+        let mut up = five_rows();
+        up.process_str("\x1b[5;1H\n");
+        assert_eq!(rows(&up), ["two", "three", "four", "five", ""]);
+    }
+
+    /// The sequence Codex CLI 0.154.0 sends to insert a notice above its
+    /// inline composer: reverse index twice at the top of a region, then a
+    /// write into the gap it opened. The composer row must move down with the
+    /// region instead of being overwritten.
+    #[test]
+    fn inserting_lines_above_an_inline_composer_keeps_the_composer() {
+        let mut screen = Screen::new(6, 30);
+        screen.process_str("\x1b[1;1Hbanner\x1b[4;1H\u{203a} Ask Codex");
+        screen.process_str("\x1b[2;6r\x1b[2;1H\x1bM\x1bM\x1b[r");
+        screen.process_str("\x1b[2;1Hnotice\x1b[4;1H ");
+        assert_eq!(rows(&screen)[5], "\u{203a} Ask Codex");
+        assert_eq!(rows(&screen)[1], "notice");
     }
 }

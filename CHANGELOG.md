@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-09-13
+
+### Fixed
+
+- **`Screen` now honours the scroll region (DECSTBM) when the cursor moves
+  vertically.** Reverse index (`ESC M`) scrolled only at row 0, and index
+  (`ESC D`), next line (`ESC E`) and line feed only at the last row, whatever
+  region the program had set. A program that inserts or appends lines inside a
+  region therefore left the emulated screen out of step with a real terminal.
+  Codex CLI 0.154.0 does this on startup: it sets a region above its inline
+  composer and reverse-indexes twice to open room for a notice, and the
+  emulated composer row, including its `›` marker, was overwritten instead of
+  moved down. Each of these now scrolls the region when the cursor is on the
+  region's margin and otherwise moves the cursor, stopping at the screen edge.
+  With no region set the behaviour is unchanged.
+
+### Added
+
+- `ScreenBuffer::scroll_region()` returns the current region as 0-based,
+  inclusive `(top, bottom)` rows.
+
 ## [0.6.0] - 2026-07-31
 
 ### Changed

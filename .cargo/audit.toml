@@ -16,11 +16,6 @@ ignore = [
     # latency for SSH use cases.
     # Tracking: https://github.com/RustCrypto/RSA/issues/19
     "RUSTSEC-2023-0071",
-    # bytes BytesMut::reserve integer overflow. Direct dep but the buggy
-    # path requires constructing buffers near isize::MAX, which the matcher
-    # caps at the buffer.max_size config. Bumping bytes to 1.x+ needs to be
-    # coordinated with tokio's pinned version.
-    "RUSTSEC-2026-0007",
     # rand 0.9 unsound when used with a custom logger that calls rand::rng().
     # rust-expect uses rand only for HumanTyper, which never installs a
     # custom logger.
